@@ -1,35 +1,46 @@
 # Barangay Resident Management System
 
-A production-ready Barangay Resident Management System built using **Node.js**, **Express.js**, and **PostgreSQL**, designed specifically for deployment on Render.
+A production-ready, multi-portal Barangay Resident Management System designed for persistent deployment on **Render** using **Node.js**, **Express.js**, and **PostgreSQL**.
 
-## Features
+---
 
-- **Three Completely Separate Portals**:
-  - **Admin Portal**: Resident approval, blotter oversight, document approvals, staff/accounts management, audit logs, system settings.
-  - **Staff Portal**: Processing module for documents, resident lookup, household handling, QR code validation, and blotter intake based on role permissions.
-  - **Resident Portal**: Mobile-responsive dashboard, digital ID display, request document certificates, household details, track concerns, view announcements, and retrieve secure QR token.
-- **Persistent Storage**: Uses PostgreSQL as the single source of truth (`DATABASE_URL`).
-- **QR Verification System**: Cryptographically generated individual QR codes without leaking raw sensitive data inside QR code image payloads.
-- **Printable Documents**: Dynamic PDF/Print view generation for official clearances and certifications.
-- **Audit Trails & Security**: Parameterized SQL queries, password hashing using `bcryptjs`, and session management tied to PostgreSQL database tables.
+## Key Features
+
+1. **Three Distinct Portals**:
+   - **Admin Portal**: Full control over resident verification, household registry, blotters, official directory, system settings, staff management, and audit logs.
+   - **Staff Portal**: Role-permission-based access for processing document requests, scanning QR codes, managing blotters, and viewing reports.
+   - **Resident Portal**: Mobile-responsive interface allowing residents to view digital IDs, personal QR codes, track household members, apply for barangay clearances, and raise concerns.
+
+2. **Data Privacy & Route Security**:
+   - Explicit ownership checking prevents residents from viewing other residents' documents or profiles.
+   - Server-side role validation middleware re-verifies session scopes on every request.
+
+3. **Persistent PostgreSQL Storage**:
+   - Fully normalized tables with transaction safety.
+   - Preserves all accounts, transactions, and settings across redeployments, browser restarts, and server reboots.
+
+4. **Digital Resident ID & Verification**:
+   - Auto-generated unique Resident ID (`BRGY-2026-XXXXXX`).
+   - Secure QR token generation for quick scanning without exposing sensitive identity data directly inside the barcode.
 
 ---
 
 ## Environment Variables
 
-Configure the following environment variables in Render or your local environment:
+Configure these environment variables in your local `.env` file or within the Render Web Service Dashboard:
 
-| Variable | Description |
-| :--- | :--- |
-| `DATABASE_URL` | PostgreSQL connection string URL (Render PostgreSQL default). |
-| `SESSION_SECRET` | Secret string used to sign session cookies. |
-| `PORT` | (Optional) Port number for server. Defaults to `3000`. |
+| Variable Name | Required | Description |
+| :--- | :---: | :--- |
+| `DATABASE_URL` | **Yes** | Internal or External PostgreSQL connection URL. |
+| `SESSION_SECRET` | **Yes** | Cryptographic secret for signing session cookies. |
+| `ADMIN_SETUP_SECRET` | No | Initial setup password for the default `admin` account (Default: `admin123`). |
+| `PORT` | No | Port number on which the app listens (Render supplies this automatically). |
 
 ---
 
-## Local Installation and Testing
+## Local Installation & Setup
 
-1. Clone or extract the application repository.
-2. Install dependencies:
+1. **Clone the Repository**:
    ```bash
-   npm install
+   git clone <your-repository-url>
+   cd barangay-resident-management-system
