@@ -1,6 +1,6 @@
 /**
  * BARANGAY RESIDENT MANAGEMENT SYSTEM (BRMS)
- * Node.js + Express.js + PostgreSQL (Single File Production App)
+ * Monolithic Express.js + PostgreSQL Application
  */
 
 const express = require('express');
@@ -9,1840 +9,2372 @@ const pgSession = require('connect-pg-simple')(session);
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
+const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
 
+// Initialize Express App
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// -----------------------------------------------------------------------------
-// DATABASE CONFIGURATION & CONNECTION POOL
-// -----------------------------------------------------------------------------
+// PostgreSQL Connection Setup
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  ssl: process.env.NODE_ENV === 'production' || process.env.DATABASE_URL?.includes('render.com') 
+    ? { rejectUnauthorized: false } 
+    : false
 });
 
-// -----------------------------------------------------------------------------
-// STORAGE CONFIGURATION (Local Uploads with Abstract Readiness)
-// -----------------------------------------------------------------------------
-const uploadDir = path.join(__dirname, 'public', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+// Helper for Parameterized Queries
+const db = {
+  query: (text, params) => pool.query(text, params),
+  getClient: () => pool.connect()
+};
+
+// Ensure Local Storage Upload Dir Exists (Fallback Storage Abstraction)
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+// Multer Storage Configuration
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
   }
 });
+
 const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB Limit
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|pdf/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-    if (extname && mimetype) {
-      return cb(null, true);
-    }
-    cb(new Error('Only images (jpg, jpeg, png) and PDF documents are allowed!'));
+    const allowed = /jpeg|jpg|png|pdf/;
+    const ext = allowed.test(path.extname(file.originalname).toLowerCase());
+    const mime = allowed.test(file.mimetype);
+    if (ext && mime) return cb(null, true);
+    cb(new Error('Only images (JPG, PNG) and PDF files are allowed.'));
   }
 });
 
-// -----------------------------------------------------------------------------
-// EXPRESS MIDDLEWARE
-// -----------------------------------------------------------------------------
-app.use(express.urlencoded({ extended: true }));
+// Middleware Configuration
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static(UPLOAD_DIR));
 
+// Express Session Configuration
 app.use(session({
   store: new pgSession({
     pool: pool,
-    tableName: 'session',
+    tableName: 'user_sessions',
     createTableIfMissing: true
   }),
-  secret: process.env.SESSION_SECRET || 'brgy-super-secret-key-2026',
+  secret: process.env.SESSION_SECRET || 'super-secret-barangay-key-2026',
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 }
+  cookie: {
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 Days
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: 'lax'
+  }
 }));
 
-// -----------------------------------------------------------------------------
-// DATABASE INITIALIZATION & MIGRATIONS (Safe: CREATE TABLE IF NOT EXISTS)
-// -----------------------------------------------------------------------------
-async function initializeDatabase() {
+// ==========================================
+// DATABASE INITIALIZATION & MIGRATIONS
+// ==========================================
+async function initDatabase() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
+    // System Settings Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS system_settings (
         id SERIAL PRIMARY KEY,
-        barangay_name VARCHAR(255) DEFAULT 'Barangay San Jose',
-        barangay_address VARCHAR(255) DEFAULT 'Main St, City, Province',
-        contact_number VARCHAR(50) DEFAULT '123-4567',
-        email VARCHAR(100) DEFAULT 'contact@sanjose.gov.ph',
-        system_name VARCHAR(255) DEFAULT 'Barangay Resident Management System',
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        barangay_name VARCHAR(150) NOT NULL DEFAULT 'Barangay Central',
+        address TEXT NOT NULL DEFAULT '123 Main Street, City',
+        contact_number VARCHAR(50) NOT NULL DEFAULT '+63 912 345 6789',
+        email VARCHAR(100) NOT NULL DEFAULT 'info@barangaycentral.gov.ph',
+        logo_url TEXT,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // Users Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username VARCHAR(100) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'staff', 'resident')),
-        status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived', 'pending')),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        password_hash TEXT NOT NULL,
+        role VARCHAR(20) NOT NULL CHECK (role IN ('ADMIN', 'STAFF', 'RESIDENT')),
+        status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'INACTIVE', 'PENDING', 'REJECTED')),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // Residents Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS residents (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        resident_id VARCHAR(50) UNIQUE NOT NULL,
+        user_id INT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+        resident_id_number VARCHAR(50) UNIQUE,
         first_name VARCHAR(100) NOT NULL,
         middle_name VARCHAR(100),
         last_name VARCHAR(100) NOT NULL,
         suffix VARCHAR(20),
         birthdate DATE NOT NULL,
-        sex VARCHAR(20) NOT NULL,
-        civil_status VARCHAR(50) NOT NULL,
-        complete_address TEXT NOT NULL,
-        contact_number VARCHAR(50) NOT NULL,
-        email VARCHAR(100) UNIQUE NOT NULL,
+        sex VARCHAR(10) NOT NULL CHECK (sex IN ('Male', 'Female')),
+        civil_status VARCHAR(20) NOT NULL,
+        address TEXT NOT NULL,
+        contact_number VARCHAR(20) NOT NULL,
+        email VARCHAR(100),
         occupation VARCHAR(100),
         educational_attainment VARCHAR(100),
         nationality VARCHAR(50) DEFAULT 'Filipino',
-        voter_status BOOLEAN DEFAULT false,
-        pwd_status BOOLEAN DEFAULT false,
-        senior_citizen_status BOOLEAN DEFAULT false,
-        four_ps_status BOOLEAN DEFAULT false,
+        is_voter BOOLEAN DEFAULT FALSE,
+        is_pwd BOOLEAN DEFAULT FALSE,
+        is_senior BOOLEAN DEFAULT FALSE,
+        is_4ps BOOLEAN DEFAULT FALSE,
         emergency_contact_name VARCHAR(150),
-        emergency_contact_number VARCHAR(50),
-        valid_id_path TEXT,
-        resident_photo_path TEXT,
-        qr_token VARCHAR(255) UNIQUE,
-        account_status VARCHAR(50) DEFAULT 'pending' CHECK (account_status IN ('pending', 'approved', 'rejected', 'archived')),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        emergency_contact_number VARCHAR(20),
+        photo_url TEXT,
+        valid_id_url TEXT,
+        qr_token VARCHAR(100) UNIQUE,
+        status VARCHAR(20) DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'ARCHIVED')),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // Staff Profile & Permissions Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff_permissions (
+        id SERIAL PRIMARY KEY,
+        user_id INT UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        full_name VARCHAR(150) NOT NULL,
+        position VARCHAR(100) NOT NULL,
+        can_manage_residents BOOLEAN DEFAULT TRUE,
+        can_manage_documents BOOLEAN DEFAULT TRUE,
+        can_manage_blotter BOOLEAN DEFAULT FALSE,
+        can_scan_qr BOOLEAN DEFAULT TRUE,
+        can_generate_reports BOOLEAN DEFAULT FALSE
+      );
+    `);
+
+    // Households Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS households (
         id SERIAL PRIMARY KEY,
         household_number VARCHAR(50) UNIQUE NOT NULL,
-        household_head_id INTEGER REFERENCES residents(id) ON DELETE SET NULL,
+        head_resident_id INT REFERENCES residents(id) ON DELETE SET NULL,
         address TEXT NOT NULL,
-        classification VARCHAR(50) DEFAULT 'Private',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        classification VARCHAR(50) DEFAULT 'Residential',
+        status VARCHAR(20) DEFAULT 'ACTIVE',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // Household Members Junction Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS household_members (
         id SERIAL PRIMARY KEY,
-        household_id INTEGER REFERENCES households(id) ON DELETE CASCADE,
-        resident_id INTEGER REFERENCES residents(id) ON DELETE CASCADE,
-        relationship VARCHAR(50) NOT NULL,
-        household_position VARCHAR(50) DEFAULT 'Member',
-        UNIQUE(household_id, resident_id)
+        household_id INT REFERENCES households(id) ON DELETE CASCADE,
+        resident_id INT UNIQUE REFERENCES residents(id) ON DELETE CASCADE,
+        relationship_to_head VARCHAR(50) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // Barangay Officials Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS officials (
         id SERIAL PRIMARY KEY,
         full_name VARCHAR(150) NOT NULL,
         position VARCHAR(100) NOT NULL,
-        photo_path TEXT,
-        contact VARCHAR(50),
+        contact_number VARCHAR(20),
         term_start DATE,
         term_end DATE,
-        signature_path TEXT,
-        status VARCHAR(20) DEFAULT 'active',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        signature_url TEXT,
+        is_active BOOLEAN DEFAULT TRUE
       );
+    `);
 
-      CREATE TABLE IF NOT EXISTS documents (
+    // Document Types Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_types (
         id SERIAL PRIMARY KEY,
         title VARCHAR(150) NOT NULL,
-        code VARCHAR(50) UNIQUE NOT NULL,
-        description TEXT,
         requirements TEXT,
-        fee DECIMAL(10,2) DEFAULT 0.00,
-        status VARCHAR(20) DEFAULT 'active'
+        fee DECIMAL(10, 2) DEFAULT 0.00,
+        is_active BOOLEAN DEFAULT TRUE
       );
+    `);
 
-      CREATE TABLE IF NOT EXISTS document_requirements_config (
-        id SERIAL PRIMARY KEY,
-        document_type_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
-        requirement_name VARCHAR(150) NOT NULL
-      );
-
+    // Document Requests Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS document_requests (
         id SERIAL PRIMARY KEY,
-        request_id VARCHAR(50) UNIQUE NOT NULL,
-        resident_id INTEGER REFERENCES residents(id) ON DELETE CASCADE,
-        document_type_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        request_number VARCHAR(50) UNIQUE NOT NULL,
+        resident_id INT REFERENCES residents(id) ON DELETE CASCADE,
+        document_type_id INT REFERENCES document_types(id) ON DELETE RESTRICT,
         purpose TEXT NOT NULL,
-        requirements_path TEXT,
-        status VARCHAR(50) DEFAULT 'Pending' CHECK (status IN ('Pending', 'Under Review', 'Approved', 'Rejected', 'Ready', 'Completed', 'Cancelled')),
+        status VARCHAR(30) DEFAULT 'Pending' CHECK (status IN ('Pending', 'Under Review', 'Approved', 'Rejected', 'Ready', 'Completed', 'Cancelled')),
+        requirements_file_url TEXT,
         remarks TEXT,
-        processing_staff_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        document_number VARCHAR(100) UNIQUE,
-        date_requested TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        approval_date TIMESTAMP,
-        completion_date TIMESTAMP
+        processed_by_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // Blotter Records Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS blotter_records (
         id SERIAL PRIMARY KEY,
         case_number VARCHAR(50) UNIQUE NOT NULL,
-        complainant VARCHAR(150) NOT NULL,
-        respondent VARCHAR(150) NOT NULL,
+        complainant_name VARCHAR(150) NOT NULL,
+        respondent_name VARCHAR(150) NOT NULL,
         incident_type VARCHAR(100) NOT NULL,
         incident_date DATE NOT NULL,
         incident_time TIME NOT NULL,
         location TEXT NOT NULL,
         description TEXT NOT NULL,
-        witnesses TEXT,
+        status VARCHAR(30) DEFAULT 'Open' CHECK (status IN ('Open', 'Under Investigation', 'Resolved', 'Closed')),
         action_taken TEXT,
-        resolution TEXT,
-        status VARCHAR(50) DEFAULT 'Open' CHECK (status IN ('Open', 'Under Investigation', 'Resolved', 'Closed')),
-        attachment_path TEXT,
-        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_by_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // Announcements Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS announcements (
         id SERIAL PRIMARY KEY,
         title VARCHAR(200) NOT NULL,
         content TEXT NOT NULL,
-        image_path TEXT,
-        publish_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        expiration_date TIMESTAMP,
-        status VARCHAR(20) DEFAULT 'Published',
-        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS notifications (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        message TEXT NOT NULL,
-        type VARCHAR(50) DEFAULT 'general',
-        is_read BOOLEAN DEFAULT false,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS concerns (
-        id SERIAL PRIMARY KEY,
-        resident_id INTEGER REFERENCES residents(id) ON DELETE CASCADE,
-        subject VARCHAR(150) NOT NULL,
-        description TEXT NOT NULL,
-        attachment_path TEXT,
-        status VARCHAR(50) DEFAULT 'Submitted' CHECK (status IN ('Submitted', 'Under Review', 'Processing', 'Resolved', 'Closed')),
-        response TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS staff_permissions (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        module_name VARCHAR(100) NOT NULL,
-        can_access BOOLEAN DEFAULT true
-      );
-
-      CREATE TABLE IF NOT EXISTS activity_logs (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        role VARCHAR(50),
-        action TEXT NOT NULL,
-        module VARCHAR(100),
-        record_id INTEGER,
-        ip_address VARCHAR(50),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        image_url TEXT,
+        is_published BOOLEAN DEFAULT TRUE,
+        created_by_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-    // Default System Settings Check
-    const settingsCheck = await client.query('SELECT * FROM system_settings WHERE id = 1');
-    if (settingsCheck.rows.length === 0) {
-      await client.query(`INSERT INTO system_settings (id, barangay_name, barangay_address) VALUES (1, 'Barangay San Jose', 'Main St, City, Province')`);
-    }
+    // Notifications Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        user_id INT REFERENCES users(id) ON DELETE CASCADE,
+        title VARCHAR(150) NOT NULL,
+        message TEXT NOT NULL,
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
 
-    // Default Admin User Check
-    const adminCheck = await client.query("SELECT * FROM users WHERE role = 'admin' LIMIT 1");
-    if (adminCheck.rows.length === 0) {
-      const defaultPass = await bcrypt.hash('admin123', 10);
-      await client.query(`
-        INSERT INTO users (username, password_hash, role, status) 
-        VALUES ('admin', $1, 'admin', 'active')
-      `, [defaultPass]);
-    }
+    // Resident Concerns Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS resident_concerns (
+        id SERIAL PRIMARY KEY,
+        resident_id INT REFERENCES residents(id) ON DELETE CASCADE,
+        subject VARCHAR(200) NOT NULL,
+        description TEXT NOT NULL,
+        attachment_url TEXT,
+        status VARCHAR(30) DEFAULT 'Submitted' CHECK (status IN ('Submitted', 'Under Review', 'Processing', 'Resolved', 'Closed')),
+        response TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
 
-    // Seed default document types if empty
-    const docCheck = await client.query("SELECT * FROM documents LIMIT 1");
-    if (docCheck.rows.length === 0) {
+    // Activity Logs Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS activity_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INT REFERENCES users(id) ON DELETE SET NULL,
+        username VARCHAR(100),
+        role VARCHAR(20),
+        action VARCHAR(255) NOT NULL,
+        details TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Initialize Default Settings
+    const settingsCheck = await client.query('SELECT COUNT(*) FROM system_settings');
+    if (parseInt(settingsCheck.rows[0].count) === 0) {
       await client.query(`
-        INSERT INTO documents (title, code, description, fee) VALUES 
-        ('Barangay Clearance', 'BC', 'General clearance for employment or local purposes.', 50.00),
-        ('Certificate of Residency', 'CR', 'Certifies residency status within the barangay.', 30.00),
-        ('Certificate of Indigency', 'CI', 'Certifies indigency status for medical or financial aid.', 0.00),
-        ('Certificate of Good Moral Character', 'CGMC', 'Certifies good standing in the community.', 40.00),
-        ('Business Clearance', 'BSC', 'Clearance for local business establishment.', 150.00);
+        INSERT INTO system_settings (barangay_name, address, contact_number, email) 
+        VALUES ('Barangay San Jose', '123 Rizal Street, Poblacion', '+63 917 123 4567', 'admin@sanjose.gov.ph')
       `);
     }
 
+    // Seed Initial Document Types
+    const docsCheck = await client.query('SELECT COUNT(*) FROM document_types');
+    if (parseInt(docsCheck.rows[0].count) === 0) {
+      await client.query(`
+        INSERT INTO document_types (title, requirements, fee) VALUES
+        ('Barangay Clearance', 'Valid ID, Proof of Residency', 50.00),
+        ('Certificate of Indigency', 'Valid ID', 0.00),
+        ('Certificate of Residency', 'Valid ID, Barangay ID', 30.00),
+        ('Certificate of Good Moral Character', 'Valid ID, Police Clearance', 50.00),
+        ('Business Clearance', 'DTI Registration, Mayor''s Permit Application', 200.00)
+      `);
+    }
+
+    // Seed Initial Admin User (If None Exists)
+    const adminCheck = await client.query("SELECT COUNT(*) FROM users WHERE role = 'ADMIN'");
+    if (parseInt(adminCheck.rows[0].count) === 0) {
+      const defaultPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
+      const hash = await bcrypt.hash(defaultPassword, 10);
+      await client.query(
+        "INSERT INTO users (username, password_hash, role, status) VALUES ($1, $2, 'ADMIN', 'ACTIVE')",
+        ['admin', hash]
+      );
+      console.log('--------------------------------------------------');
+      console.log('DEFAULT ADMIN ACCOUNT CREATED:');
+      console.log('Username: admin');
+      console.log(`Password: ${defaultPassword}`);
+      console.log('--------------------------------------------------');
+    }
+
     await client.query('COMMIT');
-    console.log('Database successfully initialized.');
+    console.log('Database Schema Initialized Successfully.');
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Database initialization error:', err);
+    console.error('Error Initializing Database Schema:', err);
   } finally {
     client.release();
   }
 }
 
-// -----------------------------------------------------------------------------
-// AUTHORIZATION & SECURITY MIDDLEWARES
-// -----------------------------------------------------------------------------
-function requireAuth(req, res, next) {
-  if (req.session && req.session.userId) {
-    return next();
+// Utility Function: Log System Activity
+async function logActivity(userId, username, role, action, details) {
+  try {
+    await db.query(
+      'INSERT INTO activity_logs (user_id, username, role, action, details) VALUES ($1, $2, $3, $4, $5)',
+      [userId || null, username || 'System', role || 'SYSTEM', action, details || '']
+    );
+  } catch (e) {
+    console.error('Activity Log Error:', e);
   }
-  const urlPath = req.originalUrl;
-  if (urlPath.startsWith('/admin')) return res.redirect('/admin-login');
-  if (urlPath.startsWith('/staff')) return res.redirect('/staff-login');
-  return res.redirect('/resident-login');
+}
+
+// Utility Function: Calculate Age from Birthdate
+function calculateAge(birthdate) {
+  const birth = new Date(birthdate);
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const monthDiff = now.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+// ==========================================
+// AUTHORIZATION MIDDLEWARES
+// ==========================================
+function requireAuth(req, res, next) {
+  if (!req.session || !req.session.userId) {
+    return res.redirect('/login-choice');
+  }
+  next();
 }
 
 function requireAdmin(req, res, next) {
-  if (req.session && req.session.role === 'admin') {
+  if (req.session && req.session.role === 'ADMIN') {
     return next();
   }
-  res.status(403).send(renderErrorPage('Access Denied', 'Administrative privileges required.'));
+  return res.status(403).send(renderErrorPage('Access Denied', 'Administrator permissions required.'));
 }
 
 function requireStaff(req, res, next) {
-  if (req.session && (req.session.role === 'staff' || req.session.role === 'admin')) {
+  if (req.session && (req.session.role === 'STAFF' || req.session.role === 'ADMIN')) {
     return next();
   }
-  res.status(403).send(renderErrorPage('Access Denied', 'Staff authorization required.'));
+  return res.status(403).send(renderErrorPage('Access Denied', 'Staff access authorization required.'));
 }
 
 function requireResident(req, res, next) {
-  if (req.session && req.session.role === 'resident') {
+  if (req.session && req.session.role === 'RESIDENT') {
     return next();
   }
-  res.redirect('/resident-login');
+  return res.status(403).send(renderErrorPage('Access Denied', 'Resident account authorization required.'));
 }
 
-// Helper: Log system activity
-async function logActivity(userId, role, action, module, recordId, ip) {
-  try {
-    await pool.query(`
-      INSERT INTO activity_logs (user_id, role, action, module, record_id, ip_address) 
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `, [userId, role, action, module, recordId, ip]);
-  } catch (err) {
-    console.error('Failed to log activity:', err);
+// Check Resident Ownership
+async function checkResidentOwnership(req, res, next) {
+  if (req.session.role === 'ADMIN' || req.session.role === 'STAFF') {
+    return next();
   }
+  if (req.session.role === 'RESIDENT' && req.session.residentId) {
+    const targetId = req.params.residentId || req.body.resident_id || req.query.resident_id;
+    if (!targetId || parseInt(targetId) === parseInt(req.session.residentId)) {
+      return next();
+    }
+  }
+  return res.status(403).send(renderErrorPage('Privacy Violation', 'You can only access your own resident records.'));
 }
 
-// Helper: Calculate age from birthdate
-function calculateAge(birthdate) {
-  if (!birthdate) return 0;
-  const diff = Date.now() - new Date(birthdate).getTime();
-  const ageDate = new Date(diff);
-  return Math.abs(ageDate.getUTCFullYear() - 1970);
+// ==========================================
+// HTML TEMPLATE WRAPPERS & LAYOUTS
+// ==========================================
+
+function renderBaseHTML(title, bodyContent, navType = 'guest', sessionUser = null) {
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${title} - Barangay Resident Management System</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+      <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+      <style>
+        :root {
+          --primary-gov: #0a3663;
+          --secondary-gov: #1d5b96;
+          --accent-gold: #f39c12;
+          --bg-light: #f4f6f9;
+        }
+        body { background-color: var(--bg-light); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .navbar-gov { background-color: var(--primary-gov); }
+        .sidebar { min-height: calc(100vh - 56px); background-color: #ffffff; border-right: 1px solid #dee2e6; }
+        .card-custom { border-radius: 10px; border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .btn-gov { background-color: var(--primary-gov); color: white; }
+        .btn-gov:hover { background-color: var(--secondary-gov); color: white; }
+        .badge-status { font-size: 0.85rem; padding: 0.4em 0.8em; }
+        .id-card-wrap {
+          max-width: 450px; background: linear-gradient(135deg, #0a3663 0%, #1d5b96 100%);
+          color: white; border-radius: 15px; padding: 20px; box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+        @media print {
+          .no-print { display: none !important; }
+          .print-only { display: block !important; }
+          body { background-color: white; }
+        }
+      </style>
+    </head>
+    <body>
+      ${renderNavbar(navType, sessionUser)}
+      <div class="container-fluid">
+        <div class="row">
+          ${renderSidebar(navType, sessionUser)}
+          <main class="${navType === 'guest' ? 'col-12' : 'col-md-9 col-lg-10'} ms-sm-auto px-md-4 py-4">
+            ${bodyContent}
+          </main>
+        </div>
+      </div>
+      <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    </body>
+    </html>
+  `;
 }
 
-// -----------------------------------------------------------------------------
-// CORE HTML LAYOUT & COMPONENTS GENERATOR
-// -----------------------------------------------------------------------------
-function renderLayout(title, content, portalType = 'public', user = null) {
-  let navLinks = '';
-  if (portalType === 'admin') {
-    navLinks = `
-      <a href="/admin/dashboard">Dashboard</a>
-      <a href="/admin/residents">Residents</a>
-      <a href="/admin/accounts">Accounts</a>
-      <a href="/admin/households">Households</a>
-      <a href="/admin/staff">Staff & Roles</a>
-      <a href="/admin/officials">Officials</a>
-      <a href="/admin/documents">Document Types</a>
-      <a href="/admin/document-requests">Requests</a>
-      <a href="/admin/blotter">Blotter</a>
-      <a href="/admin/announcements">Announcements</a>
-      <a href="/admin/notifications">Notifications</a>
-      <a href="/admin/qr">QR Scanner</a>
-      <a href="/admin/reports">Reports</a>
-      <a href="/admin/logs">Activity Logs</a>
-      <a href="/admin/backup">Backup Info</a>
-      <a href="/admin/settings">Settings</a>
-      <a href="/logout" class="logout-btn">Logout</a>
+function renderNavbar(type, user) {
+  let title = "Barangay Resident Management System";
+  if (type === 'admin') title = "BRMS - Admin Portal";
+  if (type === 'staff') title = "BRMS - Staff Portal";
+  if (type === 'resident') title = "BRMS - Resident Portal";
+
+  return `
+    <nav class="navbar navbar-expand-lg navbar-dark navbar-gov sticky-top no-print">
+      <div class="container-fluid">
+        <a class="navbar-brand fw-bold" href="/"><i class="bi bi-shield-check me-2"></i>${title}</a>
+        ${user ? `
+          <div class="d-flex align-items-center text-white me-3">
+            <span class="me-3"><i class="bi bi-person-circle me-1"></i> ${user.username} (${user.role})</span>
+            <a href="/logout" class="btn btn-outline-light btn-sm"><i class="bi bi-box-arrow-right me-1"></i>Logout</a>
+          </div>
+        ` : ''}
+      </div>
+    </nav>
+  `;
+}
+
+function renderSidebar(type, user) {
+  if (type === 'guest') return '';
+  
+  let links = '';
+  if (type === 'admin') {
+    links = `
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/dashboard"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/residents"><i class="bi bi-people me-2"></i>Residents</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/households"><i class="bi bi-house-door me-2"></i>Households</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/document-requests"><i class="bi bi-file-earmark-text me-2"></i>Document Requests</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/blotter"><i class="bi bi-journal-text me-2"></i>Blotter Records</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/announcements"><i class="bi bi-megaphone me-2"></i>Announcements</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/staff"><i class="bi bi-person-badge me-2"></i>Staff Accounts</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/officials"><i class="bi bi-person-workspace me-2"></i>Officials</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/qr-scanner"><i class="bi bi-qr-code-scan me-2"></i>QR Scanner</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/reports"><i class="bi bi-graph-up me-2"></i>Reports</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/activity-logs"><i class="bi bi-clock-history me-2"></i>Activity Logs</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/admin/settings"><i class="bi bi-gear me-2"></i>System Settings</a></li>
     `;
-  } else if (portalType === 'staff') {
-    navLinks = `
-      <a href="/staff/dashboard">Dashboard</a>
-      <a href="/staff/residents">Residents</a>
-      <a href="/staff/households">Households</a>
-      <a href="/staff/documents">Documents</a>
-      <a href="/staff/document-requests">Requests</a>
-      <a href="/staff/blotter">Blotter</a>
-      <a href="/staff/qr">QR Scanner</a>
-      <a href="/staff/reports">Reports</a>
-      <a href="/staff/notifications">Notifications</a>
-      <a href="/staff/settings">Settings</a>
-      <a href="/logout" class="logout-btn">Logout</a>
+  } else if (type === 'staff') {
+    links = `
+      <li class="nav-item"><a class="nav-link text-dark" href="/staff/dashboard"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/staff/residents"><i class="bi bi-people me-2"></i>Residents</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/staff/document-requests"><i class="bi bi-file-earmark-text me-2"></i>Document Requests</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/staff/blotter"><i class="bi bi-journal-text me-2"></i>Blotter Records</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/staff/qr-scanner"><i class="bi bi-qr-code-scan me-2"></i>QR Scanner</a></li>
     `;
-  } else if (portalType === 'resident') {
-    navLinks = `
-      <a href="/resident/dashboard">Dashboard</a>
-      <a href="/resident/profile">My Profile</a>
-      <a href="/resident/household">My Household</a>
-      <a href="/resident/id">Resident ID</a>
-      <a href="/resident/qr">QR Code</a>
-      <a href="/resident/documents/request">Request Doc</a>
-      <a href="/resident/requests">My Requests</a>
-      <a href="/resident/documents">My Documents</a>
-      <a href="/resident/notifications">Notifications</a>
-      <a href="/resident/announcements">Announcements</a>
-      <a href="/resident/concerns">Concerns</a>
-      <a href="/resident/settings">Settings</a>
-      <a href="/logout" class="logout-btn">Logout</a>
-    `;
-  } else {
-    navLinks = `
-      <a href="/">Home</a>
-      <a href="/resident-login">Resident Login</a>
-      <a href="/resident-register">Register</a>
-      <a href="/admin-login">Admin Login</a>
-      <a href="/staff-login">Staff Login</a>
+  } else if (type === 'resident') {
+    links = `
+      <li class="nav-item"><a class="nav-link text-dark" href="/resident/dashboard"><i class="bi bi-house-door me-2"></i>My Dashboard</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/resident/profile"><i class="bi bi-person me-2"></i>My Profile</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/resident/id"><i class="bi bi-card-heading me-2"></i>Digital Resident ID</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/resident/documents"><i class="bi bi-file-earmark-plus me-2"></i>Request Documents</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/resident/household"><i class="bi bi-people me-2"></i>My Household</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/resident/notifications"><i class="bi bi-bell me-2"></i>Notifications</a></li>
+      <li class="nav-item"><a class="nav-link text-dark" href="/resident/concerns"><i class="bi bi-chat-left-dots me-2"></i>Concerns & Feedback</a></li>
     `;
   }
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} | Barangay System</title>
-  <style>
-    :root {
-      --primary: #1e3a8a;
-      --primary-dark: #172554;
-      --accent: #2563eb;
-      --bg-color: #f8fafc;
-      --card-bg: #ffffff;
-      --text-main: #334155;
-      --border-color: #cbd5e1;
-      --success: #16a34a;
-      --danger: #dc2626;
-      --warning: #d97706;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
-    body { background-color: var(--bg-color); color: var(--text-main); display: flex; flex-direction: column; min-height: 100vh; }
-    header { background-color: var(--primary); color: white; padding: 1rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    header h1 { font-size: 1.25rem; }
-    .container { display: flex; flex: 1; width: 100%; max-width: 1400px; margin: 0 auto; }
-    sidebar, .sidebar { width: 260px; background: var(--card-bg); border-right: 1px solid var(--border-color); padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; }
-    .sidebar a { padding: 0.75rem 1rem; color: var(--text-main); text-decoration: none; border-radius: 6px; font-weight: 500; transition: background 0.2s; }
-    .sidebar a:hover, .sidebar a.active { background: var(--primary); color: white; }
-    .sidebar a.logout-btn { color: var(--danger); margin-top: auto; }
-    .sidebar a.logout-btn:hover { background: var(--danger); color: white; }
-    main { flex: 1; padding: 2rem; overflow-y: auto; }
-    .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    h2, h3 { margin-bottom: 1rem; color: var(--primary-dark); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
-    .stat-card { background: white; padding: 1.5rem; border-radius: 8px; border-left: 5px solid var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .stat-card h4 { font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; }
-    .stat-card .value { font-size: 1.8rem; font-weight: bold; color: var(--primary-dark); }
-    table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: white; border-radius: 8px; overflow: hidden; }
-    th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 0.95rem; }
-    th { background: #f1f5f9; color: var(--primary-dark); font-weight: 600; }
-    form { display: flex; flex-direction: column; gap: 1rem; }
-    .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
-    label { font-weight: 500; font-size: 0.9rem; }
-    input, select, textarea { padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 6px; font-size: 1rem; width: 100%; }
-    button, .btn { background: var(--primary); color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; text-align: center; }
-    button:hover, .btn:hover { background: var(--primary-dark); }
-    .btn-danger { background: var(--danger); }
-    .btn-danger:hover { background: #b91c1c; }
-    .btn-success { background: var(--success); }
-    .btn-success:hover { background: #15803d; }
-    .badge { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: bold; text-transform: uppercase; }
-    .badge-success { background: #dcfce7; color: var(--success); }
-    .badge-danger { background: #fee2e2; color: var(--danger); }
-    .badge-warning { background: #fef3c7; color: var(--warning); }
-    @media (max-width: 768px) {
-      .container { flex-direction: column; }
-      sidebar, .sidebar { width: 100%; height: auto; flex-direction: row; flex-wrap: wrap; gap: 0.25rem; padding: 0.5rem; }
-      .sidebar a { padding: 0.5rem; font-size: 0.85rem; }
-      main { padding: 1rem; }
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Barangay Resident Management System</h1>
-    <div>${user ? `<span>User: <strong>${user.username}</strong> (${user.role})</span>` : ''}</div>
-  </header>
-  <div class="container">
-    ${portalType !== 'public' ? `<div class="sidebar">${navLinks}</div>` : ''}
-    <main>
-      ${content}
-    </main>
-  </div>
-</body>
-</html>`;
+  return `
+    <div class="col-md-3 col-lg-2 sidebar d-none d-md-block py-3 no-print">
+      <ul class="nav flex-column gap-1">
+        ${links}
+      </ul>
+    </div>
+  `;
 }
 
 function renderErrorPage(title, message) {
-  return renderLayout(title, `
-    <div class="card" style="text-align: center; padding: 3rem;">
-      <h2 style="color: var(--danger);">${title}</h2>
-      <p style="margin: 1rem 0; font-size: 1.1rem;">${message}</p>
-      <a href="/" class="btn">Return Home</a>
+  return renderBaseHTML(title, `
+    <div class="text-center py-5">
+      <i class="bi bi-exclamation-triangle text-danger display-1"></i>
+      <h2 class="mt-3">${title}</h2>
+      <p class="lead text-muted">${message}</p>
+      <a href="/" class="btn btn-gov mt-3"><i class="bi bi-arrow-left me-1"></i>Return to Home</a>
     </div>
   `);
 }
 
-// -----------------------------------------------------------------------------
+// ==========================================
 // PUBLIC & AUTHENTICATION ROUTES
-// -----------------------------------------------------------------------------
-app.get('/', async (req, res) => {
-  try {
-    const settings = (await pool.query('SELECT * FROM system_settings WHERE id = 1')).rows[0];
-    res.send(renderLayout('Welcome', `
-      <div class="card" style="text-align: center; padding: 3rem;">
-        <h2 style="font-size: 2rem; color: var(--primary);">${settings.barangay_name}</h2>
-        <p style="margin: 1rem 0; font-size: 1.1rem;">${settings.system_name}</p>
-        <p style="color: #64748b; margin-bottom: 2rem;">${settings.barangay_address}</p>
-        <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
-          <a href="/resident-login" class="btn">Resident Portal</a>
-          <a href="/resident-register" class="btn btn-success">Register as Resident</a>
-          <a href="/staff-login" class="btn" style="background: #0f766e;">Staff Portal</a>
-          <a href="/admin-login" class="btn" style="background: #334155;">Admin Portal</a>
+// ==========================================
+
+// Landing Choice Page
+app.get('/', (req, res) => {
+  if (req.session.userId) {
+    if (req.session.role === 'ADMIN') return res.redirect('/admin/dashboard');
+    if (req.session.role === 'STAFF') return res.redirect('/staff/dashboard');
+    if (req.session.role === 'RESIDENT') return res.redirect('/resident/dashboard');
+  }
+  
+  res.send(renderBaseHTML('Welcome', `
+    <div class="row justify-content-center py-5">
+      <div class="col-md-10 text-center">
+        <h1 class="display-4 fw-bold text-dark mb-3">Barangay Resident Management System</h1>
+        <p class="lead text-muted mb-5">Select your portal destination to continue.</p>
+        
+        <div class="row g-4">
+          <div class="col-md-4">
+            <div class="card card-custom h-100 p-4">
+              <div class="card-body">
+                <i class="bi bi-people-fill text-primary display-3 mb-3"></i>
+                <h3 class="card-title h4">Resident Portal</h3>
+                <p class="card-text text-muted">Access services, request documents, and view your digital ID.</p>
+                <div class="d-grid gap-2 mt-4">
+                  <a href="/resident-login" class="btn btn-gov">Resident Login</a>
+                  <a href="/resident-register" class="btn btn-outline-primary">New Resident Register</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="card card-custom h-100 p-4">
+              <div class="card-body">
+                <i class="bi bi-person-badge-fill text-success display-3 mb-3"></i>
+                <h3 class="card-title h4">Staff Portal</h3>
+                <p class="card-text text-muted">Process document requests, verify QR codes, and manage blotters.</p>
+                <div class="d-grid gap-2 mt-4">
+                  <a href="/staff-login" class="btn btn-success">Staff Portal Access</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="card card-custom h-100 p-4">
+              <div class="card-body">
+                <i class="bi bi-shield-lock-fill text-danger display-3 mb-3"></i>
+                <h3 class="card-title h4">Admin Portal</h3>
+                <p class="card-text text-muted">Full management of residents, system configurations, and reports.</p>
+                <div class="d-grid gap-2 mt-4">
+                  <a href="/admin-login" class="btn btn-danger">Admin Portal Access</a>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    `));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', 'Internal server error.'));
-  }
-});
-
-// Resident Login
-app.get('/resident-login', (req, res) => {
-  res.send(renderLayout('Resident Login', `
-    <div style="max-width: 400px; margin: 2rem auto;" class="card">
-      <h2>Resident Login</h2>
-      <form action="/resident-login" method="POST">
-        <div class="form-group">
-          <label>Username / Email</label>
-          <input type="text" name="username" required>
-        </div>
-        <div class="form-group">
-          <label>Password</label>
-          <input type="password" name="password" required>
-        </div>
-        <button type="submit">Login to Portal</button>
-      </form>
-      <p style="margin-top: 1rem; text-align: center; font-size: 0.9rem;">
-        Don't have an account? <a href="/resident-register">Register here</a>
-      </p>
     </div>
   `));
 });
 
-app.post('/resident-login', async (req, res) => {
-  const { username, password } = req.body;
+// Resident Login Page
+app.get('/resident-login', (req, res) => {
+  res.send(renderBaseHTML('Resident Login', `
+    <div class="row justify-content-center py-5">
+      <div class="col-md-5">
+        <div class="card card-custom p-4">
+          <h3 class="fw-bold mb-3 text-center">Resident Login</h3>
+          ${req.query.error ? `<div class="alert alert-danger">${req.query.error}</div>` : ''}
+          ${req.query.registered ? `<div class="alert alert-success">Registration submitted! Pending admin approval.</div>` : ''}
+          <form action="/api/login" method="POST">
+            <input type="hidden" name="expectedRole" value="RESIDENT">
+            <div class="mb-3">
+              <label class="form-label">Username or Email</label>
+              <input type="text" name="username" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input type="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn btn-gov w-100 py-2 fw-bold">Sign In</button>
+          </form>
+          <div class="text-center mt-3">
+            <a href="/resident-register">Don't have an account? Register here</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  `));
+});
+
+// Staff Login Page
+app.get('/staff-login', (req, res) => {
+  res.send(renderBaseHTML('Staff Login', `
+    <div class="row justify-content-center py-5">
+      <div class="col-md-5">
+        <div class="card card-custom p-4">
+          <h3 class="fw-bold mb-3 text-center text-success">Staff Portal Access</h3>
+          ${req.query.error ? `<div class="alert alert-danger">${req.query.error}</div>` : ''}
+          <form action="/api/login" method="POST">
+            <input type="hidden" name="expectedRole" value="STAFF">
+            <div class="mb-3">
+              <label class="form-label">Staff Username</label>
+              <input type="text" name="username" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input type="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn btn-success w-100 py-2 fw-bold">Sign In to Staff Portal</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  `));
+});
+
+// Admin Login Page
+app.get('/admin-login', (req, res) => {
+  res.send(renderBaseHTML('Admin Login', `
+    <div class="row justify-content-center py-5">
+      <div class="col-md-5">
+        <div class="card card-custom p-4">
+          <h3 class="fw-bold mb-3 text-center text-danger">Admin Portal Access</h3>
+          ${req.query.error ? `<div class="alert alert-danger">${req.query.error}</div>` : ''}
+          <form action="/api/login" method="POST">
+            <input type="hidden" name="expectedRole" value="ADMIN">
+            <div class="mb-3">
+              <label class="form-label">Admin Username</label>
+              <input type="text" name="username" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input type="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn btn-danger w-100 py-2 fw-bold">Sign In to Admin Portal</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  `));
+});
+
+// Unified Login Endpoint
+app.post('/api/login', async (req, res) => {
+  const { username, password, expectedRole } = req.body;
   try {
-    const userRes = await pool.query("SELECT * FROM users WHERE (username = $1 OR id IN (SELECT user_id FROM residents WHERE email = $1)) AND role = 'resident'", [username]);
-    if (userRes.rows.length === 0) return res.send(renderErrorPage('Login Failed', 'Invalid credentials or account not found.'));
-    const user = userRes.rows[0];
-    
-    if (user.status !== 'active') {
-      return res.send(renderErrorPage('Account Inactive', 'Your account is pending approval or inactive.'));
+    const result = await db.query('SELECT * FROM users WHERE username = $1', [username]);
+    if (result.rows.length === 0) {
+      return res.redirect(`/${expectedRole.toLowerCase()}-login?error=Invalid username or password`);
     }
 
+    const user = result.rows[0];
     const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) return res.send(renderErrorPage('Login Failed', 'Invalid password.'));
+    if (!match) {
+      return res.redirect(`/${expectedRole.toLowerCase()}-login?error=Invalid username or password`);
+    }
+
+    if (user.role !== expectedRole) {
+      return res.redirect(`/${expectedRole.toLowerCase()}-login?error=Unauthorized role portal attempt`);
+    }
+
+    if (user.status !== 'ACTIVE') {
+      return res.redirect(`/${expectedRole.toLowerCase()}-login?error=Account is ${user.status.toLowerCase()}. Please contact administrator.`);
+    }
 
     req.session.userId = user.id;
-    req.session.role = user.role;
     req.session.username = user.username;
+    req.session.role = user.role;
 
-    const resRec = await pool.query("SELECT id, resident_id FROM residents WHERE user_id = $1", [user.id]);
-    if (resRec.rows.length > 0) {
-      req.session.residentId = resRec.rows[0].id;
-      req.session.residentCode = resRec.rows[0].resident_id;
+    if (user.role === 'RESIDENT') {
+      const resResult = await db.query('SELECT id, status FROM residents WHERE user_id = $1', [user.id]);
+      if (resResult.rows.length > 0) {
+        req.session.residentId = resResult.rows[0].id;
+      }
     }
 
-    await logActivity(user.id, 'resident', 'Resident logged into portal', 'auth', user.id, req.ip);
-    res.redirect('/resident/dashboard');
+    await logActivity(user.id, user.username, user.role, 'LOGIN', 'User logged in successfully.');
+
+    if (user.role === 'ADMIN') return res.redirect('/admin/dashboard');
+    if (user.role === 'STAFF') return res.redirect('/staff/dashboard');
+    return res.redirect('/resident/dashboard');
+
   } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
+    console.error('Login error:', err);
+    res.redirect(`/${expectedRole.toLowerCase()}-login?error=System error encountered`);
   }
 });
 
-// Resident Registration
+// Logout Route
+app.get('/logout', async (req, res) => {
+  if (req.session) {
+    await logActivity(req.session.userId, req.session.username, req.session.role, 'LOGOUT', 'User logged out.');
+    req.session.destroy();
+  }
+  res.redirect('/');
+});
+
+// Resident Registration Page
 app.get('/resident-register', (req, res) => {
-  res.send(renderLayout('Resident Registration', `
-    <div style="max-width: 700px; margin: 2rem auto;" class="card">
-      <h2>Resident Registration Form</h2>
-      <form action="/resident-register" method="POST" enctype="multipart/form-data">
-        <div class="grid">
-          <div class="form-group"><label>First Name</label><input type="text" name="first_name" required></div>
-          <div class="form-group"><label>Middle Name</label><input type="text" name="middle_name"></div>
-          <div class="form-group"><label>Last Name</label><input type="text" name="last_name" required></div>
-          <div class="form-group"><label>Suffix</label><input type="text" name="suffix" placeholder="Jr, III, etc."></div>
+  res.send(renderBaseHTML('Resident Registration', `
+    <div class="row justify-content-center py-4">
+      <div class="col-md-9">
+        <div class="card card-custom p-4">
+          <h2 class="fw-bold text-center mb-4">Barangay Resident Registration</h2>
+          <form action="/api/resident-register" method="POST" enctype="multipart/form-data">
+            
+            <h5 class="text-primary border-bottom pb-2 mb-3">1. Account Information</h5>
+            <div class="row g-3 mb-4">
+              <div class="col-md-6">
+                <label class="form-label">Username *</label>
+                <input type="text" name="username" class="form-control" required>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Password *</label>
+                <input type="password" name="password" class="form-control" required>
+              </div>
+            </div>
+
+            <h5 class="text-primary border-bottom pb-2 mb-3">2. Personal Details</h5>
+            <div class="row g-3 mb-3">
+              <div class="col-md-3">
+                <label class="form-label">First Name *</label>
+                <input type="text" name="first_name" class="form-control" required>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Middle Name</label>
+                <input type="text" name="middle_name" class="form-control">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Last Name *</label>
+                <input type="text" name="last_name" class="form-control" required>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Suffix (Jr, Sr, III)</label>
+                <input type="text" name="suffix" class="form-control">
+              </div>
+            </div>
+
+            <div class="row g-3 mb-3">
+              <div class="col-md-3">
+                <label class="form-label">Birthdate *</label>
+                <input type="date" name="birthdate" class="form-control" required>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Sex *</label>
+                <select name="sex" class="form-select" required>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Civil Status *</label>
+                <select name="civil_status" class="form-select" required>
+                  <option value="Single">Single</option>
+                  <option value="Married">Married</option>
+                  <option value="Widowed">Widowed</option>
+                  <option value="Separated">Separated</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Nationality</label>
+                <input type="text" name="nationality" class="form-control" value="Filipino">
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Complete Address *</label>
+              <textarea name="address" class="form-control" rows="2" required></textarea>
+            </div>
+
+            <div class="row g-3 mb-4">
+              <div class="col-md-4">
+                <label class="form-label">Contact Number *</label>
+                <input type="text" name="contact_number" class="form-control" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Email Address</label>
+                <input type="email" name="email" class="form-control">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Occupation</label>
+                <input type="text" name="occupation" class="form-control">
+              </div>
+            </div>
+
+            <h5 class="text-primary border-bottom pb-2 mb-3">3. Status & Classifications</h5>
+            <div class="row g-3 mb-4">
+              <div class="col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="is_voter" value="true" id="voterCheck">
+                  <label class="form-check-label" for="voterCheck">Registered Voter</label>
+                </div>
+              </div>
+              <div class="col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="is_pwd" value="true" id="pwdCheck">
+                  <label class="form-check-label" for="pwdCheck">PWD Person</label>
+                </div>
+              </div>
+              <div class="col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="is_4ps" value="true" id="4psCheck">
+                  <label class="form-check-label" for="4psCheck">4Ps Beneficiary</label>
+                </div>
+              </div>
+            </div>
+
+            <h5 class="text-primary border-bottom pb-2 mb-3">4. Emergency Contact & Verification Docs</h5>
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label class="form-label">Emergency Contact Name</label>
+                <input type="text" name="emergency_contact_name" class="form-control">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Emergency Contact Number</label>
+                <input type="text" name="emergency_contact_number" class="form-control">
+              </div>
+            </div>
+
+            <div class="row g-3 mb-4">
+              <div class="col-md-6">
+                <label class="form-label">Resident Photo (JPG/PNG)</label>
+                <input type="file" name="photo" class="form-control" accept="image/*">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Valid ID Document (JPG/PNG/PDF)</label>
+                <input type="file" name="valid_id" class="form-control" accept="image/*,.pdf">
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-gov w-100 py-3 fw-bold fs-5">Submit Resident Registration</button>
+          </form>
         </div>
-        <div class="grid">
-          <div class="form-group"><label>Birthdate</label><input type="date" name="birthdate" required></div>
-          <div class="form-group"><label>Sex</label><select name="sex" required><option>Male</option><option>Female</option></select></div>
-          <div class="form-group"><label>Civil Status</label><select name="civil_status" required><option>Single</option><option>Married</option><option>Widowed</option><option>Separated</option></select></div>
-          <div class="form-group"><label>Nationality</label><input type="text" name="nationality" value="Filipino" required></div>
-        </div>
-        <div class="form-group"><label>Complete Address</label><textarea name="complete_address" required rows="2"></textarea></div>
-        <div class="grid">
-          <div class="form-group"><label>Contact Number</label><input type="text" name="contact_number" required></div>
-          <div class="form-group"><label>Email Address</label><input type="email" name="email" required></div>
-          <div class="form-group"><label>Occupation</label><input type="text" name="occupation"></div>
-          <div class="form-group"><label>Educational Attainment</label><input type="text" name="educational_attainment"></div>
-        </div>
-        <div class="grid">
-          <div class="form-group"><label>Voter Status</label><select name="voter_status"><option value="false">Non-Voter</option><option value="true">Registered Voter</option></select></div>
-          <div class="form-group"><label>PWD Status</label><select name="pwd_status"><option value="false">No</option><option value="true">Yes</option></select></div>
-          <div class="form-group"><label>Senior Citizen Status</label><select name="senior_citizen_status"><option value="false">No</option><option value="true">Yes</option></select></div>
-          <div class="form-group"><label>4Ps Beneficiary</label><select name="four_ps_status"><option value="false">No</option><option value="true">Yes</option></select></div>
-        </div>
-        <div class="grid">
-          <div class="form-group"><label>Emergency Contact Name</label><input type="text" name="emergency_contact_name" required></div>
-          <div class="form-group"><label>Emergency Contact Number</label><input type="text" name="emergency_contact_number" required></div>
-        </div>
-        <div class="grid">
-          <div class="form-group"><label>Valid ID File (Image/PDF)</label><input type="file" name="valid_id" required></div>
-          <div class="form-group"><label>Resident Photo</label><input type="file" name="resident_photo" required></div>
-        </div>
-        <div class="grid">
-          <div class="form-group"><label>Username</label><input type="text" name="username" required></div>
-          <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
-        </div>
-        <button type="submit" class="btn-success">Submit Registration</button>
-      </form>
+      </div>
     </div>
   `));
 });
 
-const cpUpload = upload.fields([{ name: 'valid_id', maxCount: 1 }, { name: 'resident_photo', maxCount: 1 }]);
-app.post('/resident-register', cpUpload, async (req, res) => {
+// Handle Registration API
+app.post('/api/resident-register', upload.fields([{ name: 'photo', maxCount: 1 }, { name: 'valid_id', maxCount: 1 }]), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const {
-      first_name, middle_name, last_name, suffix, birthdate, sex, civil_status,
-      complete_address, contact_number, email, occupation, educational_attainment,
-      nationality, voter_status, pwd_status, senior_citizen_status, four_ps_status,
-      emergency_contact_name, emergency_contact_number, username, password
-    } = req.body;
+    const { username, password, first_name, middle_name, last_name, suffix, birthdate, sex, civil_status, address, contact_number, email, occupation, nationality, is_voter, is_pwd, is_4ps, emergency_contact_name, emergency_contact_number } = req.body;
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const userResult = await client.query(`
-      INSERT INTO users (username, password_hash, role, status) 
-      VALUES ($1, $2, 'resident', 'pending') RETURNING id
-    `, [username, hashedPassword]);
-    const userId = userResult.rows[0].id;
+    const userCheck = await client.query('SELECT id FROM users WHERE username = $1', [username]);
+    if (userCheck.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).send(renderErrorPage('Registration Error', 'Username already exists.'));
+    }
 
-    // Generate unique Resident ID
-    const year = new Date().getFullYear();
-    const countRes = await client.query("SELECT COUNT(*) FROM residents");
-    const seq = parseInt(countRes.rows[0].count) + 1;
-    const residentId = `BRGY-${year}-${String(seq).padStart(6, '0')}`;
-    const qrToken = 'QR-' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const passwordHash = await bcrypt.hash(password, 10);
+    const userRes = await client.query(
+      "INSERT INTO users (username, password_hash, role, status) VALUES ($1, $2, 'RESIDENT', 'PENDING') RETURNING id",
+      [username, passwordHash]
+    );
+    const userId = userRes.rows[0].id;
 
-    const validIdPath = req.files['valid_id'] ? req.files['valid_id'][0].filename : null;
-    const photoPath = req.files['resident_photo'] ? req.files['resident_photo'][0].filename : null;
+    const photoUrl = req.files && req.files['photo'] ? `/uploads/${req.files['photo'][0].filename}` : null;
+    const validIdUrl = req.files && req.files['valid_id'] ? `/uploads/${req.files['valid_id'][0].filename}` : null;
+
+    const age = calculateAge(birthdate);
+    const isSenior = age >= 60;
 
     await client.query(`
       INSERT INTO residents (
-        user_id, resident_id, first_name, middle_name, last_name, suffix, birthdate, sex,
-        civil_status, complete_address, contact_number, email, occupation, educational_attainment,
-        nationality, voter_status, pwd_status, senior_citizen_status, four_ps_status,
-        emergency_contact_name, emergency_contact_number, valid_id_path, resident_photo_path,
-        qr_token, account_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, 'pending')
+        user_id, first_name, middle_name, last_name, suffix, birthdate, sex, civil_status,
+        address, contact_number, email, occupation, nationality, is_voter, is_pwd, is_senior, is_4ps,
+        emergency_contact_name, emergency_contact_number, photo_url, valid_id_url, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'PENDING')
     `, [
-      userId, residentId, first_name, middle_name, last_name, suffix, birthdate, sex,
-      civil_status, complete_address, contact_number, email, occupation, educational_attainment,
-      nationality, voter_status === 'true', pwd_status === 'true', senior_citizen_status === 'true', four_ps_status === 'true',
-      emergency_contact_name, emergency_contact_number, validIdPath, photoPath, qrToken
+      userId, first_name, middle_name, last_name, suffix, birthdate, sex, civil_status,
+      address, contact_number, email, occupation, nationality || 'Filipino',
+      is_voter === 'true', is_pwd === 'true', isSenior, is_4ps === 'true',
+      emergency_contact_name, emergency_contact_number, photoUrl, validIdUrl
     ]);
 
     await client.query('COMMIT');
-    res.send(renderLayout('Registration Submitted', `
-      <div class="card" style="text-align: center; padding: 3rem;">
-        <h2>Registration Successful!</h2>
-        <p style="margin: 1rem 0;">Your registration has been submitted and is currently <strong>Pending Approval</strong> by barangay administrators.</p>
-        <a href="/" class="btn">Return Home</a>
-      </div>
-    `));
+    await logActivity(userId, username, 'RESIDENT', 'REGISTER', 'New resident submitted registration.');
+    res.redirect('/resident-login?registered=true');
+
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(500).send(renderErrorPage('Registration Error', err.message));
+    console.error('Registration Exception:', err);
+    res.status(500).send(renderErrorPage('Server Error', 'Failed to complete registration process.'));
   } finally {
     client.release();
   }
 });
 
-// Staff Login
-app.get('/staff-login', (req, res) => {
-  res.send(renderLayout('Staff Login', `
-    <div style="max-width: 400px; margin: 2rem auto;" class="card">
-      <h2>Staff Portal Login</h2>
-      <form action="/staff-login" method="POST">
-        <div class="form-group"><label>Username</label><input type="text" name="username" required></div>
-        <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
-        <button type="submit" style="background: #0f766e;">Login to Staff Portal</button>
-      </form>
-    </div>
-  `));
-});
-
-app.post('/staff-login', async (req, res) => {
-  const { username, password } = req.body;
-  try {
-    const userRes = await pool.query("SELECT * FROM users WHERE username = $1 AND role = 'staff'", [username]);
-    if (userRes.rows.length === 0) return res.send(renderErrorPage('Login Failed', 'Invalid staff credentials.'));
-    const user = userRes.rows[0];
-    if (user.status !== 'active') return res.send(renderErrorPage('Account Inactive', 'Staff account is disabled.'));
-
-    const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) return res.send(renderErrorPage('Login Failed', 'Invalid password.'));
-
-    req.session.userId = user.id;
-    req.session.role = user.role;
-    req.session.username = user.username;
-
-    await logActivity(user.id, 'staff', 'Staff logged into portal', 'auth', user.id, req.ip);
-    res.redirect('/staff/dashboard');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-// Admin Login
-app.get('/admin-login', (req, res) => {
-  res.send(renderLayout('Admin Login', `
-    <div style="max-width: 400px; margin: 2rem auto;" class="card">
-      <h2>Admin Portal Login</h2>
-      <form action="/admin-login" method="POST">
-        <div class="form-group"><label>Username</label><input type="text" name="username" required></div>
-        <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
-        <button type="submit" style="background: #334155;">Login to Admin Portal</button>
-      </form>
-    </div>
-  `));
-});
-
-app.post('/admin-login', async (req, res) => {
-  const { username, password } = req.body;
-  try {
-    const userRes = await pool.query("SELECT * FROM users WHERE username = $1 AND role = 'admin'", [username]);
-    if (userRes.rows.length === 0) return res.send(renderErrorPage('Login Failed', 'Invalid administrator credentials.'));
-    const user = userRes.rows[0];
-
-    const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) return res.send(renderErrorPage('Login Failed', 'Invalid password.'));
-
-    req.session.userId = user.id;
-    req.session.role = user.role;
-    req.session.username = user.username;
-
-    await logActivity(user.id, 'admin', 'Admin logged into portal', 'auth', user.id, req.ip);
-    res.redirect('/admin/dashboard');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-// Logout
-app.get('/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.redirect('/');
-  });
-});
-
-// -----------------------------------------------------------------------------
+// ==========================================
 // RESIDENT PORTAL ROUTES
-// -----------------------------------------------------------------------------
+// ==========================================
+
 app.get('/resident/dashboard', requireAuth, requireResident, async (req, res) => {
   try {
-    const residentId = req.session.residentId;
-    const residentRes = await pool.query("SELECT * FROM residents WHERE id = $1", [residentId]);
+    const residentRes = await db.query('SELECT * FROM residents WHERE user_id = $1', [req.session.userId]);
     const resident = residentRes.rows[0];
 
-    const pendingReq = await pool.query("SELECT COUNT(*) FROM document_requests WHERE resident_id = $1 AND status != 'Completed'", [residentId]);
-    const completedReq = await pool.query("SELECT COUNT(*) FROM document_requests WHERE resident_id = $1 AND status = 'Completed'", [residentId]);
-    const unreadNotif = await pool.query("SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND is_read = false", [req.session.userId]);
-    const announcements = await pool.query("SELECT * FROM announcements WHERE status = 'Published' ORDER BY publish_date DESC LIMIT 3");
+    if (!resident) {
+      return res.send(renderBaseHTML('Pending Approval', `
+        <div class="alert alert-warning py-4">Your resident application is currently undergoing admin review. Please check back later.</div>
+      `, 'resident', req.session));
+    }
 
-    res.send(renderLayout('Resident Dashboard', `
-      <div class="card">
-        <h2>Welcome, ${resident.first_name} ${resident.last_name}!</h2>
-        <p>Resident ID: <strong>${resident.resident_id}</strong> | Status: <span class="badge badge-success">${resident.account_status}</span></p>
-      </div>
-      <div class="grid">
-        <div class="stat-card"><h4>Pending Requests</h4><div class="value">${pendingReq.rows[0].count}</div></div>
-        <div class="stat-card"><h4>Completed Documents</h4><div class="value">${completedReq.rows[0].count}</div></div>
-        <div class="stat-card"><h4>Unread Notifications</h4><div class="value">${unreadNotif.rows[0].count}</div></div>
-      </div>
-      <div class="card">
-        <h3>Quick Actions</h3>
-        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-          <a href="/resident/documents/request" class="btn">Request New Document</a>
-          <a href="/resident/id" class="btn btn-success">View Digital ID</a>
-          <a href="/resident/qr" class="btn" style="background: #0f766e;">My QR Code</a>
+    const pendingDocs = await db.query("SELECT COUNT(*) FROM document_requests WHERE resident_id = $1 AND status != 'Completed'", [resident.id]);
+    const unreadNotifs = await db.query("SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND is_read = false", [req.session.userId]);
+    const announcements = await db.query("SELECT * FROM announcements WHERE is_published = true ORDER BY created_at DESC LIMIT 3");
+
+    res.send(renderBaseHTML('Resident Dashboard', `
+      <div class="card card-custom p-4 mb-4">
+        <div class="d-flex align-items-center gap-3">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle border" width="80" height="80" style="object-fit:cover;">
+          <div>
+            <h3 class="fw-bold mb-1">Welcome, ${resident.first_name} ${resident.last_name}!</h3>
+            <p class="text-muted mb-0">Resident ID: <strong>${resident.resident_id_number || 'Pending Approval'}</strong> | Status: <span class="badge bg-${resident.status === 'APPROVED' ? 'success' : 'warning'}">${resident.status}</span></p>
+          </div>
         </div>
       </div>
-      <div class="card">
-        <h3>Recent Announcements</h3>
-        ${announcements.rows.map(a => `
-          <div style="padding: 0.75rem 0; border-bottom: 1px solid #e2e8f0;">
-            <strong>${a.title}</strong><p style="font-size: 0.9rem; color: #64748b;">${a.content}</p>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-4">
+          <div class="card card-custom p-3 border-start border-primary border-4">
+            <div class="text-muted">Pending Document Requests</div>
+            <div class="display-6 fw-bold text-primary">${pendingDocs.rows[0].count}</div>
           </div>
-        `).join('')}
+        </div>
+        <div class="col-md-4">
+          <div class="card card-custom p-3 border-start border-warning border-4">
+            <div class="text-muted">Unread Notifications</div>
+            <div class="display-6 fw-bold text-warning">${unreadNotifs.rows[0].count}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card card-custom p-3 border-start border-success border-4">
+            <div class="text-muted">Calculated Age</div>
+            <div class="display-6 fw-bold text-success">${calculateAge(resident.birthdate)} yrs</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card card-custom p-4">
+        <h4 class="fw-bold mb-3"><i class="bi bi-megaphone me-2"></i>Barangay Announcements</h4>
+        ${announcements.rows.map(a => `
+          <div class="border-bottom pb-3 mb-3">
+            <h5 class="fw-bold">${a.title}</h5>
+            <small class="text-muted">${new Date(a.created_at).toLocaleDateString()}</small>
+            <p class="mt-2 mb-0">${a.content}</p>
+          </div>
+        `).join('') || '<p class="text-muted">No recent announcements.</p>'}
       </div>
     `, 'resident', req.session));
+
   } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
+    console.error(err);
+    res.status(500).send(renderErrorPage('Error', 'Failed to load dashboard.'));
   }
 });
 
 app.get('/resident/profile', requireAuth, requireResident, async (req, res) => {
-  try {
-    const resident = (await pool.query("SELECT * FROM residents WHERE id = $1", [req.session.residentId])).rows[0];
-    res.send(renderLayout('My Profile', `
-      <div class="card">
-        <h2>My Resident Profile</h2>
-        <table style="max-width: 800px;">
-          <tr><th>Full Name</th><td>${resident.first_name} ${resident.middle_name || ''} ${resident.last_name} ${resident.suffix || ''}</td></tr>
-          <tr><th>Resident ID</th><td>${resident.resident_id}</td></tr>
-          <tr><th>Birthdate</th><td>${resident.birthdate.toISOString().split('T')[0]} (Age: ${calculateAge(resident.birthdate)})</td></tr>
-          <tr><th>Sex / Civil Status</th><td>${resident.sex} / ${resident.civil_status}</td></tr>
-          <tr><th>Address</th><td>${resident.complete_address}</td></tr>
-          <tr><th>Contact Number</th><td>${resident.contact_number}</td></tr>
-          <tr><th>Email</th><td>${resident.email}</td></tr>
-          <tr><th>Occupation</th><td>${resident.occupation || 'N/A'}</td></tr>
-          <tr><th>Emergency Contact</th><td>${resident.emergency_contact_name} (${resident.emergency_contact_number})</td></tr>
-        </table>
-      </div>
-    `, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
+  const residentRes = await db.query('SELECT * FROM residents WHERE user_id = $1', [req.session.userId]);
+  const resident = residentRes.rows[0];
+  const age = calculateAge(resident.birthdate);
 
-app.get('/resident/id', requireAuth, requireResident, async (req, res) => {
-  try {
-    const resident = (await pool.query("SELECT * FROM residents WHERE id = $1", [req.session.residentId])).rows[0];
-    const settings = (await pool.query("SELECT * FROM system_settings WHERE id = 1")).rows[0];
-    res.send(renderLayout('Digital Resident ID', `
-      <div class="card" style="max-width: 450px; margin: auto; border: 2px solid var(--primary); text-align: center; padding: 2rem;">
-        <h3 style="color: var(--primary);">${settings.barangay_name}</h3>
-        <p style="font-size: 0.8rem; color: #64748b;">OFFICIAL DIGITAL RESIDENT ID</p>
-        <div style="margin: 1.5rem 0;">
-          <img src="/uploads/${resident.resident_photo_path || 'default.png'}" alt="Photo" style="width: 120px; height: 120px; object-fit: cover; border-radius: 50%; border: 3px solid var(--primary);">
+  res.send(renderBaseHTML('My Profile', `
+    <div class="card card-custom p-4">
+      <h3 class="fw-bold mb-4">My Resident Profile</h3>
+      <div class="row g-3">
+        <div class="col-md-4 text-center">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="img-thumbnail rounded mb-3" style="max-height: 200px;">
+          <br>
+          <span class="badge bg-primary fs-6">${resident.resident_id_number || 'Unassigned'}</span>
         </div>
-        <h2>${resident.first_name} ${resident.last_name}</h2>
-        <p style="font-weight: bold; color: var(--accent); margin-bottom: 1rem;">${resident.resident_id}</p>
-        <p style="font-size: 0.9rem;">${resident.complete_address}</p>
-        <div style="margin-top: 1.5rem; font-size: 0.8rem; border-top: 1px dashed #cbd5e1; pt: 1rem;">
-          Emergency: ${resident.emergency_contact_name} (${resident.emergency_contact_number})
-        </div>
-      </div>
-      <div style="text-align: center; margin-top: 1rem;">
-        <button onclick="window.print()" class="btn">Print / Save ID Card</button>
-      </div>
-    `, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/qr', requireAuth, requireResident, async (req, res) => {
-  try {
-    const resident = (await pool.query("SELECT * FROM residents WHERE id = $1", [req.session.residentId])).rows[0];
-    res.send(renderLayout('My QR Code', `
-      <div class="card" style="max-width: 400px; margin: auto; text-align: center;">
-        <h2>Resident QR Verification Code</h2>
-        <p style="color: #64748b; margin-bottom: 1.5rem;">Present this secure QR code for official barangay transactions.</p>
-        <div style="background: #f1f5f9; padding: 2rem; border-radius: 8px; display: inline-block;">
-          <h3 style="font-family: monospace; font-size: 1.2rem; color: var(--primary);">${resident.qr_token}</h3>
-        </div>
-        <p style="margin-top: 1.5rem; font-size: 0.85rem; color: #64748b;">Secure Identifier Hash</p>
-      </div>
-    `, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/household', requireAuth, requireResident, async (req, res) => {
-  try {
-    const householdRes = await pool.query(`
-      SELECT h.* FROM households h 
-      JOIN household_members hm ON h.id = hm.household_id 
-      WHERE hm.resident_id = $1
-    `, [req.session.residentId]);
-
-    let membersHtml = '<p>You are not currently assigned to a household.</p>';
-    if (householdRes.rows.length > 0) {
-      const h = householdRes.rows[0];
-      const members = await pool.query(`
-        SELECT r.first_name, r.last_name, hm.relationship, hm.household_position 
-        FROM household_members hm JOIN residents r ON hm.resident_id = r.id 
-        WHERE hm.household_id = $1
-      `, [h.id]);
-
-      membersHtml = `
-        <div class="card">
-          <h3>Household #: ${h.household_number}</h3>
-          <p>Address: ${h.address}</p>
-          <table>
-            <tr><th>Name</th><th>Relationship</th><th>Position</th></tr>
-            ${members.rows.map(m => `<tr><td>${m.first_name}${m.last_name}</td><td>${m.relationship}</td><td>${m.household_position}</td></tr>`).join('')}
+        <div class="col-md-8">
+          <table class="table table-striped">
+            <tr><th>Full Name:</th><td>${resident.first_name} ${resident.middle_name || ''} ${resident.last_name} ${resident.suffix || ''}</td></tr>
+            <tr><th>Birthdate / Age:</th><td>${new Date(resident.birthdate).toLocaleDateString()} (${age} years old)</td></tr>
+            <tr><th>Sex:</th><td>${resident.sex}</td></tr>
+            <tr><th>Civil Status:</th><td>${resident.civil_status}</td></tr>
+            <tr><th>Address:</th><td>${resident.address}</td></tr>
+            <tr><th>Contact:</th><td>${resident.contact_number}</td></tr>
+            <tr><th>Email:</th><td>${resident.email || 'N/A'}</td></tr>
+            <tr><th>Classifications:</th><td>
+              ${resident.is_voter ? '<span class="badge bg-info me-1">Voter</span>' : ''}
+              ${resident.is_senior ? '<span class="badge bg-warning me-1">Senior</span>' : ''}
+              ${resident.is_pwd ? '<span class="badge bg-danger me-1">PWD</span>' : ''}
+              ${resident.is_4ps ? '<span class="badge bg-success me-1">4Ps</span>' : ''}
+            </td></tr>
           </table>
         </div>
-      `;
-    }
-
-    res.send(renderLayout('My Household', membersHtml, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/documents/request', requireAuth, requireResident, async (req, res) => {
-  try {
-    const docs = await pool.query("SELECT * FROM documents WHERE status = 'active'");
-    res.send(renderLayout('Request Document', `
-      <div class="card" style="max-width: 600px; margin: auto;">
-        <h2>Request Barangay Document</h2>
-        <form action="/resident/documents/request" method="POST" enctype="multipart/form-data">
-          <div class="form-group">
-            <label>Document Type</label>
-            <select name="document_type_id" required>
-              ${docs.rows.map(d => `<option value="${d.id}">${d.title} (Fee: ₱${d.fee})</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Purpose of Request</label>
-            <textarea name="purpose" required rows="3" placeholder="Specify complete purpose..."></textarea>
-          </div>
-          <div class="form-group">
-            <label>Upload Supporting Requirement (Valid ID/Proof)</label>
-            <input type="file" name="requirements_file" required>
-          </div>
-          <button type="submit">Submit Request</button>
-        </form>
       </div>
-    `, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.post('/resident/documents/request', upload.single('requirements_file'), async (req, res) => {
-  try {
-    const { document_type_id, purpose } = req.body;
-    const residentId = req.session.residentId;
-    const requestId = 'REQ-' + Date.now();
-    const reqPath = req.file ? req.file.filename : null;
-
-    await pool.query(`
-      INSERT INTO document_requests (request_id, resident_id, document_type_id, purpose, requirements_path, status) 
-      VALUES ($1, $2, $3, $4, $5, 'Pending')
-    `, [requestId, residentId, document_type_id, purpose, reqPath]);
-
-    await logActivity(req.session.userId, 'resident', 'Requested document ' + requestId, 'documents', residentId, req.ip);
-    res.redirect('/resident/requests');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/requests', requireAuth, requireResident, async (req, res) => {
-  try {
-    const requests = await pool.query(`
-      SELECT dr.*, d.title as doc_title FROM document_requests dr 
-      JOIN documents d ON dr.document_type_id = d.id 
-      WHERE dr.resident_id = $1 ORDER BY dr.date_requested DESC
-    `, [req.session.residentId]);
-
-    res.send(renderLayout('My Requests', `
-      <div class="card">
-        <h2>My Document Requests</h2>
-        <table>
-          <tr><th>Request ID</th><th>Document</th><th>Purpose</th><th>Status</th><th>Date</th></tr>
-          ${requests.rows.map(r => `
-            <tr>
-              <td>${r.request_id}</td>
-              <td>${r.doc_title}</td>
-              <td>${r.purpose}</td>
-              <td><span class="badge badge-warning">${r.status}</span></td>
-              <td>${r.date_requested.toISOString().split('T')[0]}</td>
-            </tr>
-          `).join('')}
-        </table>
-      </div>
-    `, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/documents', requireAuth, requireResident, async (req, res) => {
-  try {
-    const completed = await pool.query(`
-      SELECT dr.*, d.title as doc_title FROM document_requests dr 
-      JOIN documents d ON dr.document_type_id = d.id 
-      WHERE dr.resident_id = $1 AND dr.status = 'Completed'
-    `, [req.session.residentId]);
-
-    res.send(renderLayout('My Documents', `
-      <div class="card">
-        <h2>Completed & Issued Documents</h2>
-        <table>
-          <tr><th>Document No.</th><th>Type</th><th>Completed Date</th><th>Action</th></tr>
-          ${completed.rows.map(c => `
-            <tr>
-              <td>${c.document_number || 'N/A'}</td>
-              <td>${c.doc_title}</td>
-              <td>${c.completion_date ? c.completion_date.toISOString().split('T')[0] : 'N/A'}</td>
-              <td><a href="/resident/documents/view/${c.id}" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;">View Document</a></td>
-            </tr>
-          `).join('')}
-        </table>
-      </div>
-    `, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/documents/view/:id', requireAuth, requireResident, async (req, res) => {
-  try {
-    const reqId = req.params.id;
-    const docData = await pool.query(`
-      SELECT dr.*, d.title as doc_title, r.first_name, r.last_name, r.complete_address, r.resident_id 
-      FROM document_requests dr 
-      JOIN documents d ON dr.document_type_id = d.id 
-      JOIN residents r ON dr.resident_id = r.id 
-      WHERE dr.id = $1 AND dr.resident_id = $2 AND dr.status = 'Completed'
-    `, [reqId, req.session.residentId]);
-
-    if (docData.rows.length === 0) return res.status(404).send(renderErrorPage('Not Found', 'Document not found or unauthorized.'));
-    const doc = docData.rows[0];
-    const settings = (await pool.query("SELECT * FROM system_settings WHERE id = 1")).rows[0];
-
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head><title>${doc.doc_title}</title>
-      <style>
-        body { font-family: serif; padding: 3rem; max-width: 800px; margin: auto; background: white; color: black; }
-        .header { text-align: center; border-bottom: 2px solid black; padding-bottom: 1rem; margin-bottom: 2rem; }
-        .content { line-height: 1.8; font-size: 1.1rem; }
-        .footer { margin-top: 4rem; display: flex; justify-content: space-between; }
-        @media print { .no-print { display: none; } }
-      </style>
-      </head>
-      <body>
-        <div class="header">
-          <h3>Republic of the Philippines</h3>
-          <h4>${settings.barangay_name}</h4>
-          <p>${settings.barangay_address}</p>
-          <h2 style="margin-top: 1rem; text-transform: uppercase;">${doc.doc_title}</h2>
-        </div>
-        <div class="content">
-          <p><strong>TO WHOM IT MAY CONCERN:</strong></p>
-          <p style="text-indent: 2rem; margin: 1.5rem 0;">This is to certify that <strong>${doc.first_name} ${doc.last_name}</strong>, with Resident ID <strong>${doc.resident_id}</strong>, is a permanent resident of ${doc.complete_address}.</p>
-          <p style="text-indent: 2rem; margin: 1.5rem 0;">This certification is issued upon the request of the above-named person for the purpose of <strong>${doc.purpose}</strong>.</p>
-          <p>Given this ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} at ${settings.barangay_name}.</p>
-        </div>
-        <div class="footer">
-          <div>Document No: <strong>${doc.document_number}</strong></div>
-          <div style="text-align: center;">___________________________<br><strong>Barangay Captain</strong></div>
-        </div>
-        <div class="no-print" style="margin-top: 3rem; text-align: center;">
-          <button onclick="window.print()" style="padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer;">Print Document</button>
-        </div>
-      </body>
-      </html>
-    `);
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/notifications', requireAuth, requireResident, async (req, res) => {
-  try {
-    const notifs = await pool.query("SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC", [req.session.userId]);
-    res.send(renderLayout('Notifications', `
-      <div class="card">
-        <h2>Notifications</h2>
-        <table>
-          <tr><th>Message</th><th>Date</th></tr>
-          ${notifs.rows.map(n => `<tr><td>${n.message}</td><td>${n.created_at.toISOString().split('T')[0]}</td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/announcements', requireAuth, requireResident, async (req, res) => {
-  try {
-    const ann = await pool.query("SELECT * FROM announcements WHERE status = 'Published' ORDER BY publish_date DESC");
-    res.send(renderLayout('Announcements', `
-      <div class="card">
-        <h2>Barangay Announcements</h2>
-        ${ann.rows.map(a => `
-          <div style="padding: 1rem 0; border-bottom: 1px solid #e2e8f0;">
-            <h3>${a.title}</h3>
-            <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 0.5rem;">Published: ${a.publish_date.toISOString().split('T')[0]}</p>
-            <p>${a.content}</p>
-          </div>
-        `).join('')}
-      </div>
-    `, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/concerns', requireAuth, requireResident, async (req, res) => {
-  try {
-    const concerns = await pool.query("SELECT * FROM concerns WHERE resident_id = $1 ORDER BY created_at DESC", [req.session.residentId]);
-    res.send(renderLayout('Concerns & Requests', `
-      <div class="card">
-        <h2>Submit Concern or Service Request</h2>
-        <form action="/resident/concerns" method="POST">
-          <div class="form-group"><label>Subject</label><input type="text" name="subject" required></div>
-          <div class="form-group"><label>Description / Details</label><textarea name="description" required rows="3"></textarea></div>
-          <button type="submit">Submit Concern</button>
-        </form>
-      </div>
-      <div class="card">
-        <h2>My Submitted Concerns</h2>
-        <table>
-          <tr><th>Subject</th><th>Status</th><th>Response</th></tr>
-          ${concerns.rows.map(c => `<tr><td>${c.subject}</td><td><span class="badge badge-warning">${c.status}</span></td><td>${c.response || 'Pending review'}</td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.post('/resident/concerns', requireAuth, requireResident, async (req, res) => {
-  try {
-    const { subject, description } = req.body;
-    await pool.query("INSERT INTO concerns (resident_id, subject, description) VALUES ($1, $2, $3)", [req.session.residentId, subject, description]);
-    res.redirect('/resident/concerns');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/resident/settings', requireAuth, requireResident, async (req, res) => {
-  res.send(renderLayout('Account Settings', `
-    <div class="card" style="max-width: 500px;">
-      <h2>Change Password</h2>
-      <form action="/resident/settings/password" method="POST">
-        <div class="form-group"><label>Current Password</label><input type="password" name="current_password" required></div>
-        <div class="form-group"><label>New Password</label><input type="password" name="new_password" required></div>
-        <button type="submit">Update Password</button>
-      </form>
     </div>
   `, 'resident', req.session));
 });
 
-app.post('/resident/settings/password', requireAuth, requireResident, async (req, res) => {
-  try {
-    const { current_password, new_password } = req.body;
-    const userRes = await pool.query("SELECT * FROM users WHERE id = $1", [req.session.userId]);
-    const user = userRes.rows[0];
-    const match = await bcrypt.compare(current_password, user.password_hash);
-    if (!match) return res.send(renderErrorPage('Error', 'Incorrect current password.'));
+// Digital Resident ID Card & QR Display
+app.get('/resident/id', requireAuth, requireResident, async (req, res) => {
+  const residentRes = await db.query('SELECT * FROM residents WHERE user_id = $1', [req.session.userId]);
+  const resident = residentRes.rows[0];
 
-    const hashed = await bcrypt.hash(new_password, 10);
-    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [hashed, req.session.userId]);
-    res.send(renderLayout('Success', '<div class="card"><h2>Password Updated Successfully!</h2><a href="/resident/dashboard" class="btn">Dashboard</a></div>', 'resident', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
+  if (resident.status !== 'APPROVED') {
+    return res.send(renderBaseHTML('Digital ID', '<div class="alert alert-info">Your account must be APPROVED by admin before generating Digital ID and QR code.</div>', 'resident', req.session));
   }
-});
 
-// -----------------------------------------------------------------------------
-// ADMIN PORTAL ROUTES
-// -----------------------------------------------------------------------------
-app.get('/admin/dashboard', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const totalRes = (await pool.query("SELECT COUNT(*) FROM residents")).rows[0].count;
-    const totalHouse = (await pool.query("SELECT COUNT(*) FROM households")).rows[0].count;
-    const maleRes = (await pool.query("SELECT COUNT(*) FROM residents WHERE sex = 'Male'")).rows[0].count;
-    const femaleRes = (await pool.query("SELECT COUNT(*) FROM residents WHERE sex = 'Female'")).rows[0].count;
-    const seniorRes = (await pool.query("SELECT COUNT(*) FROM residents WHERE senior_citizen_status = true")).rows[0].count;
-    const pwdRes = (await pool.query("SELECT COUNT(*) FROM residents WHERE pwd_status = true")).rows[0].count;
-    const voterRes = (await pool.query("SELECT COUNT(*) FROM residents WHERE voter_status = true")).rows[0].count;
-    const pendingReg = (await pool.query("SELECT COUNT(*) FROM residents WHERE account_status = 'pending'")).rows[0].count;
-    const pendingDoc = (await pool.query("SELECT COUNT(*) FROM document_requests WHERE status = 'Pending'")).rows[0].count;
-    const blotterOpen = (await pool.query("SELECT COUNT(*) FROM blotter_records WHERE status = 'Open'")).rows[0].count;
+  const qrDataUrl = await QRCode.toDataURL(resident.qr_token || 'INVALID');
 
-    res.send(renderLayout('Admin Dashboard', `
-      <h2>Admin Dashboard Overview</h2>
-      <div class="grid">
-        <div class="stat-card"><h4>Total Residents</h4><div class="value">${totalRes}</div></div>
-        <div class="stat-card"><h4>Total Households</h4><div class="value">${totalHouse}</div></div>
-        <div class="stat-card"><h4>Male / Female</h4><div class="value">${maleRes} / ${femaleRes}</div></div>
-        <div class="stat-card"><h4>Senior Citizens</h4><div class="value">${seniorRes}</div></div>
-        <div class="stat-card"><h4>PWD Residents</h4><div class="value">${pwdRes}</div></div>
-        <div class="stat-card"><h4>Registered Voters</h4><div class="value">${voterRes}</div></div>
-        <div class="stat-card"><h4>Pending Registrations</h4><div class="value">${pendingReg}</div></div>
-        <div class="stat-card"><h4>Pending Document Requests</h4><div class="value">${pendingDoc}</div></div>
-        <div class="stat-card"><h4>Active Blotter Cases</h4><div class="value">${blotterOpen}</div></div>
+  res.send(renderBaseHTML('Digital Resident ID', `
+    <div class="d-flex flex-column align-items-center py-4">
+      <div class="id-card-wrap mb-4" id="printableCard">
+        <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+          <div>
+            <h6 class="fw-bold mb-0 text-uppercase">Republic of the Philippines</h6>
+            <small>Barangay Resident Identity Card</small>
+          </div>
+          <i class="bi bi-shield-fill-check display-6"></i>
+        </div>
+        <div class="row align-items-center">
+          <div class="col-4 text-center">
+            <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded border border-2 border-white" width="90" height="90" style="object-fit:cover;">
+          </div>
+          <div class="col-8">
+            <h5 class="fw-bold mb-1">${resident.first_name} ${resident.last_name}</h5>
+            <small class="d-block text-light">ID: ${resident.resident_id_number}</small>
+            <small class="d-block text-light">${resident.address}</small>
+          </div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+          <img src="${qrDataUrl}" width="65" height="65" class="bg-white p-1 rounded">
+          <div class="text-end">
+            <span class="badge bg-success">OFFICIAL VERIFIED</span>
+          </div>
+        </div>
       </div>
-    `, 'admin', req.session));
+
+      <button onclick="window.print()" class="btn btn-gov no-print"><i class="bi bi-printer me-2"></i>Print Digital ID Card</button>
+    </div>
+  `, 'resident', req.session));
+});
+
+// Document Request Page for Residents
+app.get('/resident/documents', requireAuth, requireResident, async (req, res) => {
+  const residentRes = await db.query('SELECT id FROM residents WHERE user_id = $1', [req.session.userId]);
+  const residentId = residentRes.rows[0].id;
+
+  const docTypes = await db.query('SELECT * FROM document_types WHERE is_active = true');
+  const myRequests = await db.query(`
+    SELECT dr.*, dt.title as doc_title 
+    FROM document_requests dr 
+    JOIN document_types dt ON dr.document_type_id = dt.id 
+    WHERE dr.resident_id = $1 ORDER BY dr.created_at DESC
+  `, [residentId]);
+
+  res.send(renderBaseHTML('Request Documents', `
+    <div class="row g-4">
+      <div class="col-md-5">
+        <div class="card card-custom p-4">
+          <h4 class="fw-bold mb-3">New Document Request</h4>
+          <form action="/api/resident/request-document" method="POST" enctype="multipart/form-data">
+            <div class="mb-3">
+              <label class="form-label">Document Type *</label>
+              <select name="document_type_id" class="form-select" required>
+                ${docTypes.rows.map(d => `<option value="${d.id}">${d.title} (Fee: ₱${d.fee})</option>`).join('')}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Purpose *</label>
+              <textarea name="purpose" class="form-control" rows="3" required placeholder="Specify purpose of clearance/certificate"></textarea>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Upload Requirement Document (JPG/PNG/PDF)</label>
+              <input type="file" name="requirements" class="form-control" accept="image/*,.pdf">
+            </div>
+            <button type="submit" class="btn btn-gov w-100 fw-bold">Submit Document Request</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="col-md-7">
+        <div class="card card-custom p-4">
+          <h4 class="fw-bold mb-3">My Request History</h4>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead>
+                <tr>
+                  <th>Req #</th>
+                  <th>Document</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${myRequests.rows.map(r => `
+                  <tr>
+                    <td><small class="fw-bold">${r.request_number}</small></td>
+                    <td>${r.doc_title}</td>
+                    <td><span class="badge bg-${r.status === 'Completed' ? 'success' : r.status === 'Approved' ? 'primary' : 'warning'}">${r.status}</span></td>
+                    <td><small>${new Date(r.created_at).toLocaleDateString()}</small></td>
+                  </tr>
+                `).join('') || '<tr><td colspan="4" class="text-center text-muted">No requests found.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  `, 'resident', req.session));
+});
+
+// Post Request API
+app.post('/api/resident/request-document', requireAuth, requireResident, upload.single('requirements'), async (req, res) => {
+  try {
+    const residentRes = await db.query('SELECT id FROM residents WHERE user_id = $1', [req.session.userId]);
+    const residentId = residentRes.rows[0].id;
+    const { document_type_id, purpose } = req.body;
+    const reqNum = 'REQ-' + Date.now().toString().slice(-6);
+    const reqFileUrl = req.file ? `/uploads/${req.file.filename}` : null;
+
+    await db.query(`
+      INSERT INTO document_requests (request_number, resident_id, document_type_id, purpose, requirements_file_url)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [reqNum, residentId, document_type_id, purpose, reqFileUrl]);
+
+    await logActivity(req.session.userId, req.session.username, 'RESIDENT', 'REQUEST_DOCUMENT', `Requested document req #${reqNum}`);
+    res.redirect('/resident/documents');
   } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
+    console.error(err);
+    res.status(500).send(renderErrorPage('Error', 'Failed to process document request.'));
   }
 });
 
-app.get('/admin/residents', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const search = req.query.search || '';
-    const residents = await pool.query(`
-      SELECT * FROM residents 
-      WHERE first_name ILIKE $1 OR last_name ILIKE $1 OR resident_id ILIKE $1 
-      ORDER BY created_at DESC LIMIT 50
-    `, [`%${search}%`]);
+// Household Profile View for Resident
+app.get('/resident/household', requireAuth, requireResident, async (req, res) => {
+  const residentRes = await db.query('SELECT id FROM residents WHERE user_id = $1', [req.session.userId]);
+  const residentId = residentRes.rows[0].id;
 
-    res.send(renderLayout('Resident Management', `
-      <div class="card">
-        <h2>Resident Management</h2>
-        <form method="GET" style="flex-direction: row; gap: 0.5rem; margin-bottom: 1rem;">
-          <input type="text" name="search" placeholder="Search by name or ID..." value="${search}">
-          <button type="submit" style="width: auto;">Search</button>
-        </form>
-        <table>
-          <tr><th>Resident ID</th><th>Name</th><th>Sex</th><th>Contact</th><th>Status</th><th>Actions</th></tr>
-          ${residents.rows.map(r => `
+  const hhRes = await db.query(`
+    SELECT h.*, hm.relationship_to_head 
+    FROM household_members hm 
+    JOIN households h ON hm.household_id = h.id 
+    WHERE hm.resident_id = $1
+  `, [residentId]);
+
+  if (hhRes.rows.length === 0) {
+    return res.send(renderBaseHTML('Household Information', `
+      <div class="card card-custom p-4 text-center">
+        <h4>No Household Profile Assigned</h4>
+        <p class="text-muted">You are currently not associated with a registered household record in the barangay database.</p>
+      </div>
+    `, 'resident', req.session));
+  }
+
+  const household = hhRes.rows[0];
+  const members = await db.query(`
+    SELECT r.first_name, r.last_name, hm.relationship_to_head 
+    FROM household_members hm 
+    JOIN residents r ON hm.resident_id = r.id 
+    WHERE hm.household_id = $1
+  `, [household.id]);
+
+  res.send(renderBaseHTML('Household Profile', `
+    <div class="card card-custom p-4">
+      <h3 class="fw-bold mb-3">Household #: ${household.household_number}</h3>
+      <p class="text-muted">Address: ${household.address}</p>
+      
+      <h5 class="fw-bold mt-4 mb-3">Household Members</h5>
+      <ul class="list-group">
+        ${members.rows.map(m => `
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            ${m.first_name}${m.last_name}
+            <span class="badge bg-secondary">${m.relationship_to_head}</span>
+          </li>
+        `).join('')}
+      </ul>
+    </div>
+  `, 'resident', req.session));
+});
+
+// Notifications View
+app.get('/resident/notifications', requireAuth, requireResident, async (req, res) => {
+  const notifs = await db.query('SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC', [req.session.userId]);
+  await db.query('UPDATE notifications SET is_read = true WHERE user_id = $1', [req.session.userId]);
+
+  res.send(renderBaseHTML('Notifications', `
+    <div class="card card-custom p-4">
+      <h3 class="fw-bold mb-3">System Notifications</h3>
+      <div class="list-group">
+        ${notifs.rows.map(n => `
+          <div class="list-group-item">
+            <h6 class="fw-bold mb-1">${n.title}</h6>
+            <p class="mb-1">${n.message}</p>
+            <small class="text-muted">${new Date(n.created_at).toLocaleString()}</small>
+          </div>
+        `).join('') || '<div class="text-muted p-3 text-center">No notifications available.</div>'}
+      </div>
+    </div>
+  `, 'resident', req.session));
+});
+
+// Resident Concerns & Feedback View
+app.get('/resident/concerns', requireAuth, requireResident, async (req, res) => {
+  const residentRes = await db.query('SELECT id FROM residents WHERE user_id = $1', [req.session.userId]);
+  const residentId = residentRes.rows[0].id;
+
+  const concerns = await db.query('SELECT * FROM resident_concerns WHERE resident_id = $1 ORDER BY created_at DESC', [residentId]);
+
+  res.send(renderBaseHTML('Resident Concerns', `
+    <div class="row g-4">
+      <div class="col-md-5">
+        <div class="card card-custom p-4">
+          <h4 class="fw-bold mb-3">Submit Concern / Feedback</h4>
+          <form action="/api/resident/submit-concern" method="POST">
+            <div class="mb-3">
+              <label class="form-label">Subject *</label>
+              <input type="text" name="subject" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Detailed Description *</label>
+              <textarea name="description" class="form-control" rows="4" required></textarea>
+            </div>
+            <button type="submit" class="btn btn-gov w-100 fw-bold">Submit Concern</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="col-md-7">
+        <div class="card card-custom p-4">
+          <h4 class="fw-bold mb-3">Submitted Concerns History</h4>
+          <div class="list-group">
+            ${concerns.rows.map(c => `
+              <div class="list-group-item">
+                <div class="d-flex justify-content-between">
+                  <h6 class="fw-bold">${c.subject}</h6>
+                  <span class="badge bg-info">${c.status}</span>
+                </div>
+                <p class="mb-1">${c.description}</p>${c.response ? `<div class="bg-light p-2 rounded mt-2"><small><strong>Response:</strong> ${c.response}</small></div>` : ''}
+              </div>
+            `).join('') || '<p class="text-muted">No concerns recorded.</p>'}
+          </div>
+        </div>
+      </div>
+    </div>
+  `, 'resident', req.session));
+});
+
+app.post('/api/resident/submit-concern', requireAuth, requireResident, async (req, res) => {
+  const residentRes = await db.query('SELECT id FROM residents WHERE user_id = $1', [req.session.userId]);
+  const residentId = residentRes.rows[0].id;
+  const { subject, description } = req.body;
+
+  await db.query('INSERT INTO resident_concerns (resident_id, subject, description) VALUES ($1, $2, $3)', [residentId, subject, description]);
+  res.redirect('/resident/concerns');
+});
+
+// ==========================================
+// ADMIN PORTAL ROUTES
+// ==========================================
+
+app.get('/admin/dashboard', requireAuth, requireAdmin, async (req, res) => {
+  const totalResidents = await db.query('SELECT COUNT(*) FROM residents');
+  const pendingRegs = await db.query("SELECT COUNT(*) FROM residents WHERE status = 'PENDING'");
+  const totalHouseholds = await db.query('SELECT COUNT(*) FROM households');
+  const pendingDocs = await db.query("SELECT COUNT(*) FROM document_requests WHERE status = 'Pending'");
+  const openBlotters = await db.query("SELECT COUNT(*) FROM blotter_records WHERE status = 'Open'");
+
+  res.send(renderBaseHTML('Admin Dashboard', `
+    <h2 class="fw-bold mb-4">Barangay Administration Dashboard</h2>
+    
+    <div class="row g-3 mb-4">
+      <div class="col-md-3">
+        <div class="card card-custom p-3 border-start border-primary border-4">
+          <div class="text-muted">Total Residents</div>
+          <div class="display-6 fw-bold text-primary">${totalResidents.rows[0].count}</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card card-custom p-3 border-start border-warning border-4">
+          <div class="text-muted">Pending Registrations</div>
+          <div class="display-6 fw-bold text-warning">${pendingRegs.rows[0].count}</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card card-custom p-3 border-start border-success border-4">
+          <div class="text-muted">Households</div>
+          <div class="display-6 fw-bold text-success">${totalHouseholds.rows[0].count}</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card card-custom p-3 border-start border-danger border-4">
+          <div class="text-muted">Pending Document Requests</div>
+          <div class="display-6 fw-bold text-danger">${pendingDocs.rows[0].count}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-md-6">
+        <div class="card card-custom p-4">
+          <h5 class="fw-bold mb-3">Quick Navigation</h5>
+          <div class="d-grid gap-2">
+            <a href="/admin/residents" class="btn btn-outline-primary text-start"><i class="bi bi-people me-2"></i>Manage Resident Approvals & Records</a>
+            <a href="/admin/document-requests" class="btn btn-outline-success text-start"><i class="bi bi-file-earmark-check me-2"></i>Process Document Requests (${pendingDocs.rows[0].count})</a>
+            <a href="/admin/blotter" class="btn btn-outline-danger text-start"><i class="bi bi-shield-exclamation me-2"></i>View Active Blotter Cases (${openBlotters.rows[0].count})</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="card card-custom p-4">
+          <h5 class="fw-bold mb-3">System Information</h5>
+          <p class="mb-1"><strong>Environment:</strong> ${process.env.NODE_ENV || 'Production/Render'}</p>
+          <p class="mb-1"><strong>Database:</strong> PostgreSQL Persistent Engine</p>
+          <p class="mb-0"><strong>Status:</strong> Active & Fully Operational</p>
+        </div>
+      </div>
+    </div>
+  `, 'admin', req.session));
+});
+
+// Admin Resident Management
+app.get('/admin/residents', requireAuth, requireAdmin, async (req, res) => {
+  const search = req.query.search || '';
+  const filterStatus = req.query.status || '';
+
+  let query = 'SELECT * FROM residents WHERE 1=1';
+  let params = [];
+
+  if (search) {
+    params.push(`%${search}%`);
+    query += ` AND (first_name ILIKE $${params.length} OR last_name ILIKE $${params.length} OR resident_id_number ILIKE $${params.length})`;
+  }
+
+  if (filterStatus) {
+    params.push(filterStatus);
+    query += ` AND status = $${params.length}`;
+  }
+
+  query += ' ORDER BY created_at DESC';
+  const residents = await db.query(query, params);
+
+  res.send(renderBaseHTML('Resident Management', `
+    <div class="card card-custom p-4">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0">Resident Database Management</h3>
+      </div>
+
+      <form method="GET" action="/admin/residents" class="row g-2 mb-4">
+        <div class="col-md-6">
+          <input type="text" name="search" class="form-control" placeholder="Search by name or Resident ID..." value="${search}">
+        </div>
+        <div class="col-md-4">
+          <select name="status" class="form-select">
+            <option value="">All Statuses</option>
+            <option value="PENDING" ${filterStatus === 'PENDING' ? 'selected' : ''}>PENDING</option>
+            <option value="APPROVED" ${filterStatus === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
+            <option value="REJECTED" ${filterStatus === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-gov w-100">Filter</button>
+        </div>
+      </form>
+
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
             <tr>
-              <td>${r.resident_id}</td>
-              <td>${r.first_name}${r.last_name}</td>
-              <td>${r.sex}</td>
-              <td>${r.contact_number}</td>
-              <td><span class="badge badge-success">${r.account_status}</span></td>
-              <td><a href="/admin/residents/${r.id}" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;">View / Approve</a></td>
+              <th>ID Number</th>
+              <th>Full Name</th>
+              <th>Sex</th>
+              <th>Contact</th>
+              <th>Status</th>
+              <th>Actions</th>
             </tr>
-          `).join('')}
+          </thead>
+          <tbody>
+            ${residents.rows.map(r => `
+              <tr>
+                <td><strong>${r.resident_id_number || 'N/A'}</strong></td>
+                <td>${r.first_name}${r.last_name}</td>
+                <td>${r.sex}</td>
+                <td>${r.contact_number}</td>
+                <td><span class="badge bg-${r.status === 'APPROVED' ? 'success' : r.status === 'PENDING' ? 'warning' : 'danger'}">${r.status}</span></td>
+                <td>
+                  ${r.status === 'PENDING' ? `
+                    <a href="/api/admin/approve-resident/${r.id}" class="btn btn-sm btn-success me-1">Approve</a>
+                    <a href="/api/admin/reject-resident/${r.id}" class="btn btn-sm btn-danger me-1">Reject</a>
+                  ` : ''}
+                  <a href="/admin/residents/${r.id}" class="btn btn-sm btn-outline-primary">View/Edit</a>
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" class="text-center text-muted">No resident records found.</td></tr>'}
+          </tbody>
         </table>
       </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
+    </div>
+  `, 'admin', req.session));
 });
 
-app.get('/admin/residents/:id', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const r = (await pool.query("SELECT * FROM residents WHERE id = $1", [req.params.id])).rows[0];
-    res.send(renderLayout('Resident Details', `
-      <div class="card">
-        <h2>Resident Review: ${r.first_name} ${r.last_name}</h2>
-        <p>Status: <span class="badge badge-warning">${r.account_status}</span></p>
-        <p>Resident ID: ${r.resident_id}</p>
-        <p>Address: ${r.complete_address}</p>
-        <p>Contact: ${r.contact_number} | Email: ${r.email}</p>
-        ${r.account_status === 'pending' ? `
-          <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
-            <a href="/admin/residents/${r.id}/approve" class="btn btn-success">Approve Registration</a>
-            <a href="/admin/residents/${r.id}/reject" class="btn btn-danger">Reject Registration</a>
-          </div>
-        ` : ''}
-      </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/admin/residents/:id/approve', requireAuth, requireAdmin, async (req, res) => {
+// Admin Approve Resident
+app.get('/api/admin/approve-resident/:id', requireAuth, requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const resId = req.params.id;
-    await client.query("UPDATE residents SET account_status = 'approved' WHERE id = $1", [resId]);
-    const rData = (await client.query("SELECT user_id FROM residents WHERE id = $1", [resId])).rows[0];
-    if (rData && rData.user_id) {
-      await client.query("UPDATE users SET status = 'active' WHERE id = $1", [rData.user_id]);
-      await client.query("INSERT INTO notifications (user_id, message) VALUES ($1, $2)", [rData.user_id, 'Your resident registration has been approved!']);
+    const residentId = req.params.id;
+
+    // Generate Unique Resident ID
+    const year = new Date().getFullYear();
+    const resIdNumber = `BRGY-${year}-${String(residentId).padStart(6, '0')}`;
+    const qrToken = `BRGY-QR-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+
+    const residentRes = await client.query(`
+      UPDATE residents 
+      SET status = 'APPROVED', resident_id_number = $1, qr_token = $2 
+      WHERE id = $3 RETURNING user_id
+    `, [resIdNumber, qrToken, residentId]);
+
+    const userId = residentRes.rows[0]?.user_id;
+    if (userId) {
+      await client.query("UPDATE users SET status = 'ACTIVE' WHERE id = $1", [userId]);
+      await client.query(
+        "INSERT INTO notifications (user_id, title, message) VALUES ($1, 'Account Approved', 'Your resident account registration has been approved!')",
+        [userId]
+      );
     }
+
     await client.query('COMMIT');
-    await logActivity(req.session.userId, 'admin', 'Approved resident ID ' + resId, 'residents', resId, req.ip);
+    await logActivity(req.session.userId, req.session.username, 'ADMIN', 'APPROVE_RESIDENT', `Approved resident ID ${residentId}`);
     res.redirect('/admin/residents');
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(500).send(renderErrorPage('Error', err.message));
+    console.error(err);
+    res.status(500).send(renderErrorPage('Error', 'Failed to approve resident.'));
   } finally {
     client.release();
   }
 });
 
-app.get('/admin/accounts', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const users = await pool.query("SELECT * FROM users ORDER BY created_at DESC");
-    res.send(renderLayout('User Accounts', `
-      <div class="card">
-        <h2>System User Accounts</h2>
-        <table>
-          <tr><th>Username</th><th>Role</th><th>Status</th><th>Created</th></tr>
-          ${users.rows.map(u => `<tr><td>${u.username}</td><td>${u.role}</td><td>${u.status}</td><td>${u.created_at.toISOString().split('T')[0]}</td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/admin/households', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const households = await pool.query("SELECT * FROM households");
-    res.send(renderLayout('Household Management', `
-      <div class="card">
-        <h2>Households</h2>
-        <form action="/admin/households" method="POST" style="max-width: 500px; margin-bottom: 2rem;">
-          <h3>Create Household</h3>
-          <div class="form-group"><label>Household Number</label><input type="text" name="household_number" required></div>
-          <div class="form-group"><label>Address</label><textarea name="address" required rows="2"></textarea></div>
-          <button type="submit">Create Household</button>
-        </form>
-        <table>
-          <tr><th>Household No.</th><th>Address</th></tr>
-          ${households.rows.map(h => `<tr><td>${h.household_number}</td><td>${h.address}</td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.post('/admin/households', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { household_number, address } = req.body;
-    await pool.query("INSERT INTO households (household_number, address) VALUES ($1, $2)", [household_number, address]);
-    res.redirect('/admin/households');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/admin/staff', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    res.send(renderLayout('Staff Management', `
-      <div class="card" style="max-width: 500px;">
-        <h2>Create Staff Account</h2>
-        <form action="/admin/staff" method="POST">
-          <div class="form-group"><label>Username</label><input type="text" name="username" required></div>
-          <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
-          <button type="submit" style="background: #0f766e;">Create Staff</button>
-        </form>
-      </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.post('/admin/staff', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    const hashed = await bcrypt.hash(password, 10);
-    await pool.query("INSERT INTO users (username, password_hash, role, status) VALUES ($1, $2, 'staff', 'active')", [username, hashed]);
-    res.redirect('/admin/staff');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/admin/officials', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const officials = await pool.query("SELECT * FROM officials");
-    res.send(renderLayout('Barangay Officials', `
-      <div class="card">
-        <h2>Officials</h2>
-        <form action="/admin/officials" method="POST" style="max-width: 500px; margin-bottom: 2rem;">
-          <h3>Add Official</h3>
-          <div class="form-group"><label>Full Name</label><input type="text" name="full_name" required></div>
-          <div class="form-group"><label>Position</label><input type="text" name="position" required></div>
-          <div class="form-group"><label>Contact</label><input type="text" name="contact"></div>
-          <button type="submit">Add Official</button>
-        </form>
-        <table>
-          <tr><th>Name</th><th>Position</th><th>Contact</th></tr>
-          ${officials.rows.map(o => `<tr><td>${o.full_name}</td><td>${o.position}</td><td>${o.contact || 'N/A'}</td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.post('/admin/officials', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { full_name, position, contact } = req.body;
-    await pool.query("INSERT INTO officials (full_name, position, contact) VALUES ($1, $2, $3)", [full_name, position, contact]);
-    res.redirect('/admin/officials');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/admin/documents', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const docs = await pool.query("SELECT * FROM documents");
-    res.send(renderLayout('Document Types', `
-      <div class="card">
-        <h2>Manage Document Types</h2>
-        <table>
-          <tr><th>Title</th><th>Code</th><th>Fee</th></tr>
-          ${docs.rows.map(d => `<tr><td>${d.title}</td><td>${d.code}</td><td>₱${d.fee}</td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
+// Admin Document Processing
 app.get('/admin/document-requests', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const requests = await pool.query(`
-      SELECT dr.*, d.title as doc_title, r.first_name, r.last_name 
-      FROM document_requests dr 
-      JOIN documents d ON dr.document_type_id = d.id 
-      JOIN residents r ON dr.resident_id = r.id 
-      ORDER BY dr.date_requested DESC
-    `);
+  const requests = await db.query(`
+    SELECT dr.*, r.first_name, r.last_name, dt.title as doc_title
+    FROM document_requests dr
+    JOIN residents r ON dr.resident_id = r.id
+    JOIN document_types dt ON dr.document_type_id = dt.id
+    ORDER BY dr.created_at DESC
+  `);
 
-    res.send(renderLayout('Document Requests', `
-      <div class="card">
-        <h2>Document Requests Management</h2>
-        <table>
-          <tr><th>Request ID</th><th>Resident</th><th>Document</th><th>Status</th><th>Action</th></tr>
-          ${requests.rows.map(r => `
+  res.send(renderBaseHTML('Document Processing', `
+    <div class="card card-custom p-4">
+      <h3 class="fw-bold mb-4">Document Request Processing</h3>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
             <tr>
-              <td>${r.request_id}</td>
-              <td>${r.first_name}${r.last_name}</td>
-              <td>${r.doc_title}</td>
-              <td><span class="badge badge-warning">${r.status}</span></td>
-              <td><a href="/admin/document-requests/${r.id}" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;">Process</a></td>
+              <th>Req #</th>
+              <th>Resident Name</th>
+              <th>Document</th>
+              <th>Purpose</th>
+              <th>Status</th>
+              <th>Actions</th>
             </tr>
-          `).join('')}
+          </thead>
+          <tbody>
+            ${requests.rows.map(r => `
+              <tr>
+                <td><strong>${r.request_number}</strong></td>
+                <td>${r.first_name}${r.last_name}</td>
+                <td>${r.doc_title}</td>
+                <td>${r.purpose}</td>
+                <td><span class="badge bg-${r.status === 'Completed' ? 'success' : 'warning'}">${r.status}</span></td>
+                <td>
+                  <form action="/api/admin/update-doc-status" method="POST" class="d-flex gap-1">
+                    <input type="hidden" name="request_id" value="${r.id}">
+                    <select name="status" class="form-select form-select-sm" style="width: auto;">
+                      <option value="Pending" ${r.status === 'Pending' ? 'selected' : ''}>Pending</option>
+                      <option value="Approved" ${r.status === 'Approved' ? 'selected' : ''}>Approved</option>
+                      <option value="Completed" ${r.status === 'Completed' ? 'selected' : ''}>Completed</option>
+                      <option value="Rejected" ${r.status === 'Rejected' ? 'selected' : ''}>Rejected</option>
+                    </select>
+                    <button type="submit" class="btn btn-sm btn-gov">Update</button>
+                    ${r.status === 'Completed' || r.status === 'Approved' ? `<a href="/admin/print-document/${r.id}" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer"></i></a>` : ''}
+                  </form>
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" class="text-center text-muted">No document requests found.</td></tr>'}
+          </tbody>
         </table>
       </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
+    </div>
+  `, 'admin', req.session));
 });
 
-app.get('/admin/document-requests/:id', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const rId = req.params.id;
-    const reqData = (await pool.query(`
-      SELECT dr.*, d.title as doc_title, r.first_name, r.last_name 
-      FROM document_requests dr 
-      JOIN documents d ON dr.document_type_id = d.id 
-      JOIN residents r ON dr.resident_id = r.id 
-      WHERE dr.id = $1
-    `, [rId])).rows[0];
+app.post('/api/admin/update-doc-status', requireAuth, requireAdmin, async (req, res) => {
+  const { request_id, status } = req.body;
+  await db.query('UPDATE document_requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [status, request_id]);
+  await logActivity(req.session.userId, req.session.username, 'ADMIN', 'UPDATE_DOC_STATUS', `Updated document req ${request_id} to ${status}`);
+  res.redirect('/admin/document-requests');
+});
 
-    res.send(renderLayout('Process Request', `
-      <div class="card" style="max-width: 600px;">
-        <h2>Process Request: ${reqData.request_id}</h2>
-        <p>Resident: ${reqData.first_name} ${reqData.last_name}</p>
-        <p>Document: ${reqData.doc_title}</p>
-        <p>Purpose: ${reqData.purpose}</p>
-        <form action="/admin/document-requests/${rId}/complete" method="POST" style="margin-top: 1.5rem;">
-          <button type="submit" class="btn-success">Approve & Complete Document</button>
-        </form>
+// Document Printable Generation
+app.get('/admin/print-document/:id', requireAuth, requireStaff, async (req, res) => {
+  const reqRes = await db.query(`
+    SELECT dr.*, r.first_name, r.middle_name, r.last_name, r.address, dt.title as doc_title
+    FROM document_requests dr
+    JOIN residents r ON dr.resident_id = r.id
+    JOIN document_types dt ON dr.document_type_id = dt.id
+    WHERE dr.id = $1
+  `, [req.params.id]);
+
+  if (reqRes.rows.length === 0) return res.status(404).send('Document not found');
+
+  const doc = reqRes.rows[0];
+  const settings = (await db.query('SELECT * FROM system_settings LIMIT 1')).rows[0];
+
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Official Document - ${doc.doc_title}</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+      <style>
+        body { padding: 40px; font-family: 'Times New Roman', Times, serif; }
+        .cert-border { border: 10px double #0a3663; padding: 40px; height: 90vh; }
+      </style>
+    </head>
+    <body onload="window.print()">
+      <div class="cert-border text-center">
+        <h4 class="fw-bold text-uppercase">Republic of the Philippines</h4>
+        <h3 class="fw-bold text-uppercase">${settings.barangay_name}</h3>
+        <p>${settings.address}</p>
+        <hr class="my-4">
+        
+        <h1 class="fw-bold my-5 text-uppercase">${doc.doc_title}</h1>
+        
+        <p class="fs-5 text-start lh-lg my-5">
+          TO WHOM IT MAY CONCERN:<br><br>
+          This is to certify that <strong>${doc.first_name} ${doc.middle_name || ''} ${doc.last_name}</strong>, legal age, residing at <strong>${doc.address}</strong>, is a bonafide resident of this barangay.<br><br>
+          This certification is issued upon request for the purpose of: <strong>${doc.purpose}</strong>.
+        </p>
+
+        <div class="row mt-5 pt-5">
+          <div class="col-6 text-start">
+            <small>Document #: ${doc.request_number}</small><br>
+            <small>Date Issued: ${new Date().toLocaleDateString()}</small>
+          </div>
+          <div class="col-6 text-center">
+            <div class="border-bottom border-dark mb-1 fw-bold">PUNONG BARANGAY</div>
+            <small>Authorized Official Signature</small>
+          </div>
+        </div>
       </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
+    </body>
+    </html>
+  `);
 });
 
-app.post('/admin/document-requests/:id/complete', requireAuth, requireAdmin, async (req, res) => {
+// Household Management Route
+app.get('/admin/households', requireAuth, requireAdmin, async (req, res) => {
+  const households = await db.query(`
+    SELECT h.*, r.first_name, r.last_name, (SELECT COUNT(*) FROM household_members WHERE household_id = h.id) as total_members
+    FROM households h
+    LEFT JOIN residents r ON h.head_resident_id = r.id
+  `);
+
+  res.send(renderBaseHTML('Household Management', `
+    <div class="card card-custom p-4">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0">Barangay Household Records</h3>
+        <button class="btn btn-gov" data-bs-toggle="modal" data-bs-target="#addHouseholdModal">+ Create Household</button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
+            <tr>
+              <th>HH Number</th>
+              <th>Address</th>
+              <th>Head of Family</th>
+              <th>Members</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${households.rows.map(h => `
+              <tr>
+                <td><strong>${h.household_number}</strong></td>
+                <td>${h.address}</td>
+                <td>${h.first_name ? `${h.first_name} ${h.last_name}` : 'Unassigned'}</td>
+                <td><span class="badge bg-secondary">${h.total_members} Members</span></td>
+                <td><button class="btn btn-sm btn-outline-primary">View Details</button></td>
+              </tr>
+            `).join('') || '<tr><td colspan="5" class="text-center text-muted">No households registered.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal fade" id="addHouseholdModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <form action="/api/admin/create-household" method="POST">
+            <div class="modal-header">
+              <h5 class="modal-title fw-bold">Create New Household</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label">Household Number *</label>
+                <input type="text" name="household_number" class="form-control" required placeholder="HH-2026-001">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Address *</label>
+                <textarea name="address" class="form-control" required></textarea>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-gov">Save Household</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `, 'admin', req.session));
+});
+
+app.post('/api/admin/create-household', requireAuth, requireAdmin, async (req, res) => {
+  const { household_number, address } = req.body;
+  await db.query('INSERT INTO households (household_number, address) VALUES ($1, $2)', [household_number, address]);
+  res.redirect('/admin/households');
+});
+
+// Blotter Records Management
+app.get('/admin/blotter', requireAuth, requireAdmin, async (req, res) => {
+  const blotters = await db.query('SELECT * FROM blotter_records ORDER BY created_at DESC');
+
+  res.send(renderBaseHTML('Blotter Management', `
+    <div class="card card-custom p-4">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0">Barangay Incident & Blotter Records</h3>
+        <button class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#addBlotterModal">+ File New Incident</button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
+            <tr>
+              <th>Case #</th>
+              <th>Complainant</th>
+              <th>Respondent</th>
+              <th>Incident Type</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${blotters.rows.map(b => `
+              <tr>
+                <td><strong>${b.case_number}</strong></td>
+                <td>${b.complainant_name}</td>
+                <td>${b.respondent_name}</td>
+                <td>${b.incident_type}</td>
+                <td><span class="badge bg-${b.status === 'Open' ? 'danger' : 'success'}">${b.status}</span></td>
+                <td>${new Date(b.incident_date).toLocaleDateString()}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" class="text-center text-muted">No blotter cases registered.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal fade" id="addBlotterModal" tabindex="-1">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <form action="/api/admin/create-blotter" method="POST">
+            <div class="modal-header">
+              <h5 class="modal-title fw-bold text-danger">File Incident Blotter</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label">Complainant Name *</label>
+                  <input type="text" name="complainant_name" class="form-control" required>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Respondent Name *</label>
+                  <input type="text" name="respondent_name" class="form-control" required>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Incident Type *</label>
+                  <input type="text" name="incident_type" class="form-control" required placeholder="Noise Disturbance, Theft, etc.">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Incident Date *</label>
+                  <input type="date" name="incident_date" class="form-control" required>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Incident Time *</label>
+                  <input type="time" name="incident_time" class="form-control" required>
+                </div>
+                <div class="col-md-12">
+                  <label class="form-label">Location *</label>
+                  <input type="text" name="location" class="form-control" required>
+                </div>
+                <div class="col-md-12">
+                  <label class="form-label">Description *</label>
+                  <textarea name="description" class="form-control" rows="3" required></textarea>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-danger">File Blotter Record</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `, 'admin', req.session));
+});
+
+app.post('/api/admin/create-blotter', requireAuth, requireAdmin, async (req, res) => {
+  const { complainant_name, respondent_name, incident_type, incident_date, incident_time, location, description } = req.body;
+  const caseNum = 'BLOT-' + Date.now().toString().slice(-6);
+
+  await db.query(`
+    INSERT INTO blotter_records (case_number, complainant_name, respondent_name, incident_type, incident_date, incident_time, location, description, created_by_user_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+  `, [caseNum, complainant_name, respondent_name, incident_type, incident_date, incident_time, location, description, req.session.userId]);
+
+  await logActivity(req.session.userId, req.session.username, 'ADMIN', 'CREATE_BLOTTER', `Filed blotter case #${caseNum}`);
+  res.redirect('/admin/blotter');
+});
+
+// Announcements Route
+app.get('/admin/announcements', requireAuth, requireAdmin, async (req, res) => {
+  const announcements = await db.query('SELECT * FROM announcements ORDER BY created_at DESC');
+
+  res.send(renderBaseHTML('Announcements', `
+    <div class="card card-custom p-4">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0">Manage Community Announcements</h3>
+        <button class="btn btn-gov" data-bs-toggle="modal" data-bs-target="#addAnnouncementModal">+ Post Announcement</button>
+      </div>
+
+      <div class="list-group">
+        ${announcements.rows.map(a => `
+          <div class="list-group-item">
+            <h5 class="fw-bold">${a.title}</h5>
+            <p>${a.content}</p>
+            <small class="text-muted">Posted: ${new Date(a.created_at).toLocaleString()}</small>
+          </div>
+        `).join('') || '<p class="text-muted">No announcements posted.</p>'}
+      </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal fade" id="addAnnouncementModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <form action="/api/admin/create-announcement" method="POST">
+            <div class="modal-header">
+              <h5 class="modal-title fw-bold">New Community Announcement</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label">Title *</label>
+                <input type="text" name="title" class="form-control" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Content *</label>
+                <textarea name="content" class="form-control" rows="4" required></textarea>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-gov">Publish Announcement</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `, 'admin', req.session));
+});
+
+app.post('/api/admin/create-announcement', requireAuth, requireAdmin, async (req, res) => {
+  const { title, content } = req.body;
+  await db.query('INSERT INTO announcements (title, content, created_by_user_id) VALUES ($1, $2, $3)', [title, content, req.session.userId]);
+  res.redirect('/admin/announcements');
+});
+
+// Staff Management Route
+app.get('/admin/staff', requireAuth, requireAdmin, async (req, res) => {
+  const staffList = await db.query(`
+    SELECT u.id, u.username, u.status, sp.full_name, sp.position 
+    FROM users u 
+    JOIN staff_permissions sp ON u.id = sp.user_id 
+    WHERE u.role = 'STAFF'
+  `);
+
+  res.send(renderBaseHTML('Staff Accounts', `
+    <div class="card card-custom p-4">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0">Barangay Staff Account Management</h3>
+        <button class="btn btn-gov" data-bs-toggle="modal" data-bs-target="#addStaffModal">+ Register Staff Account</button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
+            <tr>
+              <th>Staff Name</th>
+              <th>Position</th>
+              <th>Username</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${staffList.rows.map(s => `
+              <tr>
+                <td><strong>${s.full_name}</strong></td>
+                <td>${s.position}</td>
+                <td>${s.username}</td>
+                <td><span class="badge bg-${s.status === 'ACTIVE' ? 'success' : 'danger'}">${s.status}</span></td>
+              </tr>
+            `).join('') || '<tr><td colspan="4" class="text-center text-muted">No staff accounts found.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal fade" id="addStaffModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <form action="/api/admin/create-staff" method="POST">
+            <div class="modal-header">
+              <h5 class="modal-title fw-bold">Create Staff Account</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label">Full Name *</label>
+                <input type="text" name="full_name" class="form-control" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Position *</label>
+                <input type="text" name="position" class="form-control" required placeholder="Document Staff, Clerk, etc.">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Username *</label>
+                <input type="text" name="username" class="form-control" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Password *</label>
+                <input type="password" name="password" class="form-control" required>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-gov">Create Staff User</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `, 'admin', req.session));
+});
+
+app.post('/api/admin/create-staff', requireAuth, requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const rId = req.params.id;
-    const docNum = 'DOC-' + Date.now();
-    await client.query(`
-      UPDATE document_requests 
-      SET status = 'Completed', document_number = $1, completion_date = CURRENT_TIMESTAMP 
-      WHERE id = $2
-    `, [docNum, rId]);
+    const { full_name, position, username, password } = req.body;
+    const hash = await bcrypt.hash(password, 10);
 
-    const reqInfo = (await client.query("SELECT resident_id, user_id FROM residents WHERE id = (SELECT resident_id FROM document_requests WHERE id = $1)", [rId])).rows[0];
-    if (reqInfo) {
-      await client.query("INSERT INTO notifications (user_id, message) VALUES ($1, $2)", [reqInfo.user_id, 'Your requested document has been completed and is ready!']);
-    }
+    const userRes = await client.query(
+      "INSERT INTO users (username, password_hash, role, status) VALUES ($1, $2, 'STAFF', 'ACTIVE') RETURNING id",
+      [username, hash]
+    );
+
+    await client.query(
+      'INSERT INTO staff_permissions (user_id, full_name, position) VALUES ($1, $2, $3)',
+      [userRes.rows[0].id, full_name, position]
+    );
 
     await client.query('COMMIT');
-    res.redirect('/admin/document-requests');
+    res.redirect('/admin/staff');
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(500).send(renderErrorPage('Error', err.message));
+    console.error(err);
+    res.status(500).send(renderErrorPage('Error', 'Failed to create staff account.'));
   } finally {
     client.release();
   }
 });
 
-app.get('/admin/blotter', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const blotters = await pool.query("SELECT * FROM blotter_records ORDER BY created_at DESC");
-    res.send(renderLayout('Blotter Records', `
-      <div class="card">
-        <h2>Blotter Management</h2>
-        <form action="/admin/blotter" method="POST" style="max-width: 600px; margin-bottom: 2rem;">
-          <h3>File Blotter Record</h3>
-          <div class="grid">
-            <div class="form-group"><label>Complainant</label><input type="text" name="complainant" required></div>
-            <div class="form-group"><label>Respondent</label><input type="text" name="respondent" required></div>
-          </div>
-          <div class="grid">
-            <div class="form-group"><label>Incident Type</label><input type="text" name="incident_type" required></div>
-            <div class="form-group"><label>Date / Time</label><input type="date" name="incident_date" required></div>
-          </div>
-          <div class="form-group"><label>Location</label><input type="text" name="location" required></div>
-          <div class="form-group"><label>Description</label><textarea name="description" required rows="2"></textarea></div>
-          <button type="submit">File Case</button>
-        </form>
-        <table>
-          <tr><th>Case No.</th><th>Complainant</th><th>Respondent</th><th>Type</th><th>Status</th></tr>
-          ${blotters.rows.map(b => `<tr><td>${b.case_number}</td><td>${b.complainant}</td><td>${b.respondent}</td><td>${b.incident_type}</td><td><span class="badge badge-warning">${b.status}</span></td></tr>`).join('')}
+// Officials Management
+app.get('/admin/officials', requireAuth, requireAdmin, async (req, res) => {
+  const officials = await db.query('SELECT * FROM officials ORDER BY id ASC');
+
+  res.send(renderBaseHTML('Officials Management', `
+    <div class="card card-custom p-4">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0">Barangay Officials Roster</h3>
+        <button class="btn btn-gov" data-bs-toggle="modal" data-bs-target="#addOfficialModal">+ Add Official</button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
+            <tr>
+              <th>Full Name</th>
+              <th>Position</th>
+              <th>Contact</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${officials.rows.map(o => `
+              <tr>
+                <td><strong>${o.full_name}</strong></td>
+                <td>${o.position}</td>
+                <td>${o.contact_number || 'N/A'}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="3" class="text-center text-muted">No officials configured.</td></tr>'}
+          </tbody>
         </table>
       </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
+    </div>
+
+    <!-- Modal -->
+    <div class="modal fade" id="addOfficialModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <form action="/api/admin/create-official" method="POST">
+            <div class="modal-header">
+              <h5 class="modal-title fw-bold">Add Barangay Official</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label">Full Name *</label>
+                <input type="text" name="full_name" class="form-control" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Position *</label>
+                <input type="text" name="position" class="form-control" required placeholder="Punong Barangay, Councilor">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Contact Number</label>
+                <input type="text" name="contact_number" class="form-control">
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-gov">Save Official</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `, 'admin', req.session));
 });
 
-app.post('/admin/blotter', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { complainant, respondent, incident_type, incident_date, location, description } = req.body;
-    const caseNum = 'BLT-' + Date.now();
-    await pool.query(`
-      INSERT INTO blotter_records (case_number, complainant, respondent, incident_type, incident_date, incident_time, location, description, created_by) 
-      VALUES ($1, $2, $3, $4, $5, '00:00:00', $6, $7, $8)
-    `, [caseNum, complainant, respondent, incident_type, incident_date, location, description, req.session.userId]);
-    res.redirect('/admin/blotter');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
+app.post('/api/admin/create-official', requireAuth, requireAdmin, async (req, res) => {
+  const { full_name, position, contact_number } = req.body;
+  await db.query('INSERT INTO officials (full_name, position, contact_number) VALUES ($1, $2, $3)', [full_name, position, contact_number]);
+  res.redirect('/admin/officials');
 });
 
-app.get('/admin/announcements', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const anns = await pool.query("SELECT * FROM announcements ORDER BY created_at DESC");
-    res.send(renderLayout('Announcements', `
-      <div class="card">
-        <h2>Announcements</h2>
-        <form action="/admin/announcements" method="POST" style="max-width: 600px; margin-bottom: 2rem;">
-          <h3>Create Announcement</h3>
-          <div class="form-group"><label>Title</label><input type="text" name="title" required></div>
-          <div class="form-group"><label>Content</label><textarea name="content" required rows="3"></textarea></div>
-          <button type="submit">Publish Announcement</button>
-        </form>
-        <table>
-          <tr><th>Title</th><th>Date</th><th>Status</th></tr>
-          ${anns.rows.map(a => `<tr><td>${a.title}</td><td>${a.publish_date.toISOString().split('T')[0]}</td><td><span class="badge badge-success">${a.status}</span></td></tr>`).join('')}
+// Activity Logs Route
+app.get('/admin/activity-logs', requireAuth, requireAdmin, async (req, res) => {
+  const logs = await db.query('SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 100');
+
+  res.send(renderBaseHTML('Activity Logs', `
+    <div class="card card-custom p-4">
+      <h3 class="fw-bold mb-4">System Activity Audit Trail</h3>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>User</th>
+              <th>Role</th>
+              <th>Action</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${logs.rows.map(l => `
+              <tr>
+                <td><small>${new Date(l.created_at).toLocaleString()}</small></td>
+                <td><strong>${l.username}</strong></td>
+                <td><span class="badge bg-secondary">${l.role}</span></td>
+                <td><code>${l.action}</code></td>
+                <td><small>${l.details}</small></td>
+              </tr>
+            `).join('')}
+          </tbody>
         </table>
       </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
+    </div>
+  `, 'admin', req.session));
 });
 
-app.post('/admin/announcements', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { title, content } = req.body;
-    await pool.query("INSERT INTO announcements (title, content, created_by) VALUES ($1, $2, $3)", [title, content, req.session.userId]);
-    res.redirect('/admin/announcements');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
+// System Settings Route
+app.get('/admin/settings', requireAuth, requireAdmin, async (req, res) => {
+  const settings = (await db.query('SELECT * FROM system_settings LIMIT 1')).rows[0];
 
-app.get('/admin/notifications', requireAuth, requireAdmin, (req, res) => {
-  res.send(renderLayout('Admin Notifications', '<div class="card"><h2>Notifications Control</h2><p>System notification broadcast hub.</p></div>', 'admin', req.session));
-});
-
-app.get('/admin/qr', requireAuth, requireAdmin, (req, res) => {
-  res.send(renderLayout('QR Scanner', `
-    <div class="card" style="max-width: 500px; text-align: center;">
-      <h2>Resident QR Verification Scanner</h2>
-      <p style="color: #64748b; margin-bottom: 1.5rem;">Enter or scan resident QR token hash to verify profile identity.</p>
-      <form action="/admin/qr/verify" method="POST">
-        <div class="form-group"><input type="text" name="qr_token" placeholder="Paste QR Hash Token..." required></div>
-        <button type="submit">Verify Resident QR</button>
+  res.send(renderBaseHTML('System Settings', `
+    <div class="card card-custom p-4">
+      <h3 class="fw-bold mb-4">Barangay System Configuration</h3>
+      <form action="/api/admin/update-settings" method="POST">
+        <div class="mb-3">
+          <label class="form-label">Barangay Name *</label>
+          <input type="text" name="barangay_name" class="form-control" value="${settings.barangay_name}" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Barangay Address *</label>
+          <textarea name="address" class="form-control" rows="2" required>${settings.address}</textarea>
+        </div>
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <label class="form-label">Contact Number *</label>
+            <input type="text" name="contact_number" class="form-control" value="${settings.contact_number}" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Email Address *</label>
+            <input type="email" name="email" class="form-control" value="${settings.email}" required>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-gov fw-bold">Save System Settings</button>
       </form>
     </div>
   `, 'admin', req.session));
 });
 
-app.post('/admin/qr/verify', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { qr_token } = req.body;
-    const resData = await pool.query("SELECT * FROM residents WHERE qr_token = $1", [qr_token]);
-    if (resData.rows.length === 0) {
-      return res.send(renderErrorPage('Invalid QR', 'Unrecognized or invalid resident QR token.'));
-    }
-    const r = resData.rows[0];
-    res.send(renderLayout('Verification Result', `
-      <div class="card" style="max-width: 500px; text-align: center;">
-        <h2 style="color: var(--success);">Valid Resident Verified</h2>
-        <h3>${r.first_name} ${r.last_name}</h3>
-        <p>Resident ID: <strong>${r.resident_id}</strong></p>
-        <p>Status: <span class="badge badge-success">${r.account_status}</span></p>
-        <p>Address: ${r.complete_address}</p>
-      </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
+app.post('/api/admin/update-settings', requireAuth, requireAdmin, async (req, res) => {
+  const { barangay_name, address, contact_number, email } = req.body;
+  await db.query('UPDATE system_settings SET barangay_name=$1, address=$2, contact_number=$3, email=$4, updated_at=CURRENT_TIMESTAMP', [barangay_name, address, contact_number, email]);
+  res.redirect('/admin/settings');
 });
 
+// Demographics & Master Reports
 app.get('/admin/reports', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const count = (await pool.query("SELECT COUNT(*) FROM residents")).rows[0].count;
-    res.send(renderLayout('Reports', `
-      <div class="card">
-        <h2>Demographic & System Reports</h2>
-        <p>Total Registered Residents in Master List: <strong>${count}</strong></p>
-        <div style="margin-top: 1.5rem;">
-          <button onclick="window.print()" class="btn">Print Report</button>
-        </div>
-      </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
+  const stats = await db.query(`
+    SELECT 
+      COUNT(*) as total,
+      COUNT(*) FILTER (WHERE sex = 'Male') as male,
+      COUNT(*) FILTER (WHERE sex = 'Female') as female,
+      COUNT(*) FILTER (WHERE is_voter = true) as voters,
+      COUNT(*) FILTER (WHERE is_senior = true) as seniors,
+      COUNT(*) FILTER (WHERE is_pwd = true) as pwd,
+      COUNT(*) FILTER (WHERE is_4ps = true) as fourps
+    FROM residents WHERE status = 'APPROVED'
+  `);
 
-app.get('/admin/logs', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const logs = await pool.query("SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 50");
-    res.send(renderLayout('Activity Logs', `
-      <div class="card">
-        <h2>System Activity Logs</h2>
-        <table>
-          <tr><th>Action</th><th>Role</th><th>Module</th><th>Date/Time</th></tr>
-          ${logs.rows.map(l => `<tr><td>${l.action}</td><td>${l.role}</td><td>${l.module}</td><td>${l.created_at.toISOString()}</td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
+  const s = stats.rows[0];
 
-app.get('/admin/backup', requireAuth, requireAdmin, (req, res) => {
-  res.send(renderLayout('Backup Instructions', `
-    <div class="card">
-      <h2>Database Backup & Persistence Information</h2>
-      <p>This system utilizes <strong>Render PostgreSQL</strong> as its permanent storage source of truth.</p>
-      <p style="margin-top: 1rem;">For automated production database backups, use Render's built-in PostgreSQL backup capabilities or standard <code>pg_dump</code> utilities.</p>
+  res.send(renderBaseHTML('System Reports', `
+    <div class="card card-custom p-4">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0">Demographic & Statistical Reports</h3>
+        <a href="/api/admin/export-residents-csv" class="btn btn-outline-success"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Masterlist CSV</a>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-3"><div class="p-3 border rounded text-center"><h5>Total Residents</h5><strong class="fs-3">${s.total}</strong></div></div>
+        <div class="col-md-3"><div class="p-3 border rounded text-center"><h5>Male / Female</h5><strong class="fs-3">${s.male} / ${s.female}</strong></div></div>
+        <div class="col-md-3"><div class="p-3 border rounded text-center"><h5>Voters</h5><strong class="fs-3">${s.voters}</strong></div></div>
+        <div class="col-md-3"><div class="p-3 border rounded text-center"><h5>Seniors</h5><strong class="fs-3">${s.seniors}</strong></div></div>
+      </div>
     </div>
   `, 'admin', req.session));
 });
 
-app.get('/admin/settings', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const settings = (await pool.query("SELECT * FROM system_settings WHERE id = 1")).rows[0];
-    res.send(renderLayout('System Settings', `
-      <div class="card" style="max-width: 600px;">
-        <h2>Barangay Settings</h2>
-        <form action="/admin/settings" method="POST">
-          <div class="form-group"><label>Barangay Name</label><input type="text" name="barangay_name" value="${settings.barangay_name}" required></div>
-          <div class="form-group"><label>Barangay Address</label><input type="text" name="barangay_address" value="${settings.barangay_address}" required></div>
-          <div class="form-group"><label>Contact Number</label><input type="text" name="contact_number" value="${settings.contact_number}"></div>
-          <button type="submit">Save Settings</button>
-        </form>
+// CSV Export Endpoint
+app.get('/api/admin/export-residents-csv', requireAuth, requireAdmin, async (req, res) => {
+  const residents = await db.query('SELECT resident_id_number, first_name, last_name, sex, address, contact_number, status FROM residents');
+  
+  let csv = 'Resident ID,First Name,Last Name,Sex,Address,Contact,Status\n';
+  residents.rows.forEach(r => {
+    csv += `"${r.resident_id_number || ''}","${r.first_name}","${r.last_name}","${r.sex}","${r.address}","${r.contact_number}","${r.status}"\n`;
+  });
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="residents_masterlist.csv"');
+  res.status(200).send(csv);
+});
+
+// ==========================================
+// SHARED QR SCANNER ROUTE (ADMIN & STAFF)
+// ==========================================
+
+app.get(['/admin/qr-scanner', '/staff/qr-scanner'], requireAuth, requireStaff, async (req, res) => {
+  const portalType = req.session.role === 'ADMIN' ? 'admin' : 'staff';
+  res.send(renderBaseHTML('QR Code Verification', `
+    <div class="row justify-content-center">
+      <div class="col-md-8">
+        <div class="card card-custom p-4 text-center">
+          <h3 class="fw-bold mb-3"><i class="bi bi-qr-code-scan me-2"></i>Resident QR Verification Scanner</h3>
+          <p class="text-muted">Scan a resident's QR code using camera or enter QR token manually to verify authenticity.</p>
+          
+          <div id="reader" class="mx-auto border rounded mb-4" style="max-width: 400px;"></div>
+
+          <form action="/api/verify-qr" method="POST" class="row g-2 justify-content-center">
+            <div class="col-8">
+              <input type="text" name="qr_token" id="qrTokenInput" class="form-control" placeholder="Manual QR Token Input" required>
+            </div>
+            <div class="col-4">
+              <button type="submit" class="btn btn-gov w-100">Verify QR</button>
+            </div>
+          </form>
+        </div>
       </div>
-    `, 'admin', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
+    </div>
+
+    <script>
+      function onScanSuccess(decodedText, decodedResult) {
+        document.getElementById('qrTokenInput').value = decodedText;
+      }
+      let html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: {width: 250, height: 250} }, false);
+      html5QrcodeScanner.render(onScanSuccess);
+    </script>
+  `, portalType, req.session));
 });
 
-app.post('/admin/settings', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { barangay_name, barangay_address, contact_number } = req.body;
-    await pool.query("UPDATE system_settings SET barangay_name = $1, barangay_address = $2, contact_number = $3 WHERE id = 1", [barangay_name, barangay_address, contact_number]);
-    res.redirect('/admin/settings');
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
+// Handle QR Verification API
+app.post('/api/verify-qr', requireAuth, requireStaff, async (req, res) => {
+  const { qr_token } = req.body;
+  const result = await db.query('SELECT * FROM residents WHERE qr_token = $1', [qr_token]);
+
+  const portalType = req.session.role === 'ADMIN' ? 'admin' : 'staff';
+
+  if (result.rows.length === 0) {
+    return res.send(renderBaseHTML('QR Scan Result', `
+      <div class="card card-custom p-5 text-center">
+        <i class="bi bi-x-circle text-danger display-1 mb-3"></i>
+        <h2 class="fw-bold text-danger">INVALID OR UNRECOGNIZED QR CODE</h2>
+        <p class="lead text-muted">The scanned QR code token does not match any registered resident in PostgreSQL.</p>
+        <a href="/${portalType}/qr-scanner" class="btn btn-gov mt-3">Scan Another QR Code</a>
+      </div>
+    `, portalType, req.session));
   }
+
+  const resident = result.rows[0];
+  await logActivity(req.session.userId, req.session.username, req.session.role, 'SCAN_QR', `Verified QR for resident ${resident.first_name} ${resident.last_name}`);
+
+  res.send(renderBaseHTML('QR Scan Result', `
+    <div class="card card-custom p-5 text-center">
+      <i class="bi bi-check-circle-fill text-success display-1 mb-3"></i>
+      <h2 class="fw-bold text-success mb-3">VERIFIED RESIDENT RECORD</h2>
+      <div class="row align-items-center justify-content-center text-start">
+        <div class="col-md-3 text-center">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded img-thumbnail" width="120">
+        </div>
+        <div class="col-md-6">
+          <h4>${resident.first_name} ${resident.last_name}</h4>
+          <p class="mb-1"><strong>ID:</strong> ${resident.resident_id_number}</p>
+          <p class="mb-1"><strong>Address:</strong> ${resident.address}</p>
+          <p class="mb-0"><strong>Status:</strong> <span class="badge bg-success">${resident.status}</span></p>
+        </div>
+      </div>
+      <a href="/${portalType}/qr-scanner" class="btn btn-gov mt-4">Scan Next Code</a>
+    </div>
+  `, portalType, req.session));
 });
 
-// -----------------------------------------------------------------------------
-// STAFF PORTAL ROUTES
-// -----------------------------------------------------------------------------
-app.get('/staff/dashboard', requireAuth, requireStaff, (req, res) => {
-  res.send(renderLayout('Staff Dashboard', `
-    <div class="card">
-      <h2>Staff Portal Dashboard</h2>
-      <p>Welcome to the authorized staff module dashboard. Use the sidebar to manage records, requests, and QR scanning.</p>
+// ==========================================
+// STAFF PORTAL DASHBOARD & ROUTES
+// ==========================================
+
+app.get('/staff/dashboard', requireAuth, requireStaff, async (req, res) => {
+  const pendingDocs = await db.query("SELECT COUNT(*) FROM document_requests WHERE status = 'Pending'");
+  const totalResidents = await db.query("SELECT COUNT(*) FROM residents WHERE status = 'APPROVED'");
+
+  res.send(renderBaseHTML('Staff Dashboard', `
+    <h2 class="fw-bold mb-4">Barangay Staff Operations Dashboard</h2>
+    <div class="row g-3 mb-4">
+      <div class="col-md-6">
+        <div class="card card-custom p-3 border-start border-primary border-4">
+          <div class="text-muted">Total Approved Residents</div>
+          <div class="display-6 fw-bold text-primary">${totalResidents.rows[0].count}</div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card card-custom p-3 border-start border-warning border-4">
+          <div class="text-muted">Pending Documents To Process</div>
+          <div class="display-6 fw-bold text-warning">${pendingDocs.rows[0].count}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card card-custom p-4">
+      <h5 class="fw-bold mb-3">Quick Staff Tasks</h5>
+      <div class="d-flex gap-2">
+        <a href="/staff/document-requests" class="btn btn-gov"><i class="bi bi-file-earmark-text me-1"></i>Process Document Requests</a>
+        <a href="/staff/qr-scanner" class="btn btn-outline-success"><i class="bi bi-qr-code-scan me-1"></i>Launch QR Scanner</a>
+      </div>
     </div>
   `, 'staff', req.session));
 });
 
 app.get('/staff/residents', requireAuth, requireStaff, async (req, res) => {
-  try {
-    const residents = await pool.query("SELECT * FROM residents ORDER BY created_at DESC LIMIT 50");
-    res.send(renderLayout('Staff Residents', `
-      <div class="card">
-        <h2>Resident Records</h2>
-        <table>
-          <tr><th>Resident ID</th><th>Name</th><th>Sex</th><th>Contact</th></tr>
-          ${residents.rows.map(r => `<tr><td>${r.resident_id}</td><td>${r.first_name}${r.last_name}</td><td>${r.sex}</td><td>${r.contact_number}</td></tr>`).join('')}
+  const residents = await db.query("SELECT * FROM residents WHERE status = 'APPROVED' ORDER BY first_name ASC");
+  res.send(renderBaseHTML('Residents List', `
+    <div class="card card-custom p-4">
+      <h3 class="fw-bold mb-4">Approved Barangay Resident Directory</h3>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
+            <tr>
+              <th>Resident ID</th>
+              <th>Name</th>
+              <th>Address</th>
+              <th>Contact</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${residents.rows.map(r => `
+              <tr>
+                <td><strong>${r.resident_id_number}</strong></td>
+                <td>${r.first_name}${r.last_name}</td>
+                <td>${r.address}</td>
+                <td>${r.contact_number}</td>
+              </tr>
+            `).join('')}
+          </tbody>
         </table>
       </div>
-    `, 'staff', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/staff/households', requireAuth, requireStaff, async (req, res) => {
-  try {
-    const households = await pool.query("SELECT * FROM households");
-    res.send(renderLayout('Staff Households', `
-      <div class="card">
-        <h2>Household Records</h2>
-        <table>
-          <tr><th>Household No.</th><th>Address</th></tr>
-          ${households.rows.map(h => `<tr><td>${h.household_number}</td><td>${h.address}</td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'staff', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/staff/documents', requireAuth, requireStaff, (req, res) => {
-  res.send(renderLayout('Staff Documents', '<div class="card"><h2>Document Types</h2><p>Staff view of available barangay documents.</p></div>', 'staff', req.session));
-});
-
-app.get('/staff/document-requests', requireAuth, requireStaff, async (req, res) => {
-  try {
-    const requests = await pool.query(`
-      SELECT dr.*, d.title as doc_title, r.first_name, r.last_name 
-      FROM document_requests dr 
-      JOIN documents d ON dr.document_type_id = d.id 
-      JOIN residents r ON dr.resident_id = r.id 
-      ORDER BY dr.date_requested DESC
-    `);
-    res.send(renderLayout('Staff Document Requests', `
-      <div class="card">
-        <h2>Document Requests</h2>
-        <table>
-          <tr><th>Request ID</th><th>Resident</th><th>Document</th><th>Status</th></tr>
-          ${requests.rows.map(r => `<tr><td>${r.request_id}</td><td>${r.first_name} ${r.last_name}</td><td>${r.doc_title}</td><td><span class="badge badge-warning">${r.status}</span></td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'staff', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/staff/blotter', requireAuth, requireStaff, async (req, res) => {
-  try {
-    const blotters = await pool.query("SELECT * FROM blotter_records ORDER BY created_at DESC");
-    res.send(renderLayout('Staff Blotter', `
-      <div class="card">
-        <h2>Blotter Records</h2>
-        <table>
-          <tr><th>Case No.</th><th>Complainant</th><th>Respondent</th><th>Status</th></tr>
-          ${blotters.rows.map(b => `<tr><td>${b.case_number}</td><td>${b.complainant}</td><td>${b.respondent}</td><td>${b.status}</td></tr>`).join('')}
-        </table>
-      </div>
-    `, 'staff', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
-});
-
-app.get('/staff/qr', requireAuth, requireStaff, (req, res) => {
-  res.send(renderLayout('Staff QR Scanner', `
-    <div class="card" style="max-width: 500px; text-align: center;">
-      <h2>QR Scanner Module</h2>
-      <form action="/staff/qr/verify" method="POST">
-        <div class="form-group"><input type="text" name="qr_token" placeholder="Enter QR Token Hash..." required></div>
-        <button type="submit">Verify Resident</button>
-      </form>
     </div>
   `, 'staff', req.session));
 });
 
-app.post('/staff/qr/verify', requireAuth, requireStaff, async (req, res) => {
-  try {
-    const { qr_token } = req.body;
-    const resData = await pool.query("SELECT * FROM residents WHERE qr_token = $1", [qr_token]);
-    if (resData.rows.length === 0) return res.send(renderErrorPage('Invalid QR', 'Unrecognized QR token.'));
-    const r = resData.rows[0];
-    res.send(renderLayout('Verification Success', `
-      <div class="card" style="max-width: 500px; text-align: center;">
-        <h3 style="color: var(--success);">Resident Verified</h3>
-        <p>${r.first_name} ${r.last_name} (${r.resident_id})</p>
+app.get('/staff/document-requests', requireAuth, requireStaff, async (req, res) => {
+  const requests = await db.query(`
+    SELECT dr.*, r.first_name, r.last_name, dt.title as doc_title
+    FROM document_requests dr
+    JOIN residents r ON dr.resident_id = r.id
+    JOIN document_types dt ON dr.document_type_id = dt.id
+    ORDER BY dr.created_at DESC
+  `);
+
+  res.send(renderBaseHTML('Staff Document Processing', `
+    <div class="card card-custom p-4">
+      <h3 class="fw-bold mb-4">Staff Document Request Processing</h3>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
+            <tr>
+              <th>Req #</th>
+              <th>Resident</th>
+              <th>Document</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${requests.rows.map(r => `
+              <tr>
+                <td><strong>${r.request_number}</strong></td>
+                <td>${r.first_name}${r.last_name}</td>
+                <td>${r.doc_title}</td>
+                <td><span class="badge bg-info">${r.status}</span></td>
+                <td>
+                  <a href="/admin/print-document/${r.id}" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer me-1"></i>Print Document</a>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
       </div>
-    `, 'staff', req.session));
-  } catch (err) {
-    res.status(500).send(renderErrorPage('Error', err.message));
-  }
+    </div>
+  `, 'staff', req.session));
 });
 
-app.get('/staff/reports', requireAuth, requireStaff, (req, res) => {
-  res.send(renderLayout('Staff Reports', '<div class="card"><h2>Reports</h2><p>Standard demographic and operational reports.</p></div>', 'staff', req.session));
+app.get('/staff/blotter', requireAuth, requireStaff, async (req, res) => {
+  const blotters = await db.query('SELECT * FROM blotter_records ORDER BY created_at DESC');
+  res.send(renderBaseHTML('Blotter View', `
+    <div class="card card-custom p-4">
+      <h3 class="fw-bold mb-4">Blotter Incident Records</h3>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
+            <tr>
+              <th>Case #</th>
+              <th>Complainant</th>
+              <th>Respondent</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${blotters.rows.map(b => `
+              <tr>
+                <td><strong>${b.case_number}</strong></td>
+                <td>${b.complainant_name}</td>
+                <td>${b.respondent_name}</td>
+                <td><span class="badge bg-warning">${b.status}</span></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `, 'staff', req.session));
 });
 
-app.get('/staff/notifications', requireAuth, requireStaff, (req, res) => {
-  res.send(renderLayout('Staff Notifications', '<div class="card"><h2>Notifications</h2><p>Staff operational notifications.</p></div>', 'staff', req.session));
+// Fallback Route for Undefined Paths
+app.use((req, res) => {
+  res.status(404).send(renderErrorPage('404 - Page Not Found', 'The requested page or route does not exist.'));
 });
 
-app.get('/staff/settings', requireAuth, requireStaff, (req, res) => {
-  res.send(renderLayout('Staff Settings', '<div class="card"><h2>Settings</h2><p>Staff account management.</p></div>', 'staff', req.session));
-});
-
-// -----------------------------------------------------------------------------
-// SERVER INITIALIZATION
-// -----------------------------------------------------------------------------
-initializeDatabase().then(() => {
+// Start Application Server
+initDatabase().then(() => {
   app.listen(PORT, () => {
-    console.log(`Barangay Resident Management System running on port ${PORT}`);
+    console.log(`==================================================`);
+    console.log(`Barangay Resident Management System Running`);
+    console.log(`Server Port: ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`==================================================`);
   });
 });
