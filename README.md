@@ -1,51 +1,35 @@
-# Barangay Resident Management System (BRMS)
+# Barangay Resident Management System
 
-A complete, production-ready, monolithic web application built with **Node.js**, **Express.js**, and **PostgreSQL**. Designed specifically for seamless zero-downtime deployment on **Render**.
+A production-ready Barangay Resident Management System built using **Node.js**, **Express.js**, and **PostgreSQL**, designed specifically for deployment on Render.
 
----
+## Features
 
-## Key System Features
-
-1. **Three Separate Portals**:
-   - **Admin Portal (`/admin-login`)**: Full administrative control over resident approvals, household units, blotters, system logs, reports, document issuance, and configurations.
-   - **Staff Portal (`/staff-login`)**: Module-restricted workflow for processing document applications and verifying QR codes.
-   - **Resident Portal (`/resident-login`)**: Mobile-first portal allowing residents to register, request clearances, access their Digital ID, view household structure, and submit feedback.
-
-2. **Digital Resident ID & Verification System**:
-   - Generates digital ID cards featuring encrypted QR tokens.
-   - Built-in live browser camera QR Code Scanner for verification by barangay staff/admin.
-
-3. **Persistent PostgreSQL Integration**:
-   - Automated schema migrations without dropping or resetting tables on server restarts.
-   - Structured PostgreSQL sessions using `connect-pg-simple`.
-
-4. **Security & Ownership**:
-   - Encrypted passwords using `bcryptjs`.
-   - Strict server-side route guards enforcing data isolation per resident.
+- **Three Completely Separate Portals**:
+  - **Admin Portal**: Resident approval, blotter oversight, document approvals, staff/accounts management, audit logs, system settings.
+  - **Staff Portal**: Processing module for documents, resident lookup, household handling, QR code validation, and blotter intake based on role permissions.
+  - **Resident Portal**: Mobile-responsive dashboard, digital ID display, request document certificates, household details, track concerns, view announcements, and retrieve secure QR token.
+- **Persistent Storage**: Uses PostgreSQL as the single source of truth (`DATABASE_URL`).
+- **QR Verification System**: Cryptographically generated individual QR codes without leaking raw sensitive data inside QR code image payloads.
+- **Printable Documents**: Dynamic PDF/Print view generation for official clearances and certifications.
+- **Audit Trails & Security**: Parameterized SQL queries, password hashing using `bcryptjs`, and session management tied to PostgreSQL database tables.
 
 ---
 
 ## Environment Variables
 
-Configure these environment variables on Render or in your local environment:
+Configure the following environment variables in Render or your local environment:
 
 | Variable | Description |
 | :--- | :--- |
-| `DATABASE_URL` | PostgreSQL connection string (Provided by Render PostgreSQL). |
-| `SESSION_SECRET` | Cryptographic key used to sign session cookies. |
-| `INITIAL_ADMIN_PASSWORD` | Optional. Initial password for default `admin` user on first boot (Defaults to `admin123`). |
-| `NODE_ENV` | Set to `production` when deployed. |
+| `DATABASE_URL` | PostgreSQL connection string URL (Render PostgreSQL default). |
+| `SESSION_SECRET` | Secret string used to sign session cookies. |
+| `PORT` | (Optional) Port number for server. Defaults to `3000`. |
 
 ---
 
-## Local Setup & Development
+## Local Installation and Testing
 
-### Prerequisites
-- Node.js (v18 or higher)
-- PostgreSQL Database Server
-
-### Quick Start Instructions
-1. **Clone the repository**:
+1. Clone or extract the application repository.
+2. Install dependencies:
    ```bash
-   git clone <your-repo-url>
-   cd barangay-resident-management-system
+   npm install
