@@ -1,18 +1,18 @@
 {
   "name": "barangay-resident-management-system",
   "version": "1.0.0",
-  "description": "Production-ready persistent Barangay Resident Management System for Node.js + Express + PostgreSQL on Render",
+  "description": "Production Ready Barangay Resident Management System for Node.js, Express, and Render PostgreSQL",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "connect-pg-simple": "^9.0.1",
-    "express": "^4.18.2",
-    "express-session": "^1.17.3",
+    "connect-pg-simple": "^10.0.0",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
     "multer": "^1.4.5-lts.1",
-    "pg": "^8.11.3",
+    "pg": "^8.12.0",
     "qrcode": "^1.5.3"
   },
   "engines": {
