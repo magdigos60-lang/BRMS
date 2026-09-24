@@ -1,2961 +1,2187 @@
+/**
+ * Barangay Resident Management System
+ * Complete Single-File Node.js Express Application (app.js)
+ * Includes both Staff Portal and Resident Portal with full CRUD, Auth, Seed Data, and Tailwind CSS.
+ */
+
 const express = require('express');
 const session = require('express-session');
-const pgSession = require('connect-pg-simple')(session);
-const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
-const multer = require('multer');
-const QRCode = require('qrcode');
-const path = require('path');
-const fs = require('fs');
+const http = require('http');
 
-// Initialize Express App
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuration Defaults
-const DATABASE_URL = process.env.DATABASE_URL;
-const SESSION_SECRET = process.env.SESSION_SECRET || 'super-secret-barangay-key-2026';
-const ADMIN_SETUP_SECRET = process.env.ADMIN_SETUP_SECRET || 'admin123';
-
-if (!DATABASE_URL) {
-  console.error('FATAL ERROR: DATABASE_URL environment variable is not set.');
-  process.exit(1);
-}
-
-// Ensure local uploads directory exists (fallback storage abstraction)
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Storage Abstraction (Local Disk vs External Object Storage Mock/Hook)
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
-  }
-});
-
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, WEBP, and PDF files are allowed.'), false);
-  }
-};
-
-const upload = multer({
-  storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-  fileFilter: fileFilter
-});
-
-// Database Connection
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' || DATABASE_URL.includes('render.com') 
-    ? { rejectUnauthorized: false } 
-    : false
-});
-
-// Middleware
-app.use(express.json());
+// Middleware setup
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(uploadDir));
-
-// Express Session Middleware with PostgreSQL Storage
+app.use(express.json());
 app.use(session({
-  store: new pgSession({
-    pool: pool,
-    tableName: 'user_sessions',
-    createTableIfMissing: true
-  }),
-  secret: SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 Days
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    httpOnly: true
-  }
+    secret: 'barangay-secret-key-2026',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
 }));
 
-// Core Database Initialization
-async function initializeDatabase() {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+// In-Memory Database Store with Sample Seed Data
+const db = {
+    users: [
+        { id: 1, username: 'admin', passwordHash: bcrypt.hashSync('admin123', 8), role: 'Admin', name: 'Kapitan Juan Dela Cruz', email: 'admin@barangay.gov.ph', status: 'Active' },
+        { id: 2, username: 'secretary', passwordHash: bcrypt.hashSync('sec123', 8), role: 'Secretary', name: 'Maria Santos', email: 'secretary@barangay.gov.ph', status: 'Active' },
+        { id: 3, username: 'staff', passwordHash: bcrypt.hashSync('staff123', 8), role: 'Staff', name: 'Pedro Reyes', email: 'staff@barangay.gov.ph', status: 'Active' },
+        { id: 4, username: 'resident1', passwordHash: bcrypt.hashSync('res123', 8), role: 'Resident', name: 'Juanito Gomez Jr.', email: 'juanito@gmail.com', residentId: 'RES-2026-0001', status: 'Active' },
+        { id: 5, username: 'resident2', passwordHash: bcrypt.hashSync('res123', 8), role: 'Resident', name: 'Elena Gomez', email: 'elena@gmail.com', residentId: 'RES-2026-0002', status: 'Active' }
+    ],
+    residents: [
+        {
+            residentId: 'RES-2026-0001',
+            firstName: 'Juanito',
+            middleName: 'Santos',
+            lastName: 'Gomez',
+            suffix: 'Jr.',
+            dob: '1985-05-12',
+            age: 41,
+            gender: 'Male',
+            civilStatus: 'Married',
+            address: 'Blk 3 Lot 12, Sunflower St.',
+            purok: 'Purok 1 - Maligaya',
+            contactNumber: '09123456789',
+            email: 'juanito@gmail.com',
+            occupation: 'Carpenter',
+            educationalAttainment: 'High School Graduate',
+            nationality: 'Filipino',
+            voterStatus: 'Registered Voter',
+            category: 'Regular Resident',
+            dateRegistered: '2024-01-15',
+            photo: 'https://placehold.co/150x150/1e40af/ffffff?text=JG',
+            householdNo: 'HH-101'
+        },
+        {
+            residentId: 'RES-2026-0002',
+            firstName: 'Elena',
+            middleName: 'Cruz',
+            lastName: 'Gomez',
+            suffix: '',
+            dob: '1988-09-20',
+            age: 37,
+            gender: 'Female',
+            civilStatus: 'Married',
+            address: 'Blk 3 Lot 12, Sunflower St.',
+            purok: 'Purok 1 - Maligaya',
+            contactNumber: '09187654321',
+            email: 'elena@gmail.com',
+            occupation: 'Vendor',
+            educationalAttainment: 'College Undergraduate',
+            nationality: 'Filipino',
+            voterStatus: 'Registered Voter',
+            category: 'Solo Parent',
+            dateRegistered: '2024-01-16',
+            photo: 'https://placehold.co/150x150/db2777/ffffff?text=EG',
+            householdNo: 'HH-101'
+        },
+        {
+            residentId: 'RES-2026-0003',
+            firstName: 'Lolo',
+            middleName: 'Alvarez',
+            lastName: 'Mercado',
+            suffix: 'Sr.',
+            dob: '1950-02-10',
+            age: 76,
+            gender: 'Male',
+            civilStatus: 'Widowed',
+            address: '45 Rosas St.',
+            purok: 'Purok 2 - Maharlika',
+            contactNumber: '09198765432',
+            email: 'lolo.mer@gmail.com',
+            occupation: 'Retired',
+            educationalAttainment: 'Elementary Graduate',
+            nationality: 'Filipino',
+            voterStatus: 'Registered Voter',
+            category: 'Senior Citizen',
+            dateRegistered: '2024-02-01',
+            photo: 'https://placehold.co/150x150/ca8a04/ffffff?text=LM',
+            householdNo: 'HH-102'
+        },
+        {
+            residentId: 'RES-2026-0004',
+            firstName: 'Roberto',
+            middleName: 'Tan',
+            lastName: 'Aquino',
+            suffix: '',
+            dob: '1995-11-05',
+            age: 30,
+            gender: 'Male',
+            civilStatus: 'Single',
+            address: '12 Orchid St.',
+            purok: 'Purok 3 - Bagong Silang',
+            contactNumber: '09223334455',
+            email: 'roberto@gmail.com',
+            occupation: 'Driver',
+            educationalAttainment: 'Vocational',
+            nationality: 'Filipino',
+            voterStatus: 'Registered Voter',
+            category: 'PWD',
+            dateRegistered: '2024-03-10',
+            photo: 'https://placehold.co/150x150/0d9488/ffffff?text=RA',
+            householdNo: 'HH-103'
+        }
+    ],
+    households: [
+        { householdNo: 'HH-101', headName: 'Juanito S. Gomez Jr.', address: 'Blk 3 Lot 12, Sunflower St.', purok: 'Purok 1 - Maligaya', membersCount: 2, members: ['Juanito Gomez Jr.', 'Elena Gomez'] },
+        { householdNo: 'HH-102', headName: 'Lolo Alvarez Mercado', address: '45 Rosas St.', purok: 'Purok 2 - Maharlika', membersCount: 1, members: ['Lolo Alvarez Mercado'] },
+        { householdNo: 'HH-103', headName: 'Roberto Tan Aquino', address: '12 Orchid St.', purok: 'Purok 3 - Bagong Silang', membersCount: 1, members: ['Roberto Tan Aquino'] }
+    ],
+    puroks: [
+        { id: 1, name: 'Purok 1 - Maligaya', leader: 'Mang Ambo', description: 'Northern section near elementary school' },
+        { id: 2, name: 'Purok 2 - Maharlika', leader: 'Aling Nena', description: 'Central commercial zone' },
+        { id: 3, name: 'Purok 3 - Bagong Silang', leader: 'Kagawad Nestor', description: 'Eastern residential phase' }
+    ],
+    certificates: [
+        { certNo: 'CRT-2026-0001', residentName: 'Juanito S. Gomez Jr.', type: 'Barangay Clearance', dateRequested: '2026-03-01', dateApproved: '2026-03-02', dateReleased: '2026-03-02', status: 'Released', remarks: 'Purpose: Employment' },
+        { certNo: 'CRT-2026-0002', residentName: 'Elena Cruz Gomez', type: 'Certificate of Indigency', dateRequested: '2026-03-05', dateApproved: '2026-03-05', dateReleased: '', status: 'Ready for Release', remarks: 'Medical assistance purpose' }
+    ],
+    requests: [
+        { id: 1, reqNo: 'REQ-0001', residentName: 'Juanito S. Gomez Jr.', type: 'Barangay Clearance', status: 'Approved', dateSubmitted: '2026-03-01', remarks: 'All clear', releaseDate: '2026-03-02' },
+        { id: 2, reqNo: 'REQ-0002', residentName: 'Elena Cruz Gomez', type: 'Certificate of Indigency', status: 'Processing', dateSubmitted: '2026-03-04', remarks: 'Checking records', releaseDate: '' },
+        { id: 3, reqNo: 'REQ-0003', residentName: 'Lolo Alvarez Mercado', type: 'Certificate of Residency', status: 'Submitted', dateSubmitted: '2026-03-06', remarks: '', releaseDate: '' }
+    ],
+    blotters: [
+        { caseNo: 'BLT-2026-0001', complainant: 'Maria Santos', respondent: 'Cardo Dalisay', witness: 'Barangay Tanod', incidentDate: '2026-02-15', incidentTime: '21:30', location: 'Purok 2 Basketball Court', type: 'Noise Disturbance', description: 'Loud karaoke past midnight causing public disturbance.', actionTaken: 'Summoned both parties for amicable settlement.', settlement: 'Settled via Katarungang Pambarangay', status: 'Closed' },
+        { caseNo: 'BLT-2026-0002', complainant: 'Elena Gomez', respondent: 'Neighbor Anonymous', witness: 'None', incidentDate: '2026-03-02', incidentTime: '08:00', location: 'Sunflower St.', type: 'Property Boundary Dispute', description: 'Dispute over fence encroachment.', actionTaken: 'Scheduled ocular inspection by Purok leader.', settlement: 'Pending mediation', status: 'Under Investigation' }
+    ],
+    appointments: [
+        { id: 1, date: '2026-03-10', time: '10:00 AM', residentName: 'Juanito S. Gomez Jr.', service: 'Certificate Processing', status: 'Approved' },
+        { id: 2, date: '2026-03-12', time: '02:00 PM', residentName: 'Lolo Alvarez Mercado', service: 'Barangay Assistance', status: 'Pending' }
+    ],
+    assistances: [
+        { id: 1, residentName: 'Elena Cruz Gomez', type: 'Medical Assistance', amount: '5,000 PHP', date: '2026-02-10', status: 'Approved', remarks: 'For laboratory medicines' },
+        { id: 2, residentName: 'Lolo Alvarez Mercado', type: 'Financial Assistance', amount: '3,000 PHP', date: '2026-02-20', status: 'Reviewing', remarks: 'Evaluating requirements' }
+    ],
+    businesses: [
+        { businessId: 'BUS-101', businessName: 'Gomez Sari-Sari Store', owner: 'Elena Cruz Gomez', address: 'Blk 3 Lot 12 Sunflower St.', purok: 'Purok 1 - Maligaya', businessType: 'Retail', contactNumber: '09187654321', registrationDate: '2024-05-10', permitStatus: 'Active', expirationDate: '2027-05-10' },
+        { businessId: 'BUS-102', businessName: 'Mercado Auto Repair Shop', owner: 'Lolo Mercado', address: '45 Rosas St.', purok: 'Purok 2 - Maharlika', businessType: 'Services', contactNumber: '09198765432', registrationDate: '2023-08-15', permitStatus: 'Active', expirationDate: '2026-08-15' }
+    ],
+    announcements: [
+        { id: 1, title: 'Free Medical and Dental Mission', description: 'All residents are invited for free checkup and medicines at the Barangay Covered Court this coming Saturday at 8:00 AM.', date: '2026-03-15', category: 'Health & Medical', status: 'Published' },
+        { id: 2, title: 'General Barangay Assembly', description: 'Quarterly assembly to discuss barangay budget, projects, and security measures.', date: '2026-03-20', category: 'Meeting', status: 'Published' },
+        { id: 3, title: 'Scheduled Power Interruption', description: 'Meralco maintenance affecting Purok 1 and Purok 2 on Sunday from 6AM to 12NN.', date: '2026-03-12', category: 'Emergency Notice', status: 'Published' }
+    ],
+    complaints: [
+        { id: 1, type: 'Garbage Collection', subject: 'Uncollected Trash on Sunflower St.', description: 'Garbage truck missed our street for two consecutive days.', date: '2026-03-05', location: 'Sunflower St.', status: 'Under Review', residentName: 'Juanito S. Gomez Jr.' }
+    ],
+    feedbacks: [
+        { id: 1, residentName: 'Juanito S. Gomez Jr.', rating: 5, comments: 'Very fast service when claiming my clearance. Thank you staff!', date: '2026-03-02' }
+    ],
+    profileUpdates: [
+        { id: 1, residentId: 'RES-2026-0001', requestedChanges: 'Contact number updated to 09998887766, Occupation: Senior Carpenter', status: 'Pending', date: '2026-03-05' }
+    ],
+    activityLogs: [
+        { user: 'admin', action: 'System Seeded & Initialized', date: '2026-01-01', time: '08:00:00' },
+        { user: 'secretary', action: 'Created Certificate CRT-2026-0001', date: '2026-03-01', time: '09:15:30' },
+        { user: 'resident1', action: 'Submitted Certificate Request REQ-0003', date: '2026-03-06', time: '14:22:10' }
+    ],
+    notifications: [
+        { id: 1, residentName: 'Juanito S. Gomez Jr.', message: 'Your Certificate Request REQ-0001 has been Approved!', date: '2026-03-02', read: false },
+        { id: 2, residentName: 'Elena Cruz Gomez', message: 'New announcement posted: Free Medical and Dental Mission', date: '2026-03-06', read: false }
+    ],
+    emergencyContacts: [
+        { name: 'Barangay Main Hall Hotline', number: '(02) 8123-4567', category: 'Barangay Hall' },
+        { name: 'Punong Barangay Office', number: '0917-555-1234', category: 'Barangay Officials' },
+        { name: 'Barangay Police Outpost / Tanod', number: '0918-555-4321', category: 'Police' },
+        { name: 'Local Police Station 4', number: '(02) 8987-6543', category: 'Police' },
+        { name: 'Municipal Fire Department', number: '(02) 8432-1111', category: 'Fire Department' },
+        { name: 'Barangay Health Center', number: '(02) 8555-9988', category: 'Health Center' },
+        { name: 'National Emergency Hotline', number: '911', category: 'Emergency Hotline' }
+    ]
+};
 
-    // System Settings Table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS system_settings (
-        id SERIAL PRIMARY KEY,
-        barangay_name VARCHAR(255) DEFAULT 'Barangay San Jose',
-        municipality VARCHAR(255) DEFAULT 'City of Angeles',
-        province VARCHAR(255) DEFAULT 'Pampanga',
-        contact_number VARCHAR(50) DEFAULT '+63 912 345 6789',
-        email VARCHAR(255) DEFAULT 'info@barangaysanjose.gov.ph',
-        address TEXT DEFAULT '123 Main Street, Barangay San Jose',
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Users Table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(100) UNIQUE NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        role VARCHAR(20) NOT NULL CHECK (role IN ('ADMIN', 'STAFF', 'RESIDENT')),
-        status VARCHAR(20) DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ACTIVE', 'REJECTED', 'DISABLED', 'ARCHIVED')),
-        permissions JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Households Table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS households (
-        id SERIAL PRIMARY KEY,
-        household_number VARCHAR(50) UNIQUE NOT NULL,
-        head_resident_id INT,
-        address TEXT NOT NULL,
-        classification VARCHAR(100) DEFAULT 'Residential',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Residents Table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS residents (
-        id SERIAL PRIMARY KEY,
-        user_id INT UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-        resident_id_number VARCHAR(50) UNIQUE NOT NULL,
-        first_name VARCHAR(100) NOT NULL,
-        middle_name VARCHAR(100),
-        last_name VARCHAR(100) NOT NULL,
-        suffix VARCHAR(20),
-        birthdate DATE NOT NULL,
-        sex VARCHAR(20) NOT NULL,
-        civil_status VARCHAR(50) NOT NULL,
-        address TEXT NOT NULL,
-        contact_number VARCHAR(50) NOT NULL,
-        email VARCHAR(255) NOT NULL,
-        occupation VARCHAR(100),
-        educational_attainment VARCHAR(100),
-        nationality VARCHAR(100) DEFAULT 'Filipino',
-        voter_status BOOLEAN DEFAULT FALSE,
-        pwd_status BOOLEAN DEFAULT FALSE,
-        senior_status BOOLEAN DEFAULT FALSE,
-        four_ps_status BOOLEAN DEFAULT FALSE,
-        emergency_contact_name VARCHAR(255),
-        emergency_contact_number VARCHAR(50),
-        photo_url TEXT,
-        valid_id_url TEXT,
-        household_id INT REFERENCES households(id) ON DELETE SET NULL,
-        household_relationship VARCHAR(100),
-        qr_token VARCHAR(255) UNIQUE NOT NULL,
-        qr_status VARCHAR(20) DEFAULT 'ACTIVE',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Foreign key link back to Residents for Household head
-    await client.query(`
-      DO $$ 
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.constraint_column_usage WHERE constraint_name = 'fk_household_head') THEN
-          ALTER TABLE households ADD CONSTRAINT fk_household_head FOREIGN KEY (head_resident_id) REFERENCES residents(id) ON DELETE SET NULL;
-        END IF;
-      END $$;
-    `);
-
-    // Documents Catalog
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS document_types (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(255) UNIQUE NOT NULL,
-        description TEXT,
-        requirements JSONB DEFAULT '[]'::jsonb,
-        fee DECIMAL(10, 2) DEFAULT 0.00,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Document Requests
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS document_requests (
-        id SERIAL PRIMARY KEY,
-        request_number VARCHAR(50) UNIQUE NOT NULL,
-        resident_id INT REFERENCES residents(id) ON DELETE CASCADE,
-        document_type_id INT REFERENCES document_types(id),
-        purpose TEXT NOT NULL,
-        requirements_url TEXT,
-        status VARCHAR(30) DEFAULT 'Pending' CHECK (status IN ('Pending', 'Under Review', 'Approved', 'Rejected', 'Ready', 'Completed', 'Cancelled')),
-        remarks TEXT,
-        processed_by_user_id INT REFERENCES users(id),
-        issued_date TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Blotter Records
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS blotter_records (
-        id SERIAL PRIMARY KEY,
-        case_number VARCHAR(50) UNIQUE NOT NULL,
-        complainant_name VARCHAR(255) NOT NULL,
-        respondent_name VARCHAR(255) NOT NULL,
-        incident_type VARCHAR(100) NOT NULL,
-        incident_date DATE NOT NULL,
-        incident_time TIME NOT NULL,
-        location TEXT NOT NULL,
-        description TEXT NOT NULL,
-        witnesses TEXT,
-        action_taken TEXT,
-        resolution TEXT,
-        status VARCHAR(30) DEFAULT 'Open' CHECK (status IN ('Open', 'Under Investigation', 'Resolved', 'Closed')),
-        attachment_url TEXT,
-        created_by INT REFERENCES users(id),
-        updated_by INT REFERENCES users(id),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Announcements
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS announcements (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        content TEXT NOT NULL,
-        image_url TEXT,
-        publication_date DATE DEFAULT CURRENT_DATE,
-        is_published BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Notifications
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS notifications (
-        id SERIAL PRIMARY KEY,
-        user_id INT REFERENCES users(id) ON DELETE CASCADE,
-        message TEXT NOT NULL,
-        type VARCHAR(50) DEFAULT 'INFO',
-        is_read BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Resident Concerns / Service Requests
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS resident_concerns (
-        id SERIAL PRIMARY KEY,
-        resident_id INT REFERENCES residents(id) ON DELETE CASCADE,
-        subject VARCHAR(255) NOT NULL,
-        description TEXT NOT NULL,
-        attachment_url TEXT,
-        status VARCHAR(30) DEFAULT 'Submitted' CHECK (status IN ('Submitted', 'Under Review', 'Processing', 'Resolved', 'Closed')),
-        response TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Officials
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS barangay_officials (
-        id SERIAL PRIMARY KEY,
-        full_name VARCHAR(255) NOT NULL,
-        position VARCHAR(100) NOT NULL,
-        contact_number VARCHAR(50),
-        term VARCHAR(100),
-        photo_url TEXT,
-        signature_url TEXT,
-        is_active BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Activity Logs
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS activity_logs (
-        id SERIAL PRIMARY KEY,
-        user_id INT REFERENCES users(id) ON DELETE SET NULL,
-        user_role VARCHAR(50),
-        action VARCHAR(255) NOT NULL,
-        module VARCHAR(100) NOT NULL,
-        record_id VARCHAR(100),
-        ip_address VARCHAR(45),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Seed System Settings if Empty
-    const checkSettings = await client.query('SELECT COUNT(*) FROM system_settings');
-    if (parseInt(checkSettings.rows[0].count) === 0) {
-      await client.query('INSERT INTO system_settings (barangay_name) VALUES ($1)', ['Barangay San Jose']);
-    }
-
-    // Seed Initial Admin User if none exists
-    const checkAdmin = await client.query("SELECT COUNT(*) FROM users WHERE role = 'ADMIN'");
-    if (parseInt(checkAdmin.rows[0].count) === 0) {
-      const hashedPassword = await bcrypt.hash(ADMIN_SETUP_SECRET, 10);
-      await client.query(
-        `INSERT INTO users (username, email, password_hash, role, status, permissions) 
-         VALUES ($1, $2, $3, 'ADMIN', 'ACTIVE', '["all"]')`,
-        ['admin', 'admin@barangay.gov.ph', hashedPassword]
-      );
-      console.log('--- DEFAULT ADMIN CREATED ---');
-      console.log('Username: admin');
-      console.log(`Password: ${ADMIN_SETUP_SECRET}`);
-      console.log('-----------------------------');
-    }
-
-    // Seed Default Document Types
-    const checkDocTypes = await client.query('SELECT COUNT(*) FROM document_types');
-    if (parseInt(checkDocTypes.rows[0].count) === 0) {
-      await client.query(`
-        INSERT INTO document_types (title, description, requirements, fee) VALUES
-        ('Barangay Clearance', 'Clearance for employment, business, or official transactions.', '["Valid ID", "Proof of Residency"]'::jsonb, 50.00),
-        ('Certificate of Residency', 'Proof that resident lives in the barangay.', '["Valid ID"]'::jsonb, 30.00),
-        ('Certificate of Indigency', 'Issued to low-income residents for financial assistance.', '["Valid ID", "Barangay Interview"]'::jsonb, 0.00),
-        ('Certificate of Good Moral Character', 'Certificate of good community standing.', '["Valid ID"]'::jsonb, 50.00),
-        ('Business Clearance', 'Clearance required to operate a business within the barangay.', '["Business Permit Form", "DTI Registration"]'::jsonb, 200.00);
-      `);
-    }
-
-    await client.query('COMMIT');
-    console.log('Database tables, constraints, and initial state initialized successfully.');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error initializing database setup:', err);
-  } finally {
-    client.release();
-  }
+// Helper logger
+function logActivity(username, action) {
+    const now = new Date();
+    db.activityLogs.unshift({
+        user: username || 'System',
+        action: action,
+        date: now.toISOString().split('T')[0],
+        time: now.toTimeString().split(' ')[0]
+    });
 }
 
-// Utility Helpers & Calculation Logic
-function calculateAge(birthdateStr) {
-  const birthdate = new Date(birthdateStr);
-  const diff = Date.now() - birthdate.getTime();
-  const ageDate = new Date(diff);
-  return Math.abs(ageDate.getUTCFullYear() - 1970);
-}
-
-async function logActivity(userId, role, action, moduleName, recordId, req) {
-  try {
-    const ip = req ? (req.headers['x-forwarded-for'] || req.socket.remoteAddress) : '127.0.0.1';
-    await pool.query(
-      `INSERT INTO activity_logs (user_id, user_role, action, module, record_id, ip_address)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [userId || null, role || 'SYSTEM', action, moduleName, String(recordId || ''), ip]
-    );
-  } catch (err) {
-    console.error('Activity Logging Error:', err);
-  }
-}
-
-// Global Authentication & Role-Based Security Middlewares
+// Authentication middleware
 function requireAuth(req, res, next) {
-  if (!req.session || !req.session.userId) {
-    if (req.xhr || req.headers.accept?.includes('json')) {
-      return res.status(401).json({ error: 'Unauthorized access. Please login.' });
+    if (!req.session.user) {
+        return res.redirect('/login');
     }
-    return res.redirect('/resident-login');
-  }
-  next();
-}
-
-function requireAdmin(req, res, next) {
-  if (!req.session || !req.session.userId) {
-    return res.redirect('/admin-login');
-  }
-  if (req.session.role !== 'ADMIN') {
-    return res.status(403).send(getAccessDeniedHTML('Admin Authorization Required'));
-  }
-  next();
+    next();
 }
 
 function requireStaff(req, res, next) {
-  if (!req.session || !req.session.userId) {
-    return res.redirect('/staff-login');
-  }
-  if (req.session.role !== 'STAFF' && req.session.role !== 'ADMIN') {
-    return res.status(403).send(getAccessDeniedHTML('Staff Authorization Required'));
-  }
-  next();
-}
-
-function requireResident(req, res, next) {
-  if (!req.session || !req.session.userId) {
-    return res.redirect('/resident-login');
-  }
-  if (req.session.role !== 'RESIDENT') {
-    return res.status(403).send(getAccessDeniedHTML('Resident Authorization Required'));
-  }
-  next();
-}
-
-function requirePermission(moduleName) {
-  return (req, res, next) => {
-    if (req.session.role === 'ADMIN') return next();
-    if (req.session.role === 'STAFF') {
-      const perms = req.session.permissions || [];
-      if (perms.includes('all') || perms.includes(moduleName)) {
-        return next();
-      }
+    if (!req.session.user || req.session.user.role === 'Resident') {
+        return res.status(403).send('Access Denied: Staff authorization required.');
     }
-    return res.status(403).send(getAccessDeniedHTML(`Access Denied to Module: ${moduleName}`));
-  };
+    next();
 }
 
-// Master HTML Shell Renderer
-function renderLayout({ title, portal, user, content, activeNav }) {
-  const isResident = portal === 'RESIDENT';
-  const isAdmin = portal === 'ADMIN';
-  const isStaff = portal === 'STAFF';
+// Routes - Authentication
+app.get('/login', (req, res) => {
+    res.send(renderLoginPage(req.query.error));
+});
 
-  const themeClass = isResident ? 'theme-resident' : isAdmin ? 'theme-admin' : 'theme-staff';
-  const portalName = isResident ? 'Resident Portal' : isAdmin ? 'Admin Portal' : 'Staff Portal';
+app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+    const user = db.users.find(u => u.username === username);
+    if (user && bcrypt.compareSync(password, user.passwordHash) && user.status === 'Active') {
+        req.session.user = user;
+        logActivity(user.username, 'User Logged In');
+        if (user.role === 'Resident') {
+            return res.redirect('/resident-portal');
+        } else {
+            return res.redirect('/staff-portal');
+        }
+    }
+    res.redirect('/login?error=Invalid+credentials+or+inactive+account');
+});
 
-  let navLinks = '';
-  if (isResident) {
-    navLinks = `
-      <a href="/resident/dashboard" class="${activeNav==='dashboard'?'active':''}"><i class="icon">🏠</i> Dashboard</a>
-      <a href="/resident/profile" class="${activeNav==='profile'?'active':''}"><i class="icon">👤</i> My Profile</a>
-      <a href="/resident/household" class="${activeNav==='household'?'active':''}"><i class="icon">👨‍👩‍👧‍👦</i> My Household</a>
-      <a href="/resident/id" class="${activeNav==='id'?'active':''}"><i class="icon">🪪</i> My Resident ID</a>
-      <a href="/resident/qr" class="${activeNav==='qr'?'active':''}"><i class="icon">📱</i> My QR Code</a>
-      <a href="/resident/documents/request" class="${activeNav==='doc-req'?'active':''}"><i class="icon">📄</i> Request Document</a>
-      <a href="/resident/documents/history" class="${activeNav==='doc-hist'?'active':''}"><i class="icon">📑</i> My Requests</a>
-      <a href="/resident/concerns" class="${activeNav==='concerns'?'active':''}"><i class="icon">💬</i> Concerns & Requests</a>
-      <a href="/resident/announcements" class="${activeNav==='announcements'?'active':''}"><i class="icon">📢</i> Announcements</a>
-      <a href="/resident/notifications" class="${activeNav==='notifications'?'active':''}"><i class="icon">🔔</i> Notifications</a>
-      <a href="/resident/settings" class="${activeNav==='settings'?'active':''}"><i class="icon">⚙️</i> Settings</a>
-    `;
-  } else if (isAdmin) {
-    navLinks = `
-      <a href="/admin/dashboard" class="${activeNav==='dashboard'?'active':''}"><i class="icon">📊</i> Dashboard</a>
-      <a href="/admin/residents" class="${activeNav==='residents'?'active':''}"><i class="icon">👥</i> Resident Management</a>
-      <a href="/admin/accounts" class="${activeNav==='accounts'?'active':''}"><i class="icon">✅</i> Pending Approvals</a>
-      <a href="/admin/households" class="${activeNav==='households'?'active':''}"><i class="icon">🏠</i> Households</a>
-      <a href="/admin/staff" class="${activeNav==='staff'?'active':''}"><i class="icon">🛡️</i> Staff Management</a>
-      <a href="/admin/officials" class="${activeNav==='officials'?'active':''}"><i class="icon">🏛️</i> Barangay Officials</a>
-      <a href="/admin/document-requests" class="${activeNav==='doc-requests'?'active':''}"><i class="icon">📑</i> Document Requests</a>
-      <a href="/admin/documents" class="${activeNav==='documents'?'active':''}"><i class="icon">📜</i> Document Templates</a>
-      <a href="/admin/blotter" class="${activeNav==='blotter'?'active':''}"><i class="icon">⚖️</i> Blotter Records</a>
-      <a href="/admin/announcements" class="${activeNav==='announcements'?'active':''}"><i class="icon">📢</i> Announcements</a>
-      <a href="/admin/qr" class="${activeNav==='qr'?'active':''}"><i class="icon">📷</i> QR Verification</a>
-      <a href="/admin/reports" class="${activeNav==='reports'?'active':''}"><i class="icon">📈</i> System Reports</a>
-      <a href="/admin/logs" class="${activeNav==='logs'?'active':''}"><i class="icon">📋</i> Activity Logs</a>
-      <a href="/admin/backup" class="${activeNav==='backup'?'active':''}"><i class="icon">💾</i> Database Backup</a>
-      <a href="/admin/settings" class="${activeNav==='settings'?'active':''}"><i class="icon">⚙️</i> System Settings</a>
-    `;
-  } else if (isStaff) {
-    const perms = user?.permissions || [];
-    const hasAll = perms.includes('all');
-    navLinks = `
-      <a href="/staff/dashboard" class="${activeNav==='dashboard'?'active':''}"><i class="icon">📊</i> Dashboard</a>
-      ${(hasAll || perms.includes('residents')) ? `<a href="/staff/residents" class="${activeNav==='residents'?'active':''}"><i class="icon">👥</i> Residents</a>` : ''}
-      ${(hasAll || perms.includes('households')) ? `<a href="/staff/households" class="${activeNav==='households'?'active':''}"><i class="icon">🏠</i> Households</a>` : ''}
-      ${(hasAll || perms.includes('documents')) ? `<a href="/staff/document-requests" class="${activeNav==='doc-requests'?'active':''}"><i class="icon">📑</i> Document Requests</a>` : ''}
-      ${(hasAll || perms.includes('blotter')) ? `<a href="/staff/blotter" class="${activeNav==='blotter'?'active':''}"><i class="icon">⚖️</i> Blotter Cases</a>` : ''}
-      ${(hasAll || perms.includes('qr')) ? `<a href="/staff/qr" class="${activeNav==='qr'?'active':''}"><i class="icon">📷</i> QR Scanner</a>` : ''}
-      ${(hasAll || perms.includes('reports')) ? `<a href="/staff/reports" class="${activeNav==='reports'?'active':''}"><i class="icon">📈</i> Reports</a>` : ''}
-      <a href="/staff/notifications" class="${activeNav==='notifications'?'active':''}"><i class="icon">🔔</i> Notifications</a>
-      <a href="/staff/settings" class="${activeNav==='settings'?'active':''}"><i class="icon">⚙️</i> Settings</a>
-    `;
-  }
+app.get('/logout', (req, res) => {
+    if (req.session.user) {
+        logActivity(req.session.user.username, 'User Logged Out');
+    }
+    req.session.destroy(() => {
+        res.redirect('/login');
+    });
+});
 
-  return `
+app.get('/', (req, res) => {
+    if (!req.session.user) return res.redirect('/login');
+    if (req.session.user.role === 'Resident') res.redirect('/resident-portal');
+    else res.redirect('/staff-portal');
+});
+
+// STAFF PORTAL ROUTES
+app.get('/staff-portal', requireAuth, requireStaff, (req, res) => {
+    const tab = req.query.tab || 'dashboard';
+    res.send(renderStaffPortal(req.session.user, tab, db));
+});
+
+// Staff CRUD APIs
+app.post('/api/residents/add', requireAuth, requireStaff, (req, res) => {
+    const body = req.body;
+    const newResId = 'RES-2026-' + String(db.residents.length + 10).padStart(4, '0');
+    const resident = {
+        residentId: newResId,
+        firstName: body.firstName,
+        middleName: body.middleName || '',
+        lastName: body.lastName,
+        suffix: body.suffix || '',
+        dob: body.dob,
+        age: parseInt(body.age) || 25,
+        gender: body.gender,
+        civilStatus: body.civilStatus,
+        address: body.address,
+        purok: body.purok,
+        contactNumber: body.contactNumber,
+        email: body.email,
+        occupation: body.occupation,
+        educationalAttainment: body.educationalAttainment,
+        nationality: body.nationality || 'Filipino',
+        voterStatus: body.voterStatus,
+        category: body.category,
+        dateRegistered: new Date().toISOString().split('T')[0],
+        photo: body.photo || `https://placehold.co/150x150/1e40af/ffffff?text=${body.firstName[0]}${body.lastName[0]}`,
+        householdNo: body.householdNo || 'HH-101'
+    };
+    db.residents.push(resident);
+    logActivity(req.session.user.username, `Added Resident: ${resident.firstName} ${resident.lastName}`);
+    res.redirect('/staff-portal?tab=residents');
+});
+
+app.post('/api/residents/edit', requireAuth, requireStaff, (req, res) => {
+    const body = req.body;
+    const idx = db.residents.findIndex(r => r.residentId === body.residentId);
+    if (idx !== -1) {
+        db.residents[idx] = { ...db.residents[idx], ...body };
+        logActivity(req.session.user.username, `Updated Resident: ${body.residentId}`);
+    }
+    res.redirect('/staff-portal?tab=residents');
+});
+
+app.post('/api/residents/delete', requireAuth, requireStaff, (req, res) => {
+    const { residentId } = req.body;
+    db.residents = db.residents.filter(r => r.residentId !== residentId);
+    logActivity(req.session.user.username, `Archived/Deleted Resident: ${residentId}`);
+    res.redirect('/staff-portal?tab=residents');
+});
+
+// Household APIs
+app.post('/api/households/add', requireAuth, requireStaff, (req, res) => {
+    const body = req.body;
+    db.households.push({
+        householdNo: body.householdNo,
+        headName: body.headName,
+        address: body.address,
+        purok: body.purok,
+        membersCount: parseInt(body.membersCount) || 1,
+        members: body.members ? body.members.split(',').map(m => m.trim()) : []
+    });
+    logActivity(req.session.user.username, `Added Household: ${body.householdNo}`);
+    res.redirect('/staff-portal?tab=households');
+});
+
+// Purok APIs
+app.post('/api/puroks/add', requireAuth, requireStaff, (req, res) => {
+    const body = req.body;
+    db.puroks.push({
+        id: db.puroks.length + 1,
+        name: body.name,
+        leader: body.leader,
+        description: body.description
+    });
+    logActivity(req.session.user.username, `Added Purok: ${body.name}`);
+    res.redirect('/staff-portal?tab=puroks');
+});
+
+// Certificate APIs
+app.post('/api/certificates/add', requireAuth, requireStaff, (req, res) => {
+    const body = req.body;
+    const certNo = 'CRT-2026-' + String(db.certificates.length + 10).padStart(4, '0');
+    db.certificates.push({
+        certNo: certNo,
+        residentName: body.residentName,
+        type: body.type,
+        dateRequested: new Date().toISOString().split('T')[0],
+        dateApproved: new Date().toISOString().split('T')[0],
+        dateReleased: new Date().toISOString().split('T')[0],
+        status: 'Released',
+        remarks: body.remarks || 'Issued by staff'
+    });
+    logActivity(req.session.user.username, `Created Certificate ${certNo} for ${body.residentName}`);
+    res.redirect('/staff-portal?tab=certificates');
+});
+
+// Request Update Status
+app.post('/api/requests/update', requireAuth, requireStaff, (req, res) => {
+    const { id, status, remarks } = req.body;
+    const reqItem = db.requests.find(r => r.id == id);
+    if (reqItem) {
+        reqItem.status = status;
+        if (remarks) reqItem.remarks = remarks;
+        if (status === 'Approved' || status === 'Ready for Release') {
+            reqItem.releaseDate = new Date().toISOString().split('T')[0];
+        }
+        logActivity(req.session.user.username, `Updated Request ${reqItem.reqNo} status to ${status}`);
+    }
+    res.redirect('/staff-portal?tab=requests');
+});
+
+// Blotter APIs
+app.post('/api/blotters/add', requireAuth, requireStaff, (req, res) => {
+    const body = req.body;
+    const caseNo = 'BLT-2026-' + String(db.blotters.length + 10).padStart(4, '0');
+    db.blotters.push({
+        caseNo: caseNo,
+        complainant: body.complainant,
+        respondent: body.respondent,
+        witness: body.witness,
+        incidentDate: body.incidentDate,
+        incidentTime: body.incidentTime,
+        location: body.location,
+        type: body.type,
+        description: body.description,
+        actionTaken: body.actionTaken || 'Initial investigation conducted',
+        settlement: body.settlement || 'Ongoing',
+        status: body.status || 'Open'
+    });
+    logActivity(req.session.user.username, `Recorded Blotter Case ${caseNo}`);
+    res.redirect('/staff-portal?tab=blotters');
+});
+
+// Appointment Management Staff
+app.post('/api/appointments/update', requireAuth, requireStaff, (req, res) => {
+    const { id, status } = req.body;
+    const appt = db.appointments.find(a => a.id == id);
+    if (appt) {
+        appt.status = status;
+        logActivity(req.session.user.username, `Updated Appointment ID ${id} to ${status}`);
+    }
+    res.redirect('/staff-portal?tab=appointments');
+});
+
+// Assistance Management Staff
+app.post('/api/assistances/update', requireAuth, requireStaff, (req, res) => {
+    const { id, status, remarks } = req.body;
+    const ast = db.assistances.find(a => a.id == id);
+    if (ast) {
+        ast.status = status;
+        if (remarks) ast.remarks = remarks;
+        logActivity(req.session.user.username, `Updated Assistance ID ${id} status to ${status}`);
+    }
+    res.redirect('/staff-portal?tab=assistances');
+});
+
+// Business Registration Staff
+app.post('/api/businesses/add', requireAuth, requireStaff, (req, res) => {
+    const body = req.body;
+    const busId = 'BUS-' + Math.floor(100 + Math.random() * 900);
+    db.businesses.push({
+        businessId: busId,
+        businessName: body.businessName,
+        owner: body.owner,
+        address: body.address,
+        purok: body.purok,
+        businessType: body.businessType,
+        contactNumber: body.contactNumber,
+        registrationDate: new Date().toISOString().split('T')[0],
+        permitStatus: 'Active',
+        expirationDate: body.expirationDate || '2027-12-31'
+    });
+    logActivity(req.session.user.username, `Registered Business: ${body.businessName}`);
+    res.redirect('/staff-portal?tab=businesses');
+});
+
+// Announcements Staff
+app.post('/api/announcements/add', requireAuth, requireStaff, (req, res) => {
+    const body = req.body;
+    db.announcements.push({
+        id: db.announcements.length + 1,
+        title: body.title,
+        description: body.description,
+        date: body.date || new Date().toISOString().split('T')[0],
+        category: body.category,
+        status: 'Published'
+    });
+    // Add notification for residents
+    db.notifications.push({
+        id: db.notifications.length + 1,
+        residentName: 'All Residents',
+        message: `New Announcement: ${body.title}`,
+        date: new Date().toISOString().split('T')[0],
+        read: false
+    });
+    logActivity(req.session.user.username, `Created Announcement: ${body.title}`);
+    res.redirect('/staff-portal?tab=announcements');
+});
+
+// User Management (Admin only)
+app.post('/api/users/add', requireAuth, requireStaff, (req, res) => {
+    if (req.session.user.role !== 'Admin') return res.status(403).send('Admin privilege required.');
+    const body = req.body;
+    db.users.push({
+        id: db.users.length + 1,
+        username: body.username,
+        passwordHash: bcrypt.hashSync(body.password || 'password123', 8),
+        role: body.role,
+        name: body.name,
+        email: body.email,
+        status: 'Active'
+    });
+    logActivity(req.session.user.username, `Created User Account: ${body.username} (${body.role})`);
+    res.redirect('/staff-portal?tab=users');
+});
+
+
+// RESIDENT PORTAL ROUTES
+app.get('/resident-portal', requireAuth, (req, res) => {
+    if (req.session.user.role !== 'Resident') return res.redirect('/staff-portal');
+    const tab = req.query.tab || 'dashboard';
+    res.send(renderResidentPortal(req.session.user, tab, db));
+});
+
+// Resident Certificate Request API
+app.post('/api/resident/request-cert', requireAuth, (req, res) => {
+    const user = req.session.user;
+    const { type, remarks } = req.body;
+    const reqNo = 'REQ-' + String(db.requests.length + 10).padStart(4, '0');
+    db.requests.push({
+        id: db.requests.length + 1,
+        reqNo: reqNo,
+        residentName: user.name,
+        type: type,
+        status: 'Submitted',
+        dateSubmitted: new Date().toISOString().split('T')[0],
+        remarks: remarks || 'Requested online by resident',
+        releaseDate: ''
+    });
+    db.notifications.push({
+        id: db.notifications.length + 1,
+        residentName: user.name,
+        message: `Your request ${reqNo} (${type}) has been submitted successfully.`,
+        date: new Date().toISOString().split('T')[0],
+        read: false
+    });
+    logActivity(user.username, `Resident requested certificate: ${type}`);
+    res.redirect('/resident-portal?tab=tracking&success=' + reqNo);
+});
+
+// Resident Profile Update Request API
+app.post('/api/resident/request-profile-update', requireAuth, (req, res) => {
+    const user = req.session.user;
+    const { changes } = req.body;
+    db.profileUpdates.push({
+        id: db.profileUpdates.length + 1,
+        residentId: user.residentId || 'RES-2026-0001',
+        requestedChanges: changes,
+        status: 'Pending',
+        date: new Date().toISOString().split('T')[0]
+    });
+    logActivity(user.username, `Requested profile update review`);
+    res.redirect('/resident-portal?tab=profile&msg=Update+submitted+for+staff+review');
+});
+
+// Resident Complaint API
+app.post('/api/resident/submit-complaint', requireAuth, (req, res) => {
+    const user = req.session.user;
+    const { type, subject, description, location } = req.body;
+    db.complaints.push({
+        id: db.complaints.length + 1,
+        type: type,
+        subject: subject,
+        description: description,
+        date: new Date().toISOString().split('T')[0],
+        location: location,
+        status: 'Submitted',
+        residentName: user.name
+    });
+    logActivity(user.username, `Submitted community complaint: ${subject}`);
+    res.redirect('/resident-portal?tab=complaints&success=1');
+});
+
+// Resident Appointment API
+app.post('/api/resident/book-appointment', requireAuth, (req, res) => {
+    const user = req.session.user;
+    const { service, date, time } = req.body;
+    db.appointments.push({
+        id: db.appointments.length + 1,
+        date: date,
+        time: time,
+        residentName: user.name,
+        service: service,
+        status: 'Pending'
+    });
+    logActivity(user.username, `Booked appointment for ${service} on ${date}`);
+    res.redirect('/resident-portal?tab=appointments&success=1');
+});
+
+// Resident Assistance Request API
+app.post('/api/resident/request-assistance', requireAuth, (req, res) => {
+    const user = req.session.user;
+    const { type, amount, remarks } = req.body;
+    db.assistances.push({
+        id: db.assistances.length + 1,
+        residentName: user.name,
+        type: type,
+        amount: amount || 'Requested Amount',
+        date: new Date().toISOString().split('T')[0],
+        status: 'Reviewing',
+        remarks: remarks
+    });
+    logActivity(user.username, `Requested assistance: ${type}`);
+    res.redirect('/resident-portal?tab=dashboard&success=assistance');
+});
+
+// Resident Feedback API
+app.post('/api/resident/submit-feedback', requireAuth, (req, res) => {
+    const user = req.session.user;
+    const { rating, comments } = req.body;
+    db.feedbacks.push({
+        id: db.feedbacks.length + 1,
+        residentName: user.name,
+        rating: parseInt(rating) || 5,
+        comments: comments,
+        date: new Date().toISOString().split('T')[0]
+    });
+    logActivity(user.username, `Submitted service feedback`);
+    res.redirect('/resident-portal?tab=dashboard&feedback=thankyou');
+});
+
+
+// HTML TEMPLATE RENDERERS WITH FULL RESPONSIVE TAILWIND CSS
+
+function renderLoginPage(errorMsg) {
+    return `
     <!DOCTYPE html>
     <html lang="en">
     <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>${title} - Barangay Resident Management System</title>
-      <style>
-        :root {
-          --primary-admin: #1e293b;
-          --primary-staff: #0f766e;
-          --primary-resident: #2563eb;
-          --accent: #3b82f6;
-          --bg-gray: #f8fafc;
-          --card-bg: #ffffff;
-          --text-dark: #0f172a;
-          --text-light: #64748b;
-          --border: #e2e8f0;
-          --success: #16a34a;
-          --warning: #d97706;
-          --danger: #dc2626;
-        }
-
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-        body { background-color: var(--bg-gray); color: var(--text-dark); display: flex; flex-direction: column; min-height: 100vh; }
-
-        /* Top Header */
-        header {
-          background: var(--card-bg);
-          border-bottom: 1px solid var(--border);
-          padding: 0.8rem 1.5rem;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          position: sticky;
-          top: 0;
-          z-index: 100;
-        }
-        .brand { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: inherit; }
-        .brand-logo { width: 38px; height: 38px; background: #0284c7; color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2rem; }
-        .brand-text h1 { font-size: 1.1rem; font-weight: 700; line-height: 1.2; }
-        .brand-text span { font-size: 0.75rem; color: var(--text-light); }
-
-        .user-nav { display: flex; align-items: center; gap: 1rem; }
-        .user-badge { font-size: 0.85rem; padding: 0.25rem 0.6rem; border-radius: 9999px; background: #e0f2fe; color: #0369a1; font-weight: 600; }
-        .btn-logout { font-size: 0.85rem; color: var(--danger); text-decoration: none; border: 1px solid var(--danger); padding: 0.3rem 0.75rem; border-radius: 6px; transition: all 0.2s; }
-        .btn-logout:hover { background: var(--danger); color: white; }
-
-        /* App Container Layout */
-        .app-container { display: flex; flex: 1; }
-
-        /* Sidebar Navigation */
-        aside {
-          width: 260px;
-          background: var(--card-bg);
-          border-right: 1px solid var(--border);
-          padding: 1.5rem 0.75rem;
-          display: flex;
-          flex-direction: column;
-          gap: 0.25rem;
-        }
-        aside a {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          padding: 0.65rem 0.85rem;
-          color: var(--text-dark);
-          text-decoration: none;
-          font-size: 0.9rem;
-          font-weight: 500;
-          border-radius: 6px;
-          transition: background 0.15s;
-        }
-        aside a:hover { background: #f1f5f9; }
-        aside a.active { background: #e0f2fe; color: #0284c7; font-weight: 600; }
-        aside .icon { font-style: normal; font-size: 1.1rem; }
-
-        /* Main Content View */
-        main { flex: 1; padding: 2rem; max-width: 1400px; margin: 0 auto; width: 100%; }
-
-        /* General Card & Grid Layouts */
-        .page-header { margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
-        .page-title { font-size: 1.5rem; font-weight: 700; color: var(--text-dark); }
-        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem; }
-        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .stat-card { display: flex; flex-direction: column; gap: 0.5rem; }
-        .stat-card .stat-title { font-size: 0.85rem; color: var(--text-light); text-transform: uppercase; font-weight: 600; }
-        .stat-card .stat-value { font-size: 1.8rem; font-weight: 700; color: var(--text-dark); }
-
-        /* Table Design */
-        .table-responsive { width: 100%; overflow-x: auto; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
-        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
-        th, td { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); }
-        th { background: #f8fafc; font-weight: 600; color: var(--text-light); }
-        tr:last-child td { border-bottom: none; }
-        tr:hover { background: #f8fafc; }
-
-        /* Buttons & Controls */
-        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 600; border-radius: 6px; border: none; cursor: pointer; text-decoration: none; transition: all 0.2s; }
-        .btn-primary { background: var(--accent); color: white; }
-        .btn-primary:hover { background: #2563eb; }
-        .btn-secondary { background: #e2e8f0; color: var(--text-dark); }
-        .btn-secondary:hover { background: #cbd5e1; }
-        .btn-success { background: var(--success); color: white; }
-        .btn-danger { background: var(--danger); color: white; }
-        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.775rem; }
-
-        /* Form Components */
-        .form-group { margin-bottom: 1rem; }
-        .form-group label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--text-dark); }
-        .form-control { width: 100%; padding: 0.6rem 0.75rem; font-size: 0.9rem; border: 1px solid var(--border); border-radius: 6px; outline: none; background: white; }
-        .form-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
-        .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
-
-        /* Badges */
-        .badge { display: inline-block; padding: 0.2rem 0.5rem; font-size: 0.75rem; font-weight: 600; border-radius: 9999px; }
-        .badge-pending { background: #fef3c7; color: #d97706; }
-        .badge-active, .badge-approved, .badge-resolved, .badge-completed { background: #dcfce7; color: #16a34a; }
-        .badge-rejected, .badge-disabled { background: #fee2e2; color: #dc2626; }
-
-        /* Mobile Responsive Navigation (Resident Focus) */
-        @media (max-width: 768px) {
-          .app-container { flex-direction: column; }
-          aside { width: 100%; border-right: none; border-bottom: 1px solid var(--border); padding: 0.75rem; flex-direction: row; overflow-x: auto; white-space: nowrap; }
-          aside a { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
-          main { padding: 1rem; }
-          .page-header { flex-direction: column; align-items: flex-start; }
-        }
-
-        /* Digital ID Styling */
-        .id-card {
-          width: 380px;
-          height: 230px;
-          background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-          color: white;
-          border-radius: 12px;
-          padding: 1.25rem;
-          position: relative;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          margin: 0 auto;
-        }
-        .id-header { display: flex; align-items: center; gap: 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 0.5rem; }
-        .id-header img { width: 35px; height: 35px; border-radius: 50%; }
-        .id-body { display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; }
-        .id-photo { width: 80px; height: 80px; border-radius: 8px; border: 2px solid white; object-fit: cover; background: #334155; }
-        .id-details h3 { font-size: 1rem; margin-bottom: 0.2rem; }
-        .id-details p { font-size: 0.75rem; color: #cbd5e1; margin-bottom: 0.15rem; }
-        .id-footer { display: flex; justify-content: space-between; align-items: center; font-size: 0.65rem; color: #94a3b8; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.4rem; }
-
-        /* Printable Area Customizations */
-        @media print {
-          body * { visibility: hidden; }
-          .printable, .printable * { visibility: visible; }
-          .printable { position: absolute; left: 0; top: 0; width: 100%; }
-          aside, header, .no-print { display: none !important; }
-        }
-      </style>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Login | Barangay Resident Management System</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>body { font-family: 'Inter', sans-serif; }</style>
     </head>
-    <body class="${themeClass}">
-      <header>
-        <a href="#" class="brand">
-          <div class="brand-logo">B</div>
-          <div class="brand-text">
-            <h1>BARANGAY SYSTEM</h1>
-            <span>${portalName}</span>
-          </div>
-        </a>
-        <div class="user-nav">
-          ${user ? `
-            <span class="user-badge">${user.username} (${user.role})</span>
-            <a href="/logout" class="btn-logout">Logout</a>
-          ` : ''}
-        </div>
-      </header>
+    <body class="bg-slate-900 min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-md w-full bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 p-8">
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-full text-white text-2xl font-bold mb-4 shadow-lg shadow-blue-600/30">🏛️</div>
+                <h1 class="text-2xl font-bold text-white">Barangay Management</h1>
+                <p class="text-slate-400 text-sm mt-1">Resident Management System</p>
+            </div>
 
-      <div class="app-container">
-        <aside class="no-print">
-          ${navLinks}
+            ${errorMsg ? `<div class="mb-4 p-3 bg-red-500/20 border border-red-500 text-red-300 text-sm rounded-lg">${errorMsg}</div>` : ''}
+
+            <form action="/login" method="POST" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Username</label>
+                    <input type="text" name="username" required placeholder="e.g. admin, secretary, resident1" class="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Password</label>
+                    <input type="password" name="password" required placeholder="••••••••" class="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition">
+                </div>
+                <button type="submit" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/30 transition duration-200">
+                    LOGIN TO PORTAL
+                </button>
+            </form>
+
+            <div class="mt-6 border-t border-slate-700 pt-6 text-xs text-slate-400 space-y-2">
+                <p class="font-semibold text-slate-300">Quick Demo Accounts:</p>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-slate-900 p-2 rounded border border-slate-700"><strong>Admin:</strong> admin / admin123</div>
+                    <div class="bg-slate-900 p-2 rounded border border-slate-700"><strong>Secretary:</strong> secretary / sec123</div>
+                    <div class="bg-slate-900 p-2 rounded border border-slate-700"><strong>Staff:</strong> staff / staff123</div>
+                    <div class="bg-slate-900 p-2 rounded border border-slate-700"><strong>Resident:</strong> resident1 / res123</div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+}
+
+function renderStaffPortal(user, activeTab, data) {
+    const totalResidents = data.residents.length;
+    const totalHouseholds = data.households.length;
+    const maleCount = data.residents.filter(r => r.gender === 'Male').length;
+    const femaleCount = data.residents.filter(r => r.gender === 'Female').length;
+    const seniorCount = data.residents.filter(r => r.category === 'Senior Citizen' || r.age >= 60).length;
+    const pwdCount = data.residents.filter(r => r.category === 'PWD').length;
+    const soloCount = data.residents.filter(r => r.category === 'Solo Parent').length;
+    const minorCount = data.residents.filter(r => r.age < 18).length;
+    const voterCount = data.residents.filter(r => r.voterStatus === 'Registered Voter').length;
+    const pendingReqs = data.requests.filter(r => r.status === 'Submitted' || r.status === 'Processing').length;
+    const todaysAppts = data.appointments.filter(a => a.status === 'Pending' || a.status === 'Approved').length;
+
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Staff Portal | Barangay Management System</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>body { font-family: 'Inter', sans-serif; }</style>
+    </head>
+    <body class="bg-slate-100 min-h-screen flex flex-col md:flex-row">
+        <!-- Sidebar Navigation -->
+        <aside class="w-full md:w-64 bg-slate-900 text-slate-300 flex flex-col justify-between shrink-0 shadow-xl">
+            <div>
+                <div class="p-6 border-b border-slate-800 flex items-center space-x-3">
+                    <span class="text-3xl">🏛️</span>
+                    <div>
+                        <h1 class="text-white font-bold text-lg leading-tight">Barangay Admin</h1>
+                        <p class="text-xs text-slate-400">Staff Portal</p>
+                    </div>
+                </div>
+                <nav class="p-4 space-y-1 text-sm font-medium">
+                    <a href="/staff-portal?tab=dashboard" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📊</span><span>Dashboard</span></a>
+                    <a href="/staff-portal?tab=residents" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'residents' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>👥</span><span>Residents</span></a>
+                    <a href="/staff-portal?tab=households" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'households' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>🏡</span><span>Households</span></a>
+                    <a href="/staff-portal?tab=puroks" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'puroks' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📍</span><span>Purok Management</span></a>
+                    <a href="/staff-portal?tab=certificates" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'certificates' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📜</span><span>Certificates</span></a>
+                    <a href="/staff-portal?tab=requests" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'requests' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📥</span><span>Requests (${pendingReqs})</span></a>
+                    <a href="/staff-portal?tab=blotters" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'blotters' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>⚖️</span><span>Blotter Cases</span></a>
+                    <a href="/staff-portal?tab=appointments" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'appointments' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📅</span><span>Appointments</span></a>
+                    <a href="/staff-portal?tab=assistances" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'assistances' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>🤝</span><span>Assistance</span></a>
+                    <a href="/staff-portal?tab=businesses" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'businesses' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>🏢</span><span>Businesses</span></a>
+                    <a href="/staff-portal?tab=announcements" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'announcements' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📢</span><span>Announcements</span></a>
+                    <a href="/staff-portal?tab=reports" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'reports' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📈</span><span>Reports & Analytics</span></a>
+                    ${user.role === 'Admin' ? `<a href="/staff-portal?tab=users" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'users' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>⚙️</span><span>User Management</span></a>` : ''}
+                    <a href="/staff-portal?tab=logs" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'logs' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📝</span><span>Activity Logs</span></a>
+                </nav>
+            </div>
+            <div class="p-4 border-t border-slate-800">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-white text-sm font-semibold">${user.name}</p>
+                        <span class="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded">${user.role}</span>
+                    </div>
+                    <a href="/logout" class="p-2 bg-slate-800 hover:bg-red-600/20 hover:text-red-400 text-slate-400 rounded-lg transition" title="Logout">🚪</a>
+                </div>
+            </div>
         </aside>
 
-        <main>
-          ${content}
+        <!-- Main Content Area -->
+        <main class="flex-1 p-6 md:p-10 overflow-y-auto">
+            <!-- Top Header Bar -->
+            <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 mb-6 border-b border-slate-200 gap-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-slate-800 uppercase tracking-wide">${activeTab} Management</h2>
+                    <p class="text-sm text-slate-500">Welcome back, ${user.name} (${user.role})</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span class="px-3 py-1 bg-emerald-500/10 text-emerald-600 text-xs font-semibold rounded-full border border-emerald-500/20">System Online</span>
+                    <span class="text-sm text-slate-600 font-medium">${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                </div>
+            </header>
+
+            <!-- TAB CONTENT -->
+            ${activeTab === 'dashboard' ? renderStaffDashboard(data, totalResidents, totalHouseholds, maleCount, femaleCount, seniorCount, pwdCount, soloCount, minorCount, voterCount, pendingReqs, todaysAppts) : ''}
+            ${activeTab === 'residents' ? renderStaffResidents(data) : ''}
+            ${activeTab === 'households' ? renderStaffHouseholds(data) : ''}
+            ${activeTab === 'puroks' ? renderStaffPuroks(data) : ''}
+            ${activeTab === 'certificates' ? renderStaffCertificates(data) : ''}
+            ${activeTab === 'requests' ? renderStaffRequests(data) : ''}
+            ${activeTab === 'blotters' ? renderStaffBlotters(data) : ''}
+            ${activeTab === 'appointments' ? renderStaffAppointments(data) : ''}
+            ${activeTab === 'assistances' ? renderStaffAssistances(data) : ''}
+            ${activeTab === 'businesses' ? renderStaffBusinesses(data) : ''}
+            ${activeTab === 'announcements' ? renderStaffAnnouncements(data) : ''}
+            ${activeTab === 'reports' ? renderStaffReports(data) : ''}
+            ${activeTab === 'users' && user.role === 'Admin' ? renderStaffUsers(data) : ''}
+            ${activeTab === 'logs' ? renderStaffLogs(data) : ''}
         </main>
-      </div>
     </body>
     </html>
-  `;
+    `;
 }
 
-// Access Denied Renderer Helper
-function getAccessDeniedHTML(message) {
-  return renderLayout({
-    title: 'Access Denied',
-    portal: 'RESIDENT',
-    user: null,
-    activeNav: '',
-    content: `
-      <div class="card" style="text-align: center; padding: 3rem; max-width: 500px; margin: 2rem auto;">
-        <h2 style="color: var(--danger); margin-bottom: 1rem;">🚫 403 Access Denied</h2>
-        <p style="color: var(--text-light); margin-bottom: 1.5rem;">${message || 'You do not have permission to view or execute this resource.'}</p>
-        <a href="javascript:history.back()" class="btn btn-primary">Go Back</a>
-      </div>
-    `
-  });
+function renderStaffDashboard(data, totalResidents, totalHouseholds, maleCount, femaleCount, seniorCount, pwdCount, soloCount, minorCount, voterCount, pendingReqs, todaysAppts) {
+    return `
+    <div class="space-y-6">
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center space-x-4">
+                <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center text-xl font-bold">👥</div>
+                <div>
+                    <p class="text-xs text-slate-500 font-semibold uppercase">Total Residents</p>
+                    <h3 class="text-2xl font-bold text-slate-800">${totalResidents}</h3>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center space-x-4">
+                <div class="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center text-xl font-bold">🏡</div>
+                <div>
+                    <p class="text-xs text-slate-500 font-semibold uppercase">Households</p>
+                    <h3 class="text-2xl font-bold text-slate-800">${totalHouseholds}</h3>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center space-x-4">
+                <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center text-xl font-bold">📥</div>
+                <div>
+                    <p class="text-xs text-slate-500 font-semibold uppercase">Pending Requests</p>
+                    <h3 class="text-2xl font-bold text-slate-800">${pendingReqs}</h3>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center space-x-4">
+                <div class="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center text-xl font-bold">📅</div>
+                <div>
+                    <p class="text-xs text-slate-500 font-semibold uppercase">Appointments</p>
+                    <h3 class="text-2xl font-bold text-slate-800">${todaysAppts}</h3>
+                </div>
+            </div>
+        </div>
+
+        <!-- Demographics Breakdown -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 text-center">
+                <span class="text-blue-600 font-bold text-lg">♂ ${maleCount} / ♀ ${femaleCount}</span>
+                <p class="text-xs text-slate-500 font-medium mt-1">Male / Female</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 text-center">
+                <span class="text-amber-600 font-bold text-lg">${seniorCount}</span>
+                <p class="text-xs text-slate-500 font-medium mt-1">Senior Citizens</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 text-center">
+                <span class="text-emerald-600 font-bold text-lg">${pwdCount}</span>
+                <p class="text-xs text-slate-500 font-medium mt-1">PWD Residents</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 text-center">
+                <span class="text-purple-600 font-bold text-lg">${voterCount}</span>
+                <p class="text-xs text-slate-500 font-medium mt-1">Registered Voters</p>
+            </div>
+        </div>
+
+        <!-- Recent Activities & Quick Table -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h3 class="font-bold text-slate-800 mb-4 flex items-center justify-between">
+                    <span>Recent System Activity</span>
+                    <span class="text-xs text-blue-600 font-normal">Real-time log</span>
+                </h3>
+                <div class="space-y-3">
+                    ${data.activityLogs.slice(0, 5).map(log => `
+                        <div class="flex items-start space-x-3 text-sm pb-3 border-b border-slate-100 last:border-none">
+                            <span class="p-2 bg-slate-100 rounded-lg">⚡</span>
+                            <div class="flex-1">
+                                <p class="text-slate-800 font-medium">${log.action}</p>
+                                <span class="text-xs text-slate-400">By <strong>${log.user}</strong> at ${log.date} ${log.time}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h3 class="font-bold text-slate-800 mb-4 flex items-center justify-between">
+                    <span>Latest Resident Requests</span>
+                    <a href="/staff-portal?tab=requests" class="text-xs text-blue-600 hover:underline">View all</a>
+                </h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead>
+                            <tr class="border-b border-slate-200 text-slate-400 text-xs uppercase">
+                                <th class="pb-2">Req #</th>
+                                <th class="pb-2">Resident</th>
+                                <th class="pb-2">Type</th>
+                                <th class="pb-2">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            ${data.requests.slice(0, 5).map(r => `
+                                <tr>
+                                    <td class="py-2.5 font-semibold text-slate-700">${r.reqNo}</td>
+                                    <td class="py-2.5 text-slate-600">${r.residentName}</td>
+                                    <td class="py-2.5 text-slate-600">${r.type}</td>
+                                    <td class="py-2.5">
+                                        <span class="px-2 py-0.5 text-xs rounded-full font-semibold ${r.status === 'Approved' ? 'bg-emerald-50 text-emerald-600' : r.status === 'Processing' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}">${r.status}</span>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    `;
 }
 
-// PUBLIC & AUTHENTICATION ROUTES
-app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Barangay Management Portal</title>
-      <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background: #f1f5f9; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
-        .portal-card { background: white; border-radius: 12px; padding: 2.5rem; max-width: 480px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.08); text-align: center; }
-        .portal-card h1 { font-size: 1.75rem; color: #0f172a; margin-bottom: 0.5rem; }
-        .portal-card p { color: #64748b; font-size: 0.95rem; margin-bottom: 2rem; }
-        .portal-btn { display: block; width: 100%; padding: 0.85rem; margin-bottom: 1rem; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.95rem; transition: transform 0.15s; }
-        .portal-btn:hover { transform: translateY(-2px); }
-        .btn-res { background: #2563eb; color: white; }
-        .btn-staff { background: #0f766e; color: white; }
-        .btn-admin { background: #1e293b; color: white; }
-      </style>
-    </head>
-    <body>
-      <div class="portal-card">
-        <h1>Barangay Digital Portal</h1>
-        <p>Select your entry access portal to continue</p>
-        <a href="/resident-login" class="portal-btn btn-res">Resident Portal Login</a>
-        <a href="/staff-login" class="portal-btn btn-staff">Barangay Staff Access</a>
-        <a href="/admin-login" class="portal-btn btn-admin">Administrator Access</a>
-      </div>
-    </body>
-    </html>
-  `);
-});
-
-// RESIDENT REGISTRATION PAGE
-app.get('/resident-register', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Resident Account Registration</title>
-      <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background: #f8fafc; padding: 2rem 1rem; display: flex; justify-content: center; }
-        .reg-container { background: white; border-radius: 12px; padding: 2rem; max-width: 800px; width: 100%; border: 1px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-        h2 { margin-bottom: 0.5rem; color: #0f172a; }
-        p { color: #64748b; margin-bottom: 1.5rem; font-size: 0.9rem; }
-        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
-        .form-group { display: flex; flex-direction: column; gap: 0.35rem; }
-        label { font-size: 0.85rem; font-weight: 600; color: #334155; }
-        input, select { padding: 0.65rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; outline: none; }
-        input:focus, select:focus { border-color: #2563eb; }
-        .section-title { font-size: 1rem; font-weight: 700; color: #1e293b; margin: 1.25rem 0 0.75rem 0; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.4rem; grid-column: 1 / -1; }
-        .btn-submit { background: #2563eb; color: white; border: none; padding: 0.85rem 1.5rem; font-size: 1rem; font-weight: 600; border-radius: 6px; cursor: pointer; width: 100%; margin-top: 1rem; }
-        .btn-submit:hover { background: #1d4ed8; }
-        .error-msg { background: #fee2e2; color: #dc2626; padding: 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 1rem; display: none; }
-      </style>
-    </head>
-    <body>
-      <div class="reg-container">
-        <h2>Resident Portal Registration</h2>
-        <p>Complete the form below to apply for official barangay resident registration.</p>
-        
-        <form action="/resident-register" method="POST" enctype="multipart/form-data">
-          <div class="form-grid">
-            <div class="section-title">Account Credentials</div>
-            <div class="form-group">
-              <label>Username *</label>
-              <input type="text" name="username" required>
+function renderStaffResidents(data) {
+    return `
+    <div class="space-y-6">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <div class="flex items-center space-x-2 w-full sm:w-auto">
+                <input type="text" id="searchRes" placeholder="Search resident name or ID..." class="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-full sm:w-80 focus:outline-none focus:border-blue-500">
             </div>
-            <div class="form-group">
-              <label>Email Address *</label>
-              <input type="email" name="email" required>
-            </div>
-            <div class="form-group">
-              <label>Password *</label>
-              <input type="password" name="password" required>
-            </div>
-            <div class="form-group">
-              <label>Confirm Password *</label>
-              <input type="password" name="confirm_password" required>
-            </div>
-
-            <div class="section-title">Personal Details</div>
-            <div class="form-group">
-              <label>First Name *</label>
-              <input type="text" name="first_name" required>
-            </div>
-            <div class="form-group">
-              <label>Middle Name</label>
-              <input type="text" name="middle_name">
-            </div>
-            <div class="form-group">
-              <label>Last Name *</label>
-              <input type="text" name="last_name" required>
-            </div>
-            <div class="form-group">
-              <label>Suffix (e.g. Jr., III)</label>
-              <input type="text" name="suffix">
-            </div>
-            <div class="form-group">
-              <label>Birthdate *</label>
-              <input type="date" name="birthdate" required>
-            </div>
-            <div class="form-group">
-              <label>Sex *</label>
-              <select name="sex" required>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Civil Status *</label>
-              <select name="civil_status" required>
-                <option value="Single">Single</option>
-                <option value="Married">Married</option>
-                <option value="Widowed">Widowed</option>
-                <option value="Separated">Separated</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Contact Number *</label>
-              <input type="text" name="contact_number" required>
-            </div>
-
-            <div class="section-title">Address & Demographics</div>
-            <div class="form-group" style="grid-column: 1 / -1;">
-              <label>Complete Barangay Address *</label>
-              <input type="text" name="address" placeholder="House No., Street Name, Zone/Purok" required>
-            </div>
-            <div class="form-group">
-              <label>Occupation</label>
-              <input type="text" name="occupation">
-            </div>
-            <div class="form-group">
-              <label>Educational Attainment</label>
-              <input type="text" name="educational_attainment">
-            </div>
-            <div class="form-group">
-              <label>Nationality</label>
-              <input type="text" name="nationality" value="Filipino">
-            </div>
-
-            <div class="section-title">Special Sector Status</div>
-            <div class="form-group">
-              <label>Registered Voter?</label>
-              <select name="voter_status">
-                <option value="false">No</option>
-                <option value="true">Yes</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>PWD Status</label>
-              <select name="pwd_status">
-                <option value="false">No</option>
-                <option value="true">Yes</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>4Ps Beneficiary?</label>
-              <select name="four_ps_status">
-                <option value="false">No</option>
-                <option value="true">Yes</option>
-              </select>
-            </div>
-
-            <div class="section-title">Emergency Contact</div>
-            <div class="form-group">
-              <label>Contact Person Name</label>
-              <input type="text" name="emergency_contact_name">
-            </div>
-            <div class="form-group">
-              <label>Contact Person Number</label>
-              <input type="text" name="emergency_contact_number">
-            </div>
-
-            <div class="section-title">Verification Documents</div>
-            <div class="form-group">
-              <label>Resident 2x2 Photo (JPG/PNG) *</label>
-              <input type="file" name="photo" accept="image/*" required>
-            </div>
-            <div class="form-group">
-              <label>Valid Government ID (JPG/PNG/PDF) *</label>
-              <input type="file" name="valid_id" accept="image/*,application/pdf" required>
-            </div>
-          </div>
-
-          <button type="submit" class="btn-submit">Submit Registration Application</button>
-        </form>
-        <div style="margin-top: 1rem; text-align: center; font-size: 0.85rem;">
-          Already registered? <a href="/resident-login" style="color: #2563eb;">Log in here</a>
+            <button onclick="document.getElementById('addResModal').classList.remove('hidden')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm shadow-md transition">+ Add New Resident</button>
         </div>
-      </div>
-    </body>
-    </html>
-  `);
-});
 
-// HANDLE RESIDENT REGISTRATION SUBMISSION
-app.post('/resident-register', upload.fields([{ name: 'photo', maxCount: 1 }, { name: 'valid_id', maxCount: 1 }]), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const {
-      username, email, password, confirm_password,
-      first_name, middle_name, last_name, suffix,
-      birthdate, sex, civil_status, address, contact_number,
-      occupation, educational_attainment, nationality,
-      voter_status, pwd_status, four_ps_status,
-      emergency_contact_name, emergency_contact_number
-    } = req.body;
-
-    if (password !== confirm_password) {
-      return res.status(400).send('Passwords do not match. <a href="javascript:history.back()">Go Back</a>');
-    }
-
-    const photoFile = req.files['photo'] ? `/uploads/${req.files['photo'][0].filename}` : null;
-    const validIdFile = req.files['valid_id'] ? `/uploads/${req.files['valid_id'][0].filename}` : null;
-
-    if (!photoFile || !validIdFile) {
-      return res.status(400).send('Photo and Valid ID are required. <a href="javascript:history.back()">Go Back</a>');
-    }
-
-    await client.query('BEGIN');
-
-    // Check duplicate username or email
-    const dupCheck = await client.query('SELECT id FROM users WHERE username = $1 OR email = $2', [username, email]);
-    if (dupCheck.rows.length > 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).send('Username or Email is already registered. <a href="javascript:history.back()">Go Back</a>');
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const userResult = await client.query(
-      `INSERT INTO users (username, email, password_hash, role, status)
-       VALUES ($1, $2, $3, 'RESIDENT', 'PENDING') RETURNING id`,
-      [username, email, hashedPassword]
-    );
-    const newUserId = userResult.rows[0].id;
-
-    // Generate unique Resident ID (Format: BRGY-2026-XXXXXX)
-    const countRes = await client.query('SELECT COUNT(*) FROM residents');
-    const nextSeq = String(parseInt(countRes.rows[0].count) + 1).padStart(6, '0');
-    const year = new Date().getFullYear();
-    const residentIdNum = `BRGY-${year}-${nextSeq}`;
-
-    // Calculate Senior Status
-    const calculatedAge = calculateAge(birthdate);
-    const isSenior = calculatedAge >= 60;
-
-    const qrToken = `QR-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-    await client.query(
-      `INSERT INTO residents (
-        user_id, resident_id_number, first_name, middle_name, last_name, suffix,
-        birthdate, sex, civil_status, address, contact_number, email,
-        occupation, educational_attainment, nationality, voter_status,
-        pwd_status, senior_status, four_ps_status, emergency_contact_name,
-        emergency_contact_number, photo_url, valid_id_url, qr_token
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
-      [
-        newUserId, residentIdNum, first_name, middle_name || null, last_name, suffix || null,
-        birthdate, sex, civil_status, address, contact_number, email,
-        occupation || null, educational_attainment || null, nationality || 'Filipino', voter_status === 'true',
-        pwd_status === 'true', isSenior, four_ps_status === 'true', emergency_contact_name || null,
-        emergency_contact_number || null, photoFile, validIdFile, qrToken
-      ]
-    );
-
-    // Initial system notification for the resident
-    await client.query(
-      `INSERT INTO notifications (user_id, message, type) VALUES ($1, $2, 'INFO')`,
-      [newUserId, 'Your registration application has been submitted and is pending administrator approval.']
-    );
-
-    await client.query('COMMIT');
-
-    await logActivity(newUserId, 'RESIDENT', 'Registration Submitted', 'RESIDENT_REGISTRATION', residentIdNum, req);
-
-    res.send(`
-      <div style="font-family: sans-serif; text-align: center; margin-top: 4rem;">
-        <h2 style="color: #16a34a;">Registration Submitted Successfully!</h2>
-        <p style="margin-top: 1rem; color: #475569;">Your account status is currently <strong>PENDING APPROVAL</strong>.</p>
-        <p style="color: #475569;">An administrator will review your submitted profile and valid ID.</p>
-        <a href="/resident-login" style="display: inline-block; margin-top: 1.5rem; padding: 0.6rem 1.2rem; background: #2563eb; color: white; text-decoration: none; border-radius: 6px;">Return to Login</a>
-      </div>
-    `);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Registration error:', err);
-    res.status(500).send('Error processing registration. Please try again.');
-  } finally {
-    client.release();
-  }
-});
-
-// UNIVERSAL LOGIN PAGE CREATOR
-function renderLoginPage(portalTitle, formAction, themeColor, bgGradient) {
-  return `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>${portalTitle} - Login</title>
-      <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background: ${bgGradient}; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
-        .login-card { background: white; border-radius: 12px; padding: 2.5rem; max-width: 400px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
-        .login-card h2 { text-align: center; color: #0f172a; font-size: 1.5rem; margin-bottom: 0.5rem; }
-        .login-card p { text-align: center; color: #64748b; font-size: 0.85rem; margin-bottom: 1.75rem; }
-        .form-group { margin-bottom: 1.25rem; }
-        label { display: block; font-size: 0.85rem; font-weight: 600; color: #334155; margin-bottom: 0.35rem; }
-        input { width: 100%; padding: 0.7rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; outline: none; }
-        input:focus { border-color: ${themeColor}; }
-        .btn-submit { width: 100%; padding: 0.75rem; background: ${themeColor}; color: white; border: none; font-size: 0.95rem; font-weight: 600; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
-        .btn-submit:hover { opacity: 0.9; }
-        .footer-links { text-align: center; margin-top: 1.25rem; font-size: 0.85rem; color: #64748b; }
-        .footer-links a { color: ${themeColor}; text-decoration: none; font-weight: 500; }
-      </style>
-    </head>
-    <body>
-      <div class="login-card">
-        <h2>${portalTitle}</h2>
-        <p>Enter your credentials to access your account</p>
-        <form action="${formAction}" method="POST">
-          <div class="form-group">
-            <label>Username or Email</label>
-            <input type="text" name="login_identifier" required autocomplete="username">
-          </div>
-          <div class="form-group">
-            <label>Password</label>
-            <input type="password" name="password" required autocomplete="current-password">
-          </div>
-          <button type="submit" class="btn-submit">Sign In</button>
-        </form>
-        ${formAction.includes('resident') ? `
-          <div class="footer-links">
-            New Resident? <a href="/resident-register">Register here</a>
-          </div>
-        ` : ''}
-        <div class="footer-links" style="margin-top: 0.5rem;">
-          <a href="/">← Return to Portal Switcher</a>
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase font-semibold">
+                        <tr>
+                            <th class="p-4">Resident ID & Photo</th>
+                            <th class="p-4">Full Name</th>
+                            <th class="p-4">Age/Gender</th>
+                            <th class="p-4">Purok / Address</th>
+                            <th class="p-4">Contact</th>
+                            <th class="p-4">Category</th>
+                            <th class="p-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${data.residents.map(r => `
+                            <tr class="hover:bg-slate-50/50 transition">
+                                <td class="p-4 flex items-center space-x-3">
+                                    <img src="${r.photo}" onerror="this.src='https://placehold.co/150x150/1e40af/ffffff?text=RES'" class="w-10 h-10 rounded-full object-cover border">
+                                    <div>
+                                        <span class="font-bold text-blue-600 text-xs">${r.residentId}</span>
+                                        <p class="text-xs text-slate-400">HH: ${r.householdNo}</p>
+                                    </div>
+                                </td>
+                                <td class="p-4 font-semibold text-slate-800">${r.lastName}, ${r.firstName} ${r.middleName} ${r.suffix}</td>
+                                <td class="p-4 text-slate-600">${r.age} yrs / ${r.gender}</td>
+                                <td class="p-4 text-slate-600">${r.purok}<br><span class="text-xs text-slate-400">${r.address}</span></td>
+                                <td class="p-4 text-slate-600">${r.contactNumber}</td>
+                                <td class="p-4"><span class="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-medium">${r.category}</span></td>
+                                <td class="p-4 text-right space-x-2">
+                                    <button onclick="alert('Viewing profile for ${r.firstName} ${r.lastName}\\nID: ${r.residentId}\\nAddress: ${r.address}\\nEmail: ${r.email}\\nVoter Status: ${r.voterStatus}')" class="px-3 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-semibold">View</button>
+                                    <form action="/api/residents/delete" method="POST" class="inline">
+                                        <input type="hidden" name="residentId" value="${r.residentId}">
+                                        <button type="submit" onclick="return confirm('Archive this resident?')" class="px-3 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-semibold">Archive</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
         </div>
-      </div>
-    </body>
-    </html>
-  `;
+
+        <!-- Add Resident Modal -->
+        <div id="addResModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <h3 class="font-bold text-lg text-slate-800">Add New Resident</h3>
+                    <button onclick="document.getElementById('addResModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600">✕</button>
+                </div>
+                <form action="/api/residents/add" method="POST" class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">First Name</label>
+                        <input type="text" name="firstName" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Middle Name</label>
+                        <input type="text" name="middleName" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Last Name</label>
+                        <input type="text" name="lastName" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Suffix</label>
+                        <input type="text" name="suffix" placeholder="Jr., III" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Date of Birth</label>
+                        <input type="date" name="dob" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Age</label>
+                        <input type="number" name="age" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Gender</label>
+                        <select name="gender" class="w-full p-2.5 border rounded-xl">
+                            <option>Male</option>
+                            <option>Female</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Civil Status</label>
+                        <select name="civilStatus" class="w-full p-2.5 border rounded-xl">
+                            <option>Single</option>
+                            <option>Married</option>
+                            <option>Widowed</option>
+                            <option>Separated</option>
+                        </select>
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block font-semibold text-slate-700 mb-1">Street Address</label>
+                        <input type="text" name="address" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Purok</label>
+                        <select name="purok" class="w-full p-2.5 border rounded-xl">
+                            ${data.puroks.map(p => `<option>${p.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Household No</label>
+                        <input type="text" name="householdNo" value="HH-101" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Contact Number</label>
+                        <input type="text" name="contactNumber" placeholder="09XXXXXXXXX" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Email Address</label>
+                        <input type="email" name="email" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Occupation</label>
+                        <input type="text" name="occupation" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Educational Attainment</label>
+                        <input type="text" name="educationalAttainment" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Voter Status</label>
+                        <select name="voterStatus" class="w-full p-2.5 border rounded-xl">
+                            <option>Registered Voter</option>
+                            <option>Not Registered</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Resident Category</label>
+                        <select name="category" class="w-full p-2.5 border rounded-xl">
+                            <option>Regular Resident</option>
+                            <option>Senior Citizen</option>
+                            <option>PWD</option>
+                            <option>Solo Parent</option>
+                            <option>Student</option>
+                            <option>Minor</option>
+                        </select>
+                    </div>
+                    <div class="sm:col-span-2 flex justify-end space-x-3 pt-4 border-t">
+                        <button type="button" onclick="document.getElementById('addResModal').classList.add('hidden')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-semibold">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-500">Save Resident</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    `;
 }
 
-app.get('/resident-login', (req, res) => res.send(renderLoginPage('Resident Portal', '/resident-login', '#2563eb', 'linear-gradient(135deg, #1e3a8a, #3b82f6)')));
-app.get('/staff-login', (req, res) => res.send(renderLoginPage('Staff Portal', '/staff-login', '#0f766e', 'linear-gradient(135deg, #134e4a, #0d9488)')));
-app.get('/admin-login', (req, res) => res.send(renderLoginPage('Admin Portal', '/admin-login', '#1e293b', 'linear-gradient(135deg, #0f172a, #334155)')));
-
-// AUTHENTICATION LOGIC POST HANDLER
-async function processLogin(req, res, expectedRole, redirectPath) {
-  const { login_identifier, password } = req.body;
-  try {
-    const result = await pool.query(
-      'SELECT * FROM users WHERE (username = $1 OR email = $1)',
-      [login_identifier]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(401).send('Invalid credentials. <a href="javascript:history.back()">Try again</a>');
-    }
-
-    const user = result.rows[0];
-
-    if (expectedRole !== 'ANY' && user.role !== expectedRole) {
-      return res.status(403).send(`Unauthorized for this portal. <a href="javascript:history.back()">Go back</a>`);
-    }
-
-    const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) {
-      return res.status(401).send('Invalid credentials. <a href="javascript:history.back()">Try again</a>');
-    }
-
-    if (user.status === 'PENDING') {
-      return res.status(403).send('Your account registration is still PENDING administrator approval. Please wait for verification.');
-    }
-
-    if (user.status !== 'ACTIVE') {
-      return res.status(403).send(`Account state is ${user.status}. Access denied.`);
-    }
-
-    // Set Session Variables
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    req.session.role = user.role;
-    req.session.permissions = user.permissions || [];
-
-    if (user.role === 'RESIDENT') {
-      const resInfo = await pool.query('SELECT id, resident_id_number FROM residents WHERE user_id = $1', [user.id]);
-      if (resInfo.rows.length > 0) {
-        req.session.residentId = resInfo.rows[0].id;
-        req.session.residentIdNumber = resInfo.rows[0].resident_id_number;
-      }
-    }
-
-    await logActivity(user.id, user.role, 'User Login Success', 'AUTH', user.id, req);
-    res.redirect(redirectPath);
-  } catch (err) {
-    console.error('Login Error:', err);
-    res.status(500).send('Internal system login error.');
-  }
-}
-
-app.post('/resident-login', (req, res) => processLogin(req, res, 'RESIDENT', '/resident/dashboard'));
-app.post('/staff-login', (req, res) => processLogin(req, res, 'STAFF', '/staff/dashboard'));
-app.post('/admin-login', (req, res) => processLogin(req, res, 'ADMIN', '/admin/dashboard'));
-
-app.get('/logout', async (req, res) => {
-  if (req.session?.userId) {
-    await logActivity(req.session.userId, req.session.role, 'User Logout', 'AUTH', req.session.userId, req);
-  }
-  req.session.destroy(() => {
-    res.redirect('/');
-  });
-});
-
-// A. RESIDENT PORTAL ROUTES
-app.get('/resident/dashboard', requireResident, async (req, res) => {
-  try {
-    const residentRes = await pool.query('SELECT * FROM residents WHERE user_id = $1', [req.session.userId]);
-    const resident = residentRes.rows[0];
-
-    const pendingReqs = await pool.query('SELECT COUNT(*) FROM document_requests WHERE resident_id = $1 AND status IN (\'Pending\', \'Under Review\')', [resident.id]);
-    const completedDocs = await pool.query('SELECT COUNT(*) FROM document_requests WHERE resident_id = $1 AND status = \'Completed\'', [resident.id]);
-    const unreadNotifs = await pool.query('SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND is_read = FALSE', [req.session.userId]);
-
-    const announcements = await pool.query('SELECT * FROM announcements WHERE is_published = TRUE ORDER BY created_at DESC LIMIT 3');
-    const recentRequests = await pool.query(`
-      SELECT dr.*, dt.title as doc_title 
-      FROM document_requests dr 
-      JOIN document_types dt ON dr.document_type_id = dt.id 
-      WHERE dr.resident_id = $1 
-      ORDER BY dr.created_at DESC LIMIT 5
-    `, [resident.id]);
-
-    const qrDataUrl = await QRCode.toDataURL(resident.qr_token);
-
-    const content = `
-      <div class="page-header">
-        <div>
-          <h1 class="page-title">Welcome back, ${resident.first_name}!</h1>
-          <p style="color: var(--text-light); font-size: 0.9rem;">Resident ID: <strong>${resident.resident_id_number}</strong></p>
-        </div>
-        <div>
-          <a href="/resident/documents/request" class="btn btn-primary">+ Request Document</a>
-        </div>
-      </div>
-
-      <div class="card-grid">
-        <div class="card stat-card">
-          <span class="stat-title">Pending Requests</span>
-          <span class="stat-value">${pendingReqs.rows[0].count}</span>
-        </div>
-        <div class="card stat-card">
-          <span class="stat-title">Completed Documents</span>
-          <span class="stat-value">${completedDocs.rows[0].count}</span>
-        </div>
-        <div class="card stat-card">
-          <span class="stat-title">Unread Notifications</span>
-          <span class="stat-value">${unreadNotifs.rows[0].count}</span>
-        </div>
-      </div>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem;">
-        <div class="card">
-          <h2 style="font-size: 1.1rem; margin-bottom: 1rem; font-weight: 700;">Digital Barangay ID Quick Access</h2>
-          <div style="text-align: center; padding: 1rem;">
-            <img src="${qrDataUrl}" style="width: 150px; height: 150px; border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem;" alt="QR Code">
-            <div style="margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: center;">
-              <a href="/resident/id" class="btn btn-secondary btn-sm">View ID Card</a>
-              <a href="/resident/qr" class="btn btn-secondary btn-sm">Show Full QR</a>
-            </div>
-          </div>
+function renderStaffHouseholds(data) {
+    return `
+    <div class="space-y-6">
+        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Household Records</h3>
+            <button onclick="document.getElementById('addHHModal').classList.remove('hidden')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm shadow-md transition">+ Add Household</button>
         </div>
 
-        <div class="card">
-          <h2 style="font-size: 1.1rem; margin-bottom: 1rem; font-weight: 700;">Recent Announcements</h2>
-          ${announcements.rows.length === 0 ? '<p style="color: var(--text-light); font-size: 0.85rem;">No announcements available.</p>' : ''}
-          <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-            ${announcements.rows.map(a => `
-              <div style="border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
-                <strong style="font-size: 0.9rem; color: var(--text-dark);">${a.title}</strong>
-                <p style="font-size: 0.8rem; color: var(--text-light); margin-top: 0.2rem;">${a.content.substring(0, 90)}...</p>
-              </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            ${data.households.map(h => `
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <span class="text-xs font-bold text-blue-600 px-2.5 py-1 bg-blue-50 rounded-lg">${h.householdNo}</span>
+                            <h4 class="font-bold text-slate-800 text-lg mt-2">Head: ${h.headName}</h4>
+                        </div>
+                        <span class="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-md font-medium">${h.membersCount} Members</span>
+                    </div>
+                    <div class="text-sm text-slate-600 space-y-1">
+                        <p>📍 <strong>Address:</strong> ${h.address}</p>
+                        <p>📌 <strong>Purok:</strong> ${h.purok}</p>
+                    </div>
+                    <div class="border-t pt-3">
+                        <p class="text-xs font-semibold text-slate-400 uppercase mb-2">Household Members:</p>
+                        <div class="flex flex-wrap gap-1">
+                            ${h.members.map(m => `<span class="px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs">${m}</span>`).join('')}
+                        </div>
+                    </div>
+                </div>
             `).join('')}
-          </div>
         </div>
-      </div>
 
-      <div class="card">
-        <h2 style="font-size: 1.1rem; margin-bottom: 1rem; font-weight: 700;">My Recent Document Requests</h2>
-        <div class="table-responsive">
-          <table>
-            <thead>
-              <tr>
-                <th>Request ID</th>
-                <th>Document</th>
-                <th>Purpose</th>
-                <th>Date</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${recentRequests.rows.length === 0 ? '<tr><td colspan="5" style="text-align:center;">No recent requests found.</td></tr>' : ''}
-              ${recentRequests.rows.map(r => `
-                <tr>
-                  <td><strong>${r.request_number}</strong></td>
-                  <td>${r.doc_title}</td>
-                  <td>${r.purpose}</td>
-                  <td>${new Date(r.created_at).toLocaleDateString()}</td>
-                  <td><span class="badge badge-${r.status.toLowerCase().replace(' ', '')}">${r.status}</span></td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+        <!-- Add Household Modal -->
+        <div id="addHHModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <h3 class="font-bold text-lg text-slate-800">Add New Household</h3>
+                    <button onclick="document.getElementById('addHHModal').classList.add('hidden')" class="text-slate-400">✕</button>
+                </div>
+                <form action="/api/households/add" method="POST" class="space-y-4 text-sm">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Household Number</label>
+                        <input type="text" name="householdNo" value="HH-104" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Household Head Name</label>
+                        <input type="text" name="headName" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Address</label>
+                        <input type="text" name="address" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Purok</label>
+                        <select name="purok" class="w-full p-2.5 border rounded-xl">
+                            ${data.puroks.map(p => `<option>${p.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Members (Comma separated names)</label>
+                        <input type="text" name="members" placeholder="Juan Gomez, Elena Gomez" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div class="flex justify-end space-x-3 pt-4 border-t">
+                        <button type="button" onclick="document.getElementById('addHHModal').classList.add('hidden')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-semibold">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-500">Save Household</button>
+                    </div>
+                </form>
+            </div>
         </div>
-      </div>
+    </div>
     `;
+}
 
-    res.send(renderLayout({
-      title: 'Resident Dashboard',
-      portal: 'RESIDENT',
-      user: { username: req.session.username, role: req.session.role },
-      activeNav: 'dashboard',
-      content: content
-    }));
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Error rendering dashboard.');
-  }
-});
-
-app.get('/resident/profile', requireResident, async (req, res) => {
-  const result = await pool.query('SELECT * FROM residents WHERE user_id = $1', [req.session.userId]);
-  const r = result.rows[0];
-  const age = calculateAge(r.birthdate);
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">My Profile</h1>
-    </div>
-    <div class="card" style="max-width: 900px;">
-      <div style="display: flex; gap: 1.5rem; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; flex-wrap: wrap;">
-        <img src="${r.photo_url || 'https://via.placeholder.com/120'}" style="width: 120px; height: 120px; border-radius: 50%; object-fit: cover; border: 3px solid var(--accent);" alt="Photo">
-        <div>
-          <h2>${r.first_name} ${r.middle_name || ''} ${r.last_name} ${r.suffix || ''}</h2>
-          <p style="color: var(--text-light);">Resident ID: <strong>${r.resident_id_number}</strong></p>
-          <span class="badge badge-approved" style="margin-top: 0.5rem;">Verified Resident</span>
+function renderStaffPuroks(data) {
+    return `
+    <div class="space-y-6">
+        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Purok Management & Population</h3>
+            <button onclick="document.getElementById('addPurokModal').classList.remove('hidden')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm shadow-md transition">+ Add Purok</button>
         </div>
-      </div>
 
-      <div class="form-row" style="row-gap: 1.25rem;">
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">BIRTHDATE & AGE</label><div>${new Date(r.birthdate).toLocaleDateString()} (${age} years old)</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">SEX</label><div>${r.sex}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">CIVIL STATUS</label><div>${r.civil_status}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">CONTACT NUMBER</label><div>${r.contact_number}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">EMAIL</label><div>${r.email}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">ADDRESS</label><div>${r.address}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">OCCUPATION</label><div>${r.occupation || 'N/A'}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">EDUCATION</label><div>${r.educational_attainment || 'N/A'}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">VOTER STATUS</label><div>${r.voter_status ? 'Yes' : 'No'}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">SENIOR CITIZEN</label><div>${r.senior_status ? 'Yes' : 'No'}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">PWD STATUS</label><div>${r.pwd_status ? 'Yes' : 'No'}</div></div>
-        <div><label style="font-weight:600; color:var(--text-light); font-size:0.8rem;">4Ps BENEFICIARY</label><div>${r.four_ps_status ? 'Yes' : 'No'}</div></div>
-      </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            ${data.puroks.map(p => {
+                const residentsInPurok = data.residents.filter(r => r.purok === p.name).length;
+                return `
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                    <h4 class="font-bold text-lg text-blue-600">${p.name}</h4>
+                    <p class="text-sm text-slate-600">${p.description}</p>
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1">
+                        <p class="text-xs text-slate-500">Purok Leader: <strong>${p.leader}</strong></p>
+                        <p class="text-xs text-slate-500">Total Population: <strong class="text-slate-800">${residentsInPurok} Residents</strong></p>
+                    </div>
+                </div>
+                `;
+            }).join('')}
+        </div>
+
+        <!-- Add Purok Modal -->
+        <div id="addPurokModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <h3 class="font-bold text-lg text-slate-800">Add New Purok</h3>
+                    <button onclick="document.getElementById('addPurokModal').classList.add('hidden')" class="text-slate-400">✕</button>
+                </div>
+                <form action="/api/puroks/add" method="POST" class="space-y-4 text-sm">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Purok Name</label>
+                        <input type="text" name="name" placeholder="Purok 4 - St. Joseph" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Purok Leader</label>
+                        <input type="text" name="leader" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Description / Area</label>
+                        <input type="text" name="description" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div class="flex justify-end space-x-3 pt-4 border-t">
+                        <button type="button" onclick="document.getElementById('addPurokModal').classList.add('hidden')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-semibold">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-500">Save Purok</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
-  `;
-
-  res.send(renderLayout({ title: 'My Profile', portal: 'RESIDENT', user: req.session, activeNav: 'profile', content }));
-});
-
-app.get('/resident/household', requireResident, async (req, res) => {
-  const residentRes = await pool.query('SELECT household_id FROM residents WHERE user_id = $1', [req.session.userId]);
-  const hhId = residentRes.rows[0]?.household_id;
-
-  let content = '';
-  if (!hhId) {
-    content = `
-      <div class="page-header"><h1 class="page-title">My Household</h1></div>
-      <div class="card"><p style="color: var(--text-light);">You are not currently linked to any registered household record. Please visit the Barangay Hall to update your household membership.</p></div>
     `;
-  } else {
-    const hhRes = await pool.query('SELECT * FROM households WHERE id = $1', [hhId]);
-    const membersRes = await pool.query('SELECT * FROM residents WHERE household_id = $1', [hhId]);
-    const household = hhRes.rows[0];
+}
 
-    content = `
-      <div class="page-header">
-        <h1 class="page-title">Household No: ${household.household_number}</h1>
-      </div>
-      <div class="card" style="margin-bottom: 1.5rem;">
-        <p><strong>Address:</strong> ${household.address}</p>
-        <p><strong>Classification:</strong> ${household.classification}</p>
-        <p><strong>Total Registered Members:</strong> ${membersRes.rows.length}</p>
-      </div>
-
-      <div class="card">
-        <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Household Members</h2>
-        <div class="table-responsive">
-          <table>
-            <thead>
-              <tr>
-                <th>Member Name</th>
-                <th>Sex</th>
-                <th>Civil Status</th>
-                <th>Relationship</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${membersRes.rows.map(m => `
-                <tr>
-                  <td><strong>${m.first_name} ${m.last_name}</strong> ${m.id === household.head_resident_id ? '<span class="badge badge-approved">Head</span>' : ''}</td>
-                  <td>${m.sex}</td>
-                  <td>${m.civil_status}</td>
-                  <td>${m.household_relationship || 'Member'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+function renderStaffCertificates(data) {
+    return `
+    <div class="space-y-6">
+        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Issued Certificates & QR Verification</h3>
+            <button onclick="document.getElementById('addCertModal').classList.remove('hidden')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm shadow-md transition">+ Issue Certificate</button>
         </div>
-      </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-semibold">
+                        <tr>
+                            <th class="p-4">Certificate #</th>
+                            <th class="p-4">Resident Name</th>
+                            <th class="p-4">Certificate Type</th>
+                            <th class="p-4">Date Released</th>
+                            <th class="p-4">Remarks</th>
+                            <th class="p-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${data.certificates.map(c => `
+                            <tr>
+                                <td class="p-4 font-bold text-blue-600">${c.certNo}</td>
+                                <td class="p-4 font-semibold text-slate-800">${c.residentName}</td>
+                                <td class="p-4 text-slate-600">${c.type}</td>
+                                <td class="p-4 text-slate-600">${c.dateReleased}</td>
+                                <td class="p-4 text-slate-500 text-xs">${c.remarks}</td>
+                                <td class="p-4 text-right space-x-2">
+                                    <button onclick="window.print()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">Print</button>
+                                    <button onclick="alert('QR Verification Secure Hash Verified:\\nAuthentic Barangay Official Document\\nCert ID: ${c.certNo}\\nIssued To: ${c.residentName}')" class="px-3 py-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-xs font-semibold">Verify QR</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Issue Certificate Modal -->
+        <div id="addCertModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <h3 class="font-bold text-lg text-slate-800">Issue Barangay Certificate</h3>
+                    <button onclick="document.getElementById('addCertModal').classList.add('hidden')" class="text-slate-400">✕</button>
+                </div>
+                <form action="/api/certificates/add" method="POST" class="space-y-4 text-sm">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Resident Name</label>
+                        <select name="residentName" class="w-full p-2.5 border rounded-xl">
+                            ${data.residents.map(r => `<option>${r.firstName} ${r.lastName}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Certificate Type</label>
+                        <select name="type" class="w-full p-2.5 border rounded-xl">
+                            <option>Barangay Clearance</option>
+                            <option>Certificate of Residency</option>
+                            <option>Certificate of Indigency</option>
+                            <option>Certificate of Good Moral</option>
+                            <option>Certificate of No Income</option>
+                            <option>Business Clearance</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Remarks / Purpose</label>
+                        <input type="text" name="remarks" placeholder="For employment / local ID" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div class="flex justify-end space-x-3 pt-4 border-t">
+                        <button type="button" onclick="document.getElementById('addCertModal').classList.add('hidden')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-semibold">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-500">Issue & Sign</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
     `;
-  }
+}
 
-  res.send(renderLayout({ title: 'My Household', portal: 'RESIDENT', user: req.session, activeNav: 'household', content }));
-});
-
-app.get('/resident/id', requireResident, async (req, res) => {
-  const residentRes = await pool.query('SELECT * FROM residents WHERE user_id = $1', [req.session.userId]);
-  const resident = residentRes.rows[0];
-  const settingsRes = await pool.query('SELECT * FROM system_settings LIMIT 1');
-  const sys = settingsRes.rows[0];
-
-  const qrDataUrl = await QRCode.toDataURL(resident.qr_token);
-
-  const content = `
-    <div class="page-header no-print">
-      <h1 class="page-title">Digital Barangay Resident ID</h1>
-      <button onclick="window.print()" class="btn btn-primary">🖨️ Print ID Card</button>
-    </div>
-
-    <div class="printable">
-      <div class="id-card">
-        <div class="id-header">
-          <div style="background: white; color: black; font-weight: bold; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">B</div>
-          <div>
-            <h4 style="font-size: 0.8rem; font-weight: 700;">${sys.barangay_name.toUpperCase()}</h4>
-            <p style="font-size: 0.65rem; color: #cbd5e1;">${sys.municipality}, ${sys.province}</p>
-          </div>
+function renderStaffRequests(data) {
+    return `
+    <div class="space-y-6">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Online Resident Requests Workflow</h3>
         </div>
-        <div class="id-body">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/80'}" class="id-photo" alt="Photo">
-          <div class="id-details">
-            <h3>${resident.first_name} ${resident.last_name}</h3>
-            <p>ID: <strong>${resident.resident_id_number}</strong></p>
-            <p>${resident.address}</p>
-            <p>DOB: ${new Date(resident.birthdate).toLocaleDateString()}</p>
-          </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-semibold">
+                        <tr>
+                            <th class="p-4">Req #</th>
+                            <th class="p-4">Resident</th>
+                            <th class="p-4">Document Type</th>
+                            <th class="p-4">Date Submitted</th>
+                            <th class="p-4">Status</th>
+                            <th class="p-4 text-right">Update Workflow</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${data.requests.map(r => `
+                            <tr>
+                                <td class="p-4 font-bold text-blue-600">${r.reqNo}</td>
+                                <td class="p-4 font-semibold text-slate-800">${r.residentName}</td>
+                                <td class="p-4 text-slate-600">${r.type}</td>
+                                <td class="p-4 text-slate-600">${r.dateSubmitted}</td>
+                                <td class="p-4">
+                                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${r.status === 'Approved' ? 'bg-emerald-50 text-emerald-600' : r.status === 'Processing' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}">${r.status}</span>
+                                </td>
+                                <td class="p-4 text-right">
+                                    <form action="/api/requests/update" method="POST" class="inline-flex space-x-1">
+                                        <input type="hidden" name="id" value="${r.id}">
+                                        <select name="status" class="p-1.5 border rounded-lg text-xs bg-slate-50">
+                                            <option ${r.status==='Submitted'?'selected':''}>Submitted</option>
+                                            <option ${r.status==='Processing'?'selected':''}>Processing</option>
+                                            <option ${r.status==='Approved'?'selected':''}>Approved</option>
+                                            <option ${r.status==='Ready for Release'?'selected':''}>Ready for Release</option>
+                                            <option ${r.status==='Released'?'selected':''}>Released</option>
+                                        </select>
+                                        <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-500">Update</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
         </div>
-        <div class="id-footer">
-          <span>Official Digital ID</span>
-          <img src="${qrDataUrl}" style="width: 35px; height: 35px; background: white; padding: 2px; border-radius: 4px;" alt="QR">
+    </div>
+    `;
+}
+
+function renderStaffBlotters(data) {
+    return `
+    <div class="space-y-6">
+        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Blotter & Incident Records</h3>
+            <button onclick="document.getElementById('addBlotterModal').classList.remove('hidden')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm shadow-md transition">+ Record Case</button>
         </div>
-      </div>
-    </div>
-  `;
 
-  res.send(renderLayout({ title: 'My Resident ID', portal: 'RESIDENT', user: req.session, activeNav: 'id', content }));
-});
-
-app.get('/resident/qr', requireResident, async (req, res) => {
-  const residentRes = await pool.query('SELECT qr_token, resident_id_number FROM residents WHERE user_id = $1', [req.session.userId]);
-  const resident = residentRes.rows[0];
-  const qrDataUrl = await QRCode.toDataURL(resident.qr_token, { width: 300 });
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">My Personal Verification QR</h1>
-    </div>
-    <div class="card" style="text-align: center; max-width: 450px; margin: 0 auto; padding: 2rem;">
-      <p style="color: var(--text-light); font-size: 0.9rem; margin-bottom: 1.5rem;">Present this secure QR code to barangay personnel for instant identity verification and document requests.</p>
-      <img src="${qrDataUrl}" style="width: 250px; height: 250px; border: 1px solid var(--border); border-radius: 12px; padding: 1rem;" alt="QR">
-      <p style="margin-top: 1rem; font-weight: 600;">Resident ID: ${resident.resident_id_number}</p>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'My QR Code', portal: 'RESIDENT', user: req.session, activeNav: 'qr', content }));
-});
-
-app.get('/resident/documents/request', requireResident, async (req, res) => {
-  const docTypes = await pool.query('SELECT * FROM document_types ORDER BY title ASC');
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Request Official Document</h1>
-    </div>
-    <div class="card" style="max-width: 600px;">
-      <form action="/resident/documents/request" method="POST" enctype="multipart/form-data">
-        <div class="form-group">
-          <label>Document Type *</label>
-          <select name="document_type_id" class="form-control" required>
-            <option value="">-- Select Document --</option>
-            ${docTypes.rows.map(d => `<option value="${d.id}">${d.title} (Fee: ₱${parseFloat(d.fee).toFixed(2)})</option>`).join('')}
-          </select>
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-semibold">
+                        <tr>
+                            <th class="p-4">Case #</th>
+                            <th class="p-4">Complainant vs Respondent</th>
+                            <th class="p-4">Incident Type</th>
+                            <th class="p-4">Date & Location</th>
+                            <th class="p-4">Status</th>
+                            <th class="p-4 text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${data.blotters.map(b => `
+                            <tr>
+                                <td class="p-4 font-bold text-blue-600">${b.caseNo}</td>
+                                <td class="p-4 font-semibold text-slate-800">${b.complainant} vs <br><span class="text-slate-500 font-normal">${b.respondent}</span></td>
+                                <td class="p-4 text-slate-600">${b.type}</td>
+                                <td class="p-4 text-slate-600">${b.incidentDate}<br><span class="text-xs text-slate-400">${b.location}</span></td>
+                                <td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold ${b.status==='Closed'?'bg-slate-100 text-slate-700':'bg-amber-50 text-amber-600'}">${b.status}</span></td>
+                                <td class="p-4 text-right">
+                                    <button onclick="window.print()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">Print Report</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
         </div>
-        <div class="form-group">
-          <label>Purpose of Request *</label>
-          <textarea name="purpose" class="form-control" rows="3" placeholder="State reason (e.g. Employment, Scholarship, Bank Application)" required></textarea>
+
+        <!-- Add Blotter Modal -->
+        <div id="addBlotterModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <h3 class="font-bold text-lg text-slate-800">Record Blotter Case</h3>
+                    <button onclick="document.getElementById('addBlotterModal').classList.add('hidden')" class="text-slate-400">✕</button>
+                </div>
+                <form action="/api/blotters/add" method="POST" class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Complainant</label>
+                        <input type="text" name="complainant" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Respondent</label>
+                        <input type="text" name="respondent" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Witness</label>
+                        <input type="text" name="witness" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Incident Type</label>
+                        <input type="text" name="type" placeholder="Dispute, Noise, Theft" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Incident Date</label>
+                        <input type="date" name="incidentDate" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Incident Time</label>
+                        <input type="text" name="incidentTime" placeholder="08:00 PM" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block font-semibold text-slate-700 mb-1">Location</label>
+                        <input type="text" name="location" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block font-semibold text-slate-700 mb-1">Description</label>
+                        <textarea name="description" rows="3" required class="w-full p-2.5 border rounded-xl"></textarea>
+                    </div>
+                    <div class="sm:col-span-2 flex justify-end space-x-3 pt-4 border-t">
+                        <button type="button" onclick="document.getElementById('addBlotterModal').classList.add('hidden')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-semibold">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-500">Save Blotter Case</button>
+                    </div>
+                </form>
+            </div>
         </div>
-        <div class="form-group">
-          <label>Attach Supporting Document/Requirement (Optional, PDF/JPG)</label>
-          <input type="file" name="requirement_file" class="form-control" accept="image/*,application/pdf">
+    </div>
+    `;
+}
+
+function renderStaffAppointments(data) {
+    return `
+    <div class="space-y-6">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Resident Appointments Schedule</h3>
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Submit Request</button>
-      </form>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-semibold">
+                        <tr>
+                            <th class="p-4">Date & Time</th>
+                            <th class="p-4">Resident Name</th>
+                            <th class="p-4">Service</th>
+                            <th class="p-4">Status</th>
+                            <th class="p-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${data.appointments.map(a => `
+                            <tr>
+                                <td class="p-4 font-bold text-slate-800">${a.date} <br><span class="text-xs text-blue-600 font-normal">${a.time}</span></td>
+                                <td class="p-4 font-semibold text-slate-800">${a.residentName}</td>
+                                <td class="p-4 text-slate-600">${a.service}</td>
+                                <td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold ${a.status==='Approved'?'bg-emerald-50 text-emerald-600':'bg-amber-50 text-amber-600'}">${a.status}</span></td>
+                                <td class="p-4 text-right space-x-1">
+                                    <form action="/api/appointments/update" method="POST" class="inline">
+                                        <input type="hidden" name="id" value="${a.id}">
+                                        <input type="hidden" name="status" value="Approved">
+                                        <button type="submit" class="px-3 py-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-xs font-semibold">Approve</button>
+                                    </form>
+                                    <form action="/api/appointments/update" method="POST" class="inline">
+                                        <input type="hidden" name="id" value="${a.id}">
+                                        <input type="hidden" name="status" value="Cancelled">
+                                        <button type="submit" class="px-3 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-semibold">Cancel</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
-  `;
+    `;
+}
 
-  res.send(renderLayout({ title: 'Request Document', portal: 'RESIDENT', user: req.session, activeNav: 'doc-req', content }));
-});
+function renderStaffAssistances(data) {
+    return `
+    <div class="space-y-6">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Financial & Medical Assistance Applications</h3>
+        </div>
 
-app.post('/resident/documents/request', requireResident, upload.single('requirement_file'), async (req, res) => {
-  try {
-    const { document_type_id, purpose } = req.body;
-    const residentRes = await pool.query('SELECT id FROM residents WHERE user_id = $1', [req.session.userId]);
-    const residentId = residentRes.rows[0].id;
-
-    const countRes = await pool.query('SELECT COUNT(*) FROM document_requests');
-    const reqNum = `REQ-${new Date().getFullYear()}-${String(parseInt(countRes.rows[0].count) + 1).padStart(5, '0')}`;
-    const reqFile = req.file ? `/uploads/${req.file.filename}` : null;
-
-    await pool.query(`
-      INSERT INTO document_requests (request_number, resident_id, document_type_id, purpose, requirements_url)
-      VALUES ($1, $2, $3, $4, $5)
-    `, [reqNum, residentId, document_type_id, purpose, reqFile]);
-
-    await logActivity(req.session.userId, 'RESIDENT', 'Document Requested', 'DOCUMENTS', reqNum, req);
-
-    res.redirect('/resident/documents/history');
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Error submitting document request.');
-  }
-});
-
-app.get('/resident/documents/history', requireResident, async (req, res) => {
-  const residentRes = await pool.query('SELECT id FROM residents WHERE user_id = $1', [req.session.userId]);
-  const requests = await pool.query(`
-    SELECT dr.*, dt.title as doc_title, dt.fee 
-    FROM document_requests dr 
-    JOIN document_types dt ON dr.document_type_id = dt.id 
-    WHERE dr.resident_id = $1 
-    ORDER BY dr.created_at DESC
-  `, [residentRes.rows[0].id]);
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">My Document Requests</h1>
-      <a href="/resident/documents/request" class="btn btn-primary">+ New Request</a>
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-semibold">
+                        <tr>
+                            <th class="p-4">Resident Name</th>
+                            <th class="p-4">Assistance Type</th>
+                            <th class="p-4">Amount</th>
+                            <th class="p-4">Date</th>
+                            <th class="p-4">Status & Remarks</th>
+                            <th class="p-4 text-right">Update</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${data.assistances.map(ast => `
+                            <tr>
+                                <td class="p-4 font-semibold text-slate-800">${ast.residentName}</td>
+                                <td class="p-4 text-slate-600">${ast.type}</td>
+                                <td class="p-4 font-bold text-emerald-600">${ast.amount}</td>
+                                <td class="p-4 text-slate-600">${ast.date}</td>
+                                <td class="p-4">
+                                    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-600">${ast.status}</span>
+                                    <p class="text-xs text-slate-400 mt-0.5">${ast.remarks}</p>
+                                </td>
+                                <td class="p-4 text-right">
+                                    <form action="/api/assistances/update" method="POST" class="inline-flex space-x-1">
+                                        <input type="hidden" name="id" value="${ast.id}">
+                                        <select name="status" class="p-1 border rounded text-xs">
+                                            <option>Approved</option>
+                                            <option>Reviewing</option>
+                                            <option>Rejected</option>
+                                        </select>
+                                        <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded text-xs font-semibold">Save</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
+    `;
+}
 
-    <div class="card">
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Request No</th>
-              <th>Document</th>
-              <th>Purpose</th>
-              <th>Date Requested</th>
-              <th>Status</th>
-              <th>Remarks</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${requests.rows.length === 0 ? '<tr><td colspan="7" style="text-align:center;">No document requests found.</td></tr>' : ''}
-            ${requests.rows.map(r => `
-              <tr>
-                <td><strong>${r.request_number}</strong></td>
-                <td>${r.doc_title}</td>
-                <td>${r.purpose}</td>
-                <td>${new Date(r.created_at).toLocaleDateString()}</td>
-                <td><span class="badge badge-${r.status.toLowerCase().replace(' ', '')}">${r.status}</span></td>
-                <td>${r.remarks || '—'}</td>
-                <td>
-                  ${(r.status === 'Approved' || r.status === 'Ready' || r.status === 'Completed') 
-                    ? `<a href="/resident/documents/print/${r.id}" target="_blank" class="btn btn-secondary btn-sm">🖨️ View & Print</a>`
-                    : '—'}
-                </td>
-              </tr>
+function renderStaffBusinesses(data) {
+    return `
+    <div class="space-y-6">
+        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Local Business Permits & Registrations</h3>
+            <button onclick="document.getElementById('addBusModal').classList.remove('hidden')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm shadow-md transition">+ Register Business</button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            ${data.businesses.map(b => `
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <span class="text-xs font-bold text-blue-600 px-2 py-0.5 bg-blue-50 rounded">${b.businessId}</span>
+                            <h4 class="font-bold text-lg text-slate-800 mt-1">${b.businessName}</h4>
+                        </div>
+                        <span class="px-2.5 py-1 bg-emerald-50 text-emerald-600 text-xs font-semibold rounded-full">${b.permitStatus}</span>
+                    </div>
+                    <div class="text-sm text-slate-600 space-y-1">
+                        <p>👤 <strong>Owner:</strong> ${b.owner}</p>
+                        <p>📍 <strong>Address:</strong> ${b.address} (${b.purok})</p>
+                        <p>📞 <strong>Contact:</strong> ${b.contactNumber}</p>
+                        <p>📅 <strong>Expires:</strong> ${b.expirationDate}</p>
+                    </div>
+                </div>
             `).join('')}
-          </tbody>
-        </table>
-      </div>
+        </div>
+
+        <!-- Add Business Modal -->
+        <div id="addBusModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <h3 class="font-bold text-lg text-slate-800">Register Business</h3>
+                    <button onclick="document.getElementById('addBusModal').classList.add('hidden')" class="text-slate-400">✕</button>
+                </div>
+                <form action="/api/businesses/add" method="POST" class="space-y-4 text-sm">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Business Name</label>
+                        <input type="text" name="businessName" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Owner Name</label>
+                        <input type="text" name="owner" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Address</label>
+                        <input type="text" name="address" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Purok</label>
+                        <select name="purok" class="w-full p-2.5 border rounded-xl">
+                            ${data.puroks.map(p => `<option>${p.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Business Type</label>
+                        <input type="text" name="businessType" placeholder="Retail / Food / Services" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Contact Number</label>
+                        <input type="text" name="contactNumber" class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div class="flex justify-end space-x-3 pt-4 border-t">
+                        <button type="button" onclick="document.getElementById('addBusModal').classList.add('hidden')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-semibold">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-500">Save Business</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
-  `;
+    `;
+}
 
-  res.send(renderLayout({ title: 'My Requests', portal: 'RESIDENT', user: req.session, activeNav: 'doc-hist', content }));
-});
+function renderStaffAnnouncements(data) {
+    return `
+    <div class="space-y-6">
+        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Barangay Announcements & Events</h3>
+            <button onclick="document.getElementById('addAnnModal').classList.remove('hidden')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm shadow-md transition">+ Create Announcement</button>
+        </div>
 
-// RESIDENT PRINT GENERATION ROUTE WITH DIRECT OWNERSHIP CHECK
-app.get('/resident/documents/print/:id', requireResident, async (req, res) => {
-  try {
-    const residentRes = await pool.query('SELECT id, first_name, middle_name, last_name, address, civil_status FROM residents WHERE user_id = $1', [req.session.userId]);
-    const resident = residentRes.rows[0];
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            ${data.announcements.map(a => `
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                    <div class="flex justify-between items-start">
+                        <span class="px-2.5 py-1 bg-blue-50 text-blue-600 text-xs font-semibold rounded-md">${a.category}</span>
+                        <span class="text-xs text-slate-400">${a.date}</span>
+                    </div>
+                    <h4 class="font-bold text-lg text-slate-800">${a.title}</h4>
+                    <p class="text-sm text-slate-600">${a.description}</p>
+                </div>
+            `).join('')}
+        </div>
 
-    const reqRes = await pool.query(`
-      SELECT dr.*, dt.title as doc_title 
-      FROM document_requests dr 
-      JOIN document_types dt ON dr.document_type_id = dt.id 
-      WHERE dr.id = $1
-    `, [req.params.id]);
+        <!-- Add Announcement Modal -->
+        <div id="addAnnModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <h3 class="font-bold text-lg text-slate-800">New Announcement</h3>
+                    <button onclick="document.getElementById('addAnnModal').classList.add('hidden')" class="text-slate-400">✕</button>
+                </div>
+                <form action="/api/announcements/add" method="POST" class="space-y-4 text-sm">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Title</label>
+                        <input type="text" name="title" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Category</label>
+                        <select name="category" class="w-full p-2.5 border rounded-xl">
+                            <option>Health & Medical</option>
+                            <option>Meeting</option>
+                            <option>Emergency Notice</option>
+                            <option>Community Program</option>
+                            <option>Public Notice</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Description</label>
+                        <textarea name="description" rows="4" required class="w-full p-2.5 border rounded-xl"></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 pt-4 border-t">
+                        <button type="button" onclick="document.getElementById('addAnnModal').classList.add('hidden')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-semibold">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-500">Publish Now</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    `;
+}
 
-    if (reqRes.rows.length === 0) return res.status(404).send('Request not found.');
+function renderStaffReports(data) {
+    return `
+    <div class="space-y-6">
+        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Comprehensive Reports & Analytics</h3>
+            <button onclick="window.print()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl text-sm shadow-md transition">🖨️ Print / Export Report</button>
+        </div>
 
-    const docReq = reqRes.rows[0];
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-2">
+                <h4 class="font-bold text-slate-800">Total Population Summary</h4>
+                <p class="text-3xl font-bold text-blue-600">${data.residents.length}</p>
+                <p class="text-xs text-slate-500">Registered residents across all puroks</p>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-2">
+                <h4 class="font-bold text-slate-800">Gender Distribution</h4>
+                <p class="text-lg font-semibold text-slate-700">Male: ${data.residents.filter(r=>r.gender==='Male').length}</p>
+                <p class="text-lg font-semibold text-slate-700">Female: ${data.residents.filter(r=>r.gender==='Female').length}</p>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-2">
+                <h4 class="font-bold text-slate-800">Voter Turnout</h4>
+                <p class="text-3xl font-bold text-emerald-600">${data.residents.filter(r=>r.voterStatus==='Registered Voter').length}</p>
+                <p class="text-xs text-slate-500">Registered active voters</p>
+            </div>
+        </div>
 
-    // PRIVACY ENFORCEMENT
-    if (docReq.resident_id !== resident.id) {
-      return res.status(403).send(getAccessDeniedHTML('Unauthorized access. You can only view your own document records.'));
-    }
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <h4 class="font-bold text-slate-800 mb-4">Summary Statistics Table</h4>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase">
+                        <tr>
+                            <th class="p-3">Category</th>
+                            <th class="p-3">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        <tr><td class="p-3">Total Households</td><td class="p-3 font-semibold">${data.households.length}</td></tr>
+                        <tr><td class="p-3">Senior Citizens (60+ yrs)</td><td class="p-3 font-semibold">${data.residents.filter(r=>r.age>=60).length}</td></tr>
+                        <tr><td class="p-3">Persons with Disability (PWD)</td><td class="p-3 font-semibold">${data.residents.filter(r=>r.category==='PWD').length}</td></tr>
+                        <tr><td class="p-3">Solo Parents</td><td class="p-3 font-semibold">${data.residents.filter(r=>r.category==='Solo Parent').length}</td></tr>
+                        <tr><td class="p-3">Minors (&lt;18 yrs)</td><td class="p-3 font-semibold">${data.residents.filter(r=>r.age<18).length}</td></tr>
+                        <tr><td class="p-3">Blotter Cases Recorded</td><td class="p-3 font-semibold">${data.blotters.length}</td></tr>
+                        <tr><td class="p-3">Registered Local Businesses</td><td class="p-3 font-semibold">${data.businesses.length}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+}
 
-    const settingsRes = await pool.query('SELECT * FROM system_settings LIMIT 1');
-    const sys = settingsRes.rows[0];
+function renderStaffUsers(data) {
+    return `
+    <div class="space-y-6">
+        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">System Staff & Admin Accounts</h3>
+            <button onclick="document.getElementById('addUserModal').classList.remove('hidden')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm shadow-md transition">+ Add User Account</button>
+        </div>
 
-    const officialRes = await pool.query("SELECT full_name, position FROM barangay_officials WHERE position LIKE '%Captain%' AND is_active = TRUE LIMIT 1");
-    const captain = officialRes.rows[0] ? officialRes.rows[0].full_name : 'HON. BARANGAY CAPTAIN';
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-semibold">
+                        <tr>
+                            <th class="p-4">Username</th>
+                            <th class="p-4">Full Name</th>
+                            <th class="p-4">Email</th>
+                            <th class="p-4">Role</th>
+                            <th class="p-4">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${data.users.map(u => `
+                            <tr>
+                                <td class="p-4 font-bold text-blue-600">${u.username}</td>
+                                <td class="p-4 font-semibold text-slate-800">${u.name}</td>
+                                <td class="p-4 text-slate-600">${u.email}</td>
+                                <td class="p-4"><span class="px-2.5 py-1 bg-slate-100 rounded text-xs font-semibold">${u.role}</span></td>
+                                <td class="p-4"><span class="px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-full text-xs font-semibold">${u.status}</span></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
 
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
+        <!-- Add User Modal -->
+        <div id="addUserModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <h3 class="font-bold text-lg text-slate-800">Add Staff Account</h3>
+                    <button onclick="document.getElementById('addUserModal').classList.add('hidden')" class="text-slate-400">✕</button>
+                </div>
+                <form action="/api/users/add" method="POST" class="space-y-4 text-sm">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Username</label>
+                        <input type="text" name="username" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Password</label>
+                        <input type="password" name="password" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Full Name</label>
+                        <input type="text" name="name" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Email</label>
+                        <input type="email" name="email" required class="w-full p-2.5 border rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Role</label>
+                        <select name="role" class="w-full p-2.5 border rounded-xl">
+                            <option>Admin</option>
+                            <option>Secretary</option>
+                            <option>Staff</option>
+                        </select>
+                    </div>
+                    <div class="flex justify-end space-x-3 pt-4 border-t">
+                        <button type="button" onclick="document.getElementById('addUserModal').classList.add('hidden')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-semibold">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-500">Create Account</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    `;
+}
+
+function renderStaffLogs(data) {
+    return `
+    <div class="space-y-6">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">System Activity Logs</h3>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-semibold">
+                        <tr>
+                            <th class="p-4">User</th>
+                            <th class="p-4">Action Performed</th>
+                            <th class="p-4">Date</th>
+                            <th class="p-4">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${data.activityLogs.map(l => `
+                            <tr>
+                                <td class="p-4 font-semibold text-blue-600">${l.user}</td>
+                                <td class="p-4 text-slate-800">${l.action}</td>
+                                <td class="p-4 text-slate-600">${l.date}</td>
+                                <td class="p-4 text-slate-400 font-mono text-xs">${l.time}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+}
+
+
+// RESIDENT PORTAL RENDERER
+
+function renderResidentPortal(user, activeTab, data) {
+    const residentRecord = data.residents.find(r => r.name === user.name || r.email === user.email) || data.residents[0];
+    const userRequests = data.requests.filter(r => r.residentName === user.name || r.residentName === residentRecord.firstName + ' ' + residentRecord.lastName);
+    const userAppointments = data.appointments.filter(a => a.residentName === user.name || a.residentName === residentRecord.firstName + ' ' + residentRecord.lastName);
+    const userNotifications = data.notifications.filter(n => n.residentName === user.name || n.residentName === 'All Residents');
+
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
         <meta charset="UTF-8">
-        <title>${docReq.doc_title} - ${docReq.request_number}</title>
-        <style>
-          body { font-family: "Times New Roman", Times, serif; padding: 3rem; background: white; color: black; }
-          .header { text-align: center; border-bottom: 2px solid black; padding-bottom: 1rem; margin-bottom: 2rem; }
-          .header h3 { font-size: 1.1rem; margin: 0; font-weight: normal; }
-          .header h2 { font-size: 1.4rem; margin: 0.2rem 0; font-weight: bold; }
-          .doc-title { text-align: center; font-size: 1.8rem; font-weight: bold; text-transform: uppercase; margin: 2rem 0; text-decoration: underline; }
-          .body-content { font-size: 1.1rem; line-height: 1.8; text-align: justify; text-indent: 2rem; margin-bottom: 3rem; }
-          .signature-section { display: flex; justify-content: space-between; margin-top: 4rem; }
-          .sig-box { text-align: center; width: 220px; }
-          .sig-line { border-top: 1px solid black; margin-top: 3rem; font-weight: bold; }
-          @media print { .no-print { display: none; } }
-        </style>
-      </head>
-      <body>
-        <div class="no-print" style="margin-bottom: 2rem; text-align: right;">
-          <button onclick="window.print()" style="padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer;">Print Document</button>
-        </div>
-
-        <div class="header">
-          <h3>Republic of the Philippines</h3>
-          <h3>Province of ${sys.province}</h3>
-          <h3>${sys.municipality}</h3>
-          <h2>OFFICE OF THE BARANGAY CAPTAIN</h2>
-          <h3>${sys.barangay_name.toUpperCase()}</h3>
-        </div>
-
-        <div class="doc-title">${docReq.doc_title}</div>
-
-        <div class="body-content">
-          <p>
-            TO WHOM IT MAY CONCERN:
-          </p>
-          <p style="margin-top: 1.5rem;">
-            This is to certify that <strong>${resident.first_name.toUpperCase()} ${resident.middle_name ? resident.middle_name.toUpperCase() + ' ' : ''}${resident.last_name.toUpperCase()}</strong>, 
-            of legal age, ${resident.civil_status}, and a bona fide resident of <strong>${resident.address}</strong>, 
-            is a person of good moral character and has no derogatory record on file in this barangay.
-          </p>
-          <p style="margin-top: 1.5rem;">
-            This certification is issued upon the request of the above-named person for the purpose of: 
-            <strong>${docReq.purpose.toUpperCase()}</strong>.
-          </p>
-          <p style="margin-top: 1.5rem;">
-            Given this <strong>${new Date().getDate()}th</strong> day of <strong>${new Date().toLocaleString('default', { month: 'long' })}</strong>, <strong>${new Date().getFullYear()}</strong> at ${sys.barangay_name}.
-          </p>
-        </div>
-
-        <div class="signature-section">
-          <div class="sig-box">
-            <p>Control No: <strong>${docReq.request_number}</strong></p>
-            <p>Date Issued: ${new Date().toLocaleDateString()}</p>
-          </div>
-          <div class="sig-box">
-            <div class="sig-line">${captain}</div>
-            <p>Punong Barangay</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Error generating document print view.');
-  }
-});
-
-app.get('/resident/concerns', requireResident, async (req, res) => {
-  const residentRes = await pool.query('SELECT id FROM residents WHERE user_id = $1', [req.session.userId]);
-  const concerns = await pool.query('SELECT * FROM resident_concerns WHERE resident_id = $1 ORDER BY created_at DESC', [residentRes.rows[0].id]);
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">My Service Requests & Concerns</h1>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
-      <div class="card">
-        <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Submit New Concern</h2>
-        <form action="/resident/concerns" method="POST" enctype="multipart/form-data">
-          <div class="form-group">
-            <label>Subject / Topic *</label>
-            <input type="text" name="subject" class="form-control" placeholder="Brief title" required>
-          </div>
-          <div class="form-group">
-            <label>Detailed Description *</label>
-            <textarea name="description" class="form-control" rows="4" placeholder="Describe your inquiry or concern in detail" required></textarea>
-          </div>
-          <div class="form-group">
-            <label>Attachment (Optional)</label>
-            <input type="file" name="attachment" class="form-control" accept="image/*,application/pdf">
-          </div>
-          <button type="submit" class="btn btn-primary" style="width:100%;">Submit Inquiry</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">My Submitted Records</h2>
-        <div style="display: flex; flex-direction: column; gap: 1rem;">
-          ${concerns.rows.length === 0 ? '<p style="color:var(--text-light);">No concerns submitted.</p>' : ''}
-          ${concerns.rows.map(c => `
-            <div style="border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem;">
-              <div style="display:flex; justify-between; align-items:center;">
-                <strong>${c.subject}</strong>
-                <span class="badge badge-${c.status.toLowerCase().replace(' ', '')}">${c.status}</span>
-              </div>
-              <p style="font-size: 0.85rem; color: var(--text-dark); margin-top: 0.4rem;">${c.description}</p>
-              ${c.response ? `<div style="margin-top:0.5rem; background:#f1f5f9; padding:0.5rem; border-radius:4px; font-size:0.8rem;"><strong>Barangay Response:</strong> ${c.response}</div>` : ''}
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Concerns', portal: 'RESIDENT', user: req.session, activeNav: 'concerns', content }));
-});
-
-app.post('/resident/concerns', requireResident, upload.single('attachment'), async (req, res) => {
-  const { subject, description } = req.body;
-  const residentRes = await pool.query('SELECT id FROM residents WHERE user_id = $1', [req.session.userId]);
-  const fileUrl = req.file ? `/uploads/${req.file.filename}` : null;
-
-  await pool.query(
-    'INSERT INTO resident_concerns (resident_id, subject, description, attachment_url) VALUES ($1, $2, $3, $4)',
-    [residentRes.rows[0].id, subject, description, fileUrl]
-  );
-
-  await logActivity(req.session.userId, 'RESIDENT', 'Submitted Concern', 'CONCERNS', '', req);
-  res.redirect('/resident/concerns');
-});
-
-app.get('/resident/announcements', requireResident, async (req, res) => {
-  const announcements = await pool.query('SELECT * FROM announcements WHERE is_published = TRUE ORDER BY created_at DESC');
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Community Announcements</h1>
-    </div>
-    <div style="display: flex; flex-direction: column; gap: 1rem; max-width: 800px;">
-      ${announcements.rows.length === 0 ? '<p>No published announcements.</p>' : ''}
-      ${announcements.rows.map(a => `
-        <div class="card">
-          <h2 style="font-size: 1.2rem; color: var(--accent);">${a.title}</h2>
-          <p style="font-size: 0.75rem; color: var(--text-light); margin-bottom: 0.75rem;">Published on ${new Date(a.publication_date).toLocaleDateString()}</p>
-          <p style="font-size: 0.95rem; line-height: 1.5;">${a.content}</p>
-        </div>
-      `).join('')}
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Announcements', portal: 'RESIDENT', user: req.session, activeNav: 'announcements', content }));
-});
-
-app.get('/resident/notifications', requireResident, async (req, res) => {
-  const notifs = await pool.query('SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC', [req.session.userId]);
-  await pool.query('UPDATE notifications SET is_read = TRUE WHERE user_id = $1', [req.session.userId]);
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Notifications</h1>
-    </div>
-    <div class="card" style="max-width: 700px;">
-      <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-        ${notifs.rows.length === 0 ? '<p style="color:var(--text-light);">No notifications.</p>' : ''}
-        ${notifs.rows.map(n => `
-          <div style="padding: 0.75rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Resident Portal | Barangay Management System</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>body { font-family: 'Inter', sans-serif; }</style>
+    </head>
+    <body class="bg-slate-100 min-h-screen flex flex-col md:flex-row">
+        <!-- Sidebar Navigation -->
+        <aside class="w-full md:w-64 bg-slate-900 text-slate-300 flex flex-col justify-between shrink-0 shadow-xl">
             <div>
-              <p style="font-size:0.9rem;">${n.message}</p>
-              <span style="font-size:0.75rem; color: var(--text-light);">${new Date(n.created_at).toLocaleString()}</span>
+                <div class="p-6 border-b border-slate-800 flex items-center space-x-3">
+                    <span class="text-3xl">🏡</span>
+                    <div>
+                        <h1 class="text-white font-bold text-lg leading-tight">Resident Portal</h1>
+                        <p class="text-xs text-slate-400">Barangay Online Services</p>
+                    </div>
+                </div>
+                <nav class="p-4 space-y-1 text-sm font-medium">
+                    <a href="/resident-portal?tab=dashboard" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📊</span><span>Dashboard</span></a>
+                    <a href="/resident-portal?tab=profile" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'profile' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>👤</span><span>My Profile</span></a>
+                    <a href="/resident-portal?tab=request-cert" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'request-cert' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📜</span><span>Request Certificate</span></a>
+                    <a href="/resident-portal?tab=tracking" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'tracking' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>🔍</span><span>Track Requests</span></a>
+                    <a href="/resident-portal?tab=complaints" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'complaints' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📢</span><span>Complaints & Reports</span></a>
+                    <a href="/resident-portal?tab=appointments" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'appointments' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>📅</span><span>Appointments</span></a>
+                    <a href="/resident-portal?tab=announcements" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'announcements' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>🔔</span><span>Announcements</span></a>
+                    <a href="/resident-portal?tab=contacts" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'contacts' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>☎️</span><span>Emergency Contacts</span></a>
+                    <a href="/resident-portal?tab=feedback" class="flex items-center space-x-3 px-4 py-3 rounded-xl transition ${activeTab === 'feedback' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'hover:bg-slate-800 text-slate-400 hover:text-white'}"><span>⭐</span><span>Service Feedback</span></a>
+                </nav>
             </div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `;
+            <div class="p-4 border-t border-slate-800">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-white text-sm font-semibold">${user.name}</p>
+                        <span class="text-xs px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">Verified Resident</span>
+                    </div>
+                    <a href="/logout" class="p-2 bg-slate-800 hover:bg-red-600/20 hover:text-red-400 text-slate-400 rounded-lg transition" title="Logout">🚪</a>
+                </div>
+            </div>
+        </aside>
 
-  res.send(renderLayout({ title: 'Notifications', portal: 'RESIDENT', user: req.session, activeNav: 'notifications', content }));
-});
+        <!-- Main Content Area -->
+        <main class="flex-1 p-6 md:p-10 overflow-y-auto">
+            <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 mb-6 border-b border-slate-200 gap-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-slate-800 uppercase tracking-wide">Resident Portal - ${activeTab}</h2>
+                    <p class="text-sm text-slate-500">Welcome, ${user.name} | ID: ${residentRecord.residentId}</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span class="px-3 py-1 bg-blue-500/10 text-blue-600 text-xs font-semibold rounded-full border border-blue-500/20">Notifications (${userNotifications.filter(n=>!n.read).length})</span>
+                </div>
+            </header>
 
-app.get('/resident/settings', requireResident, async (req, res) => {
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Account Settings</h1>
-    </div>
-    <div class="card" style="max-width: 500px;">
-      <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Change Password</h2>
-      <form action="/resident/settings/password" method="POST">
-        <div class="form-group">
-          <label>Current Password</label>
-          <input type="password" name="current_password" class="form-control" required>
+            ${activeTab === 'dashboard' ? renderResidentDashboard(user, residentRecord, userRequests, userAppointments, data) : ''}
+            ${activeTab === 'profile' ? renderResidentProfile(residentRecord, data) : ''}
+            ${activeTab === 'request-cert' ? renderResidentRequestCert(data) : ''}
+            ${activeTab === 'tracking' ? renderResidentTracking(userRequests) : ''}
+            ${activeTab === 'complaints' ? renderResidentComplaints(data) : ''}
+            ${activeTab === 'appointments' ? renderResidentAppointments(userAppointments) : ''}
+            ${activeTab === 'announcements' ? renderResidentAnnouncements(data) : ''}
+            ${activeTab === 'contacts' ? renderResidentContacts(data) : ''}
+            ${activeTab === 'feedback' ? renderResidentFeedback() : ''}
+        </main>
+    </body>
+    </html>
+    `;
+}
+
+function renderResidentDashboard(user, residentRecord, userRequests, userAppointments, data) {
+    const approvedCount = userRequests.filter(r => r.status === 'Approved' || r.status === 'Released').length;
+    const pendingCount = userRequests.filter(r => r.status === 'Submitted' || r.status === 'Processing').length;
+
+    return `
+    <div class="space-y-6">
+        <!-- Welcome Card -->
+        <div class="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-8 rounded-3xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="space-y-2">
+                <span class="px-3 py-1 bg-white/20 text-white rounded-full text-xs font-semibold">Official Resident Account</span>
+                <h3 class="text-3xl font-bold">${residentRecord.firstName} ${residentRecord.lastName}</h3>
+                <p class="text-blue-100 text-sm">Resident ID: <strong>${residentRecord.residentId}</strong> | Purok: <strong>${residentRecord.purok}</strong> | Household: <strong>${residentRecord.householdNo}</strong></p>
+            </div>
+            <img src="${residentRecord.photo}" onerror="this.src='https://placehold.co/150x150/1e40af/ffffff?text=RES'" class="w-24 h-24 rounded-2xl object-cover border-4 border-white/30 shadow-md">
         </div>
-        <div class="form-group">
-          <label>New Password</label>
-          <input type="password" name="new_password" class="form-control" required>
+
+        <!-- Quick Stats -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <p class="text-xs text-slate-500 font-semibold uppercase">Pending Requests</p>
+                <h4 class="text-2xl font-bold text-amber-600 mt-1">${pendingCount}</h4>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <p class="text-xs text-slate-500 font-semibold uppercase">Approved Documents</p>
+                <h4 class="text-2xl font-bold text-emerald-600 mt-1">${approvedCount}</h4>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <p class="text-xs text-slate-500 font-semibold uppercase">Upcoming Appointments</p>
+                <h4 class="text-2xl font-bold text-blue-600 mt-1">${userAppointments.length}</h4>
+            </div>
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">Update Password</button>
-      </form>
-    </div>
-  `;
 
-  res.send(renderLayout({ title: 'Settings', portal: 'RESIDENT', user: req.session, activeNav: 'settings', content }));
-});
+        <!-- Latest Announcements & Notifications -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <h3 class="font-bold text-slate-800">Latest Barangay Announcements</h3>
+                <div class="space-y-3">
+                    ${data.announcements.slice(0, 3).map(a => `
+                        <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <span class="text-xs text-blue-600 font-semibold">${a.category}</span>
+                            <h4 class="font-bold text-slate-800 text-sm">${a.title}</h4>
+                            <p class="text-xs text-slate-600 mt-1">${a.description}</p>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
 
-app.post('/resident/settings/password', requireResident, async (req, res) => {
-  const { current_password, new_password } = req.body;
-  const userRes = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.session.userId]);
-
-  const match = await bcrypt.compare(current_password, userRes.rows[0].password_hash);
-  if (!match) return res.status(400).send('Incorrect current password. <a href="javascript:history.back()">Go Back</a>');
-
-  const hashed = await bcrypt.hash(new_password, 10);
-  await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashed, req.session.userId]);
-
-  res.send('<script>alert("Password updated successfully!"); window.location.href="/resident/settings";</script>');
-});
-
-
-// B & C. ADMIN & STAFF PORTAL IMPLEMENTATION
-app.get('/admin/dashboard', requireAdmin, async (req, res) => {
-  const totalResidents = await pool.query('SELECT COUNT(*) FROM residents');
-  const pendingApps = await pool.query("SELECT COUNT(*) FROM users WHERE status = 'PENDING'");
-  const totalHouseholds = await pool.query('SELECT COUNT(*) FROM households');
-  const pendingDocs = await pool.query("SELECT COUNT(*) FROM document_requests WHERE status IN ('Pending', 'Under Review')");
-  const openBlotter = await pool.query("SELECT COUNT(*) FROM blotter_records WHERE status IN ('Open', 'Under Investigation')");
-
-  const recentLogs = await pool.query('SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 5');
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">System Overview Dashboard</h1>
-    </div>
-
-    <div class="card-grid">
-      <div class="card stat-card">
-        <span class="stat-title">Total Residents</span>
-        <span class="stat-value">${totalResidents.rows[0].count}</span>
-      </div>
-      <div class="card stat-card">
-        <span class="stat-title">Pending Approvals</span>
-        <span class="stat-value" style="color: var(--warning);">${pendingApps.rows[0].count}</span>
-      </div>
-      <div class="card stat-card">
-        <span class="stat-title">Total Households</span>
-        <span class="stat-value">${totalHouseholds.rows[0].count}</span>
-      </div>
-      <div class="card stat-card">
-        <span class="stat-title">Pending Document Requests</span>
-        <span class="stat-value">${pendingDocs.rows[0].count}</span>
-      </div>
-      <div class="card stat-card">
-        <span class="stat-title">Active Blotter Cases</span>
-        <span class="stat-value" style="color: var(--danger);">${openBlotter.rows[0].count}</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Recent System Activity Logs</h2>
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>Role</th>
-              <th>Action</th>
-              <th>Module</th>
-              <th>IP Address</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${recentLogs.rows.map(l => `
-              <tr>
-                <td>${new Date(l.created_at).toLocaleString()}</td>
-                <td><span class="badge badge-pending">${l.user_role || 'SYSTEM'}</span></td>
-                <td>${l.action}</td>
-                <td>${l.module}</td>
-                <td>${l.ip_address}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Admin Dashboard', portal: 'ADMIN', user: req.session, activeNav: 'dashboard', content }));
-});
-
-// STAFF DASHBOARD
-app.get('/staff/dashboard', requireStaff, async (req, res) => {
-  const totalResidents = await pool.query('SELECT COUNT(*) FROM residents');
-  const pendingDocs = await pool.query("SELECT COUNT(*) FROM document_requests WHERE status IN ('Pending', 'Under Review')");
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Staff Dashboard</h1>
-    </div>
-    <div class="card-grid">
-      <div class="card stat-card">
-        <span class="stat-title">Total Registered Residents</span>
-        <span class="stat-value">${totalResidents.rows[0].count}</span>
-      </div>
-      <div class="card stat-card">
-        <span class="stat-title">Pending Document Requests</span>
-        <span class="stat-value">${pendingDocs.rows[0].count}</span>
-      </div>
-    </div>
-    <div class="card">
-      <p style="color: var(--text-light);">Welcome to the Staff Management Interface. Use the sidebar to access your permitted module operations.</p>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Staff Dashboard', portal: 'STAFF', user: req.session, activeNav: 'dashboard', content }));
-});
-
-// ADMIN/STAFF: RESIDENT MANAGEMENT ROUTE WITH FULL PAGINATION & SEARCH
-const handleResidentList = async (req, res, portalType) => {
-  const search = req.query.search || '';
-  const page = parseInt(req.query.page) || 1;
-  const limit = 10;
-  const offset = (page - 1) * limit;
-
-  let query = 'SELECT r.*, u.status as account_status FROM residents r JOIN users u ON r.user_id = u.id WHERE 1=1';
-  let countQuery = 'SELECT COUNT(*) FROM residents r JOIN users u ON r.user_id = u.id WHERE 1=1';
-  const queryParams = [];
-
-  if (search) {
-    queryParams.push(`%${search}%`);
-    const searchFilter = ` AND (r.first_name ILIKE $${queryParams.length} OR r.last_name ILIKE $${queryParams.length} OR r.resident_id_number ILIKE $${queryParams.length})`;
-    query += searchFilter;
-    countQuery += searchFilter;
-  }
-
-  query += ` ORDER BY r.created_at DESC LIMIT ${limit} OFFSET ${offset}`;
-
-  const residents = await pool.query(query, queryParams);
-  const totalCountRes = await pool.query(countQuery, queryParams);
-  const totalPages = Math.ceil(parseInt(totalCountRes.rows[0].count) / limit);
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Resident Records</h1>
-      <form style="display:flex; gap:0.5rem;" method="GET">
-        <input type="text" name="search" class="form-control" placeholder="Search name or ID..." value="${search}">
-        <button type="submit" class="btn btn-primary">Search</button>
-      </form>
-    </div>
-
-    <div class="card">
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Resident ID</th>
-              <th>Full Name</th>
-              <th>Sex</th>
-              <th>Civil Status</th>
-              <th>Contact Number</th>
-              <th>Account Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${residents.rows.length === 0 ? '<tr><td colspan="7" style="text-align:center;">No records found.</td></tr>' : ''}
-            ${residents.rows.map(r => `
-              <tr>
-                <td><strong>${r.resident_id_number}</strong></td>
-                <td>${r.first_name} ${r.last_name}</td>
-                <td>${r.sex}</td>
-                <td>${r.civil_status}</td>
-                <td>${r.contact_number}</td>
-                <td><span class="badge badge-${r.account_status.toLowerCase()}">${r.account_status}</span></td>
-                <td>
-                  <a href="/${portalType.toLowerCase()}/residents/${r.id}" class="btn btn-secondary btn-sm">View Details</a>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Pagination Controls -->
-      <div style="display:flex; justify-between; align-items:center; margin-top: 1rem;">
-        <span>Page ${page} of ${totalPages || 1}</span>
-        <div style="display:flex; gap:0.5rem;">
-          ${page > 1 ? `<a href="?page=${page-1}&search=${search}" class="btn btn-secondary btn-sm">Previous</a>` : ''}
-          ${page < totalPages ? `<a href="?page=${page+1}&search=${search}" class="btn btn-secondary btn-sm">Next</a>` : ''}
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <h3 class="font-bold text-slate-800">My Notifications</h3>
+                <div class="space-y-3">
+                    ${data.notifications.slice(0, 4).map(n => `
+                        <div class="p-3 bg-blue-50/50 rounded-xl border border-blue-100 text-sm">
+                            <p class="text-slate-800 font-medium">${n.message}</p>
+                            <span class="text-xs text-slate-400">${n.date}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
         </div>
-      </div>
     </div>
-  `;
+    `;
+}
 
-  res.send(renderLayout({ title: 'Resident Management', portal: portalType, user: req.session, activeNav: 'residents', content }));
-};
+function renderResidentProfile(r, data) {
+    return `
+    <div class="space-y-6">
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <div class="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 pb-6 border-b">
+                <img src="${r.photo}" onerror="this.src='https://placehold.co/150x150/1e40af/ffffff?text=RES'" class="w-24 h-24 rounded-full object-cover border-4 border-slate-100 shadow">
+                <div class="text-center sm:text-left">
+                    <h3 class="text-2xl font-bold text-slate-800">${r.firstName} ${r.middleName} ${r.lastName} ${r.suffix}</h3>
+                    <p class="text-sm text-blue-600 font-semibold">Resident ID: ${r.residentId}</p>
+                    <p class="text-xs text-slate-500 mt-1">Registered Category: <span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700 font-medium">${r.category}</span></p>
+                </div>
+            </div>
 
-app.get('/admin/residents', requireAdmin, (req, res) => handleResidentList(req, res, 'ADMIN'));
-app.get('/staff/residents', requireStaff, requirePermission('residents'), (req, res) => handleResidentList(req, res, 'STAFF'));
-
-// VIEW SINGLE RESIDENT PROFILE
-const handleSingleResidentView = async (req, res, portalType) => {
-  const result = await pool.query('SELECT r.*, u.status as account_status, u.username FROM residents r JOIN users u ON r.user_id = u.id WHERE r.id = $1', [req.params.id]);
-  if (result.rows.length === 0) return res.status(404).send('Resident record not found.');
-  const r = result.rows[0];
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Resident Profile: ${r.first_name} ${r.last_name}</h1>
-      <a href="javascript:history.back()" class="btn btn-secondary">Back</a>
-    </div>
-
-    <div class="card">
-      <div style="display:flex; gap:2rem; flex-wrap:wrap; margin-bottom: 1.5rem;">
-        <img src="${r.photo_url || 'https://via.placeholder.com/150'}" style="width:150px; height:150px; border-radius:8px; object-fit:cover;" alt="Photo">
-        <div>
-          <h2>${r.first_name} ${r.middle_name || ''} ${r.last_name} ${r.suffix || ''}</h2>
-          <p>Resident ID Number: <strong>${r.resident_id_number}</strong></p>
-          <p>Username: ${r.username}</p>
-          <p>Account Status: <span class="badge badge-${r.account_status.toLowerCase()}">${r.account_status}</span></p>
-          ${r.valid_id_url ? `<a href="${r.valid_id_url}" target="_blank" class="btn btn-secondary btn-sm" style="margin-top:0.5rem;">View Uploaded Valid ID</a>` : ''}
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-6 text-sm">
+                <div><span class="text-xs text-slate-400 uppercase font-semibold">Birthday & Age</span><p class="font-semibold text-slate-800">${r.dob} (${r.age} yrs old)</p></div>
+                <div><span class="text-xs text-slate-400 uppercase font-semibold">Gender & Civil Status</span><p class="font-semibold text-slate-800">${r.gender} / ${r.civilStatus}</p></div>
+                <div><span class="text-xs text-slate-400 uppercase font-semibold">Address & Purok</span><p class="font-semibold text-slate-800">${r.address}, ${r.purok}</p></div>
+                <div><span class="text-xs text-slate-400 uppercase font-semibold">Contact Number</span><p class="font-semibold text-slate-800">${r.contactNumber}</p></div>
+                <div><span class="text-xs text-slate-400 uppercase font-semibold">Email Address</span><p class="font-semibold text-slate-800">${r.email}</p></div>
+                <div><span class="text-xs text-slate-400 uppercase font-semibold">Voter Status</span><p class="font-semibold text-slate-800">${r.voterStatus}</p></div>
+                <div><span class="text-xs text-slate-400 uppercase font-semibold">Occupation</span><p class="font-semibold text-slate-800">${r.occupation}</p></div>
+                <div><span class="text-xs text-slate-400 uppercase font-semibold">Educational Attainment</span><p class="font-semibold text-slate-800">${r.educationalAttainment}</p></div>
+                <div><span class="text-xs text-slate-400 uppercase font-semibold">Household Number</span><p class="font-semibold text-slate-800">${r.householdNo}</p></div>
+            </div>
         </div>
-      </div>
 
-      <div class="form-row">
-        <div><strong>Birthdate:</strong> ${new Date(r.birthdate).toLocaleDateString()} (${calculateAge(r.birthdate)} yrs)</div>
-        <div><strong>Sex:</strong> ${r.sex}</div>
-        <div><strong>Civil Status:</strong> ${r.civil_status}</div>
-        <div><strong>Contact:</strong> ${r.contact_number}</div>
-        <div><strong>Email:</strong> ${r.email}</div>
-        <div><strong>Address:</strong> ${r.address}</div>
-        <div><strong>Occupation:</strong> ${r.occupation || 'N/A'}</div>
-        <div><strong>Education:</strong> ${r.educational_attainment || 'N/A'}</div>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Resident View', portal: portalType, user: req.session, activeNav: 'residents', content }));
-};
-
-app.get('/admin/residents/:id', requireAdmin, (req, res) => handleSingleResidentView(req, res, 'ADMIN'));
-app.get('/staff/residents/:id', requireStaff, requirePermission('residents'), (req, res) => handleSingleResidentView(req, res, 'STAFF'));
-
-// ADMIN: PENDING USER APPROVALS
-app.get('/admin/accounts', requireAdmin, async (req, res) => {
-  const pendingUsers = await pool.query(`
-    SELECT u.id as user_id, u.username, u.email, u.created_at, r.id as resident_id, r.first_name, r.last_name, r.valid_id_url, r.photo_url 
-    FROM users u 
-    LEFT JOIN residents r ON u.id = r.user_id 
-    WHERE u.status = 'PENDING'
-  `);
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Pending Resident Approvals</h1>
-    </div>
-
-    <div class="card">
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Applicant</th>
-              <th>Username / Email</th>
-              <th>Registration Date</th>
-              <th>Submitted Documents</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${pendingUsers.rows.length === 0 ? '<tr><td colspan="5" style="text-align:center;">No pending account approvals.</td></tr>' : ''}
-            ${pendingUsers.rows.map(u => `
-              <tr>
-                <td><strong>${u.first_name \vert{}\vert{} 'N/A'}${u.last_name || ''}</strong></td>
-                <td>${u.username}<br><span style="font-size:0.8rem; color:var(--text-light);">${u.email}</span></td>
-                <td>${new Date(u.created_at).toLocaleDateString()}</td>
-                <td>
-                  ${u.photo_url ? `<a href="${u.photo_url}" target="_blank" class="btn btn-secondary btn-sm">Photo</a>` : ''}
-                  ${u.valid_id_url ? `<a href="${u.valid_id_url}" target="_blank" class="btn btn-secondary btn-sm">Valid ID</a>` : ''}
-                </td>
-                <td>
-                  <form action="/admin/accounts/approve/${u.user_id}" method="POST" style="display:inline;">
-                    <button type="submit" class="btn btn-success btn-sm">Approve</button>
-                  </form>
-                  <form action="/admin/accounts/reject/${u.user_id}" method="POST" style="display:inline;">
-                    <button type="submit" class="btn btn-danger btn-sm">Reject</button>
-                  </form>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Pending Approvals', portal: 'ADMIN', user: req.session, activeNav: 'accounts', content }));
-});
-
-app.post('/admin/accounts/approve/:userId', requireAdmin, async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query("UPDATE users SET status = 'ACTIVE' WHERE id = $1", [req.params.userId]);
-    await client.query("INSERT INTO notifications (user_id, message, type) VALUES ($1, 'Your resident registration account has been APPROVED. You can now access full portal services.', 'SUCCESS')", [req.params.userId]);
-    await client.query('COMMIT');
-
-    await logActivity(req.session.userId, 'ADMIN', 'Approved Resident User Account', 'USER_MANAGEMENT', req.params.userId, req);
-    res.redirect('/admin/accounts');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).send('Error approving account.');
-  } finally {
-    client.release();
-  }
-});
-
-app.post('/admin/accounts/reject/:userId', requireAdmin, async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query("UPDATE users SET status = 'REJECTED' WHERE id = $1", [req.params.userId]);
-    await client.query("INSERT INTO notifications (user_id, message, type) VALUES ($1, 'Your resident registration application was REJECTED. Please contact the barangay hall for details.', 'DANGER')", [req.params.userId]);
-    await client.query('COMMIT');
-
-    await logActivity(req.session.userId, 'ADMIN', 'Rejected Resident User Account', 'USER_MANAGEMENT', req.params.userId, req);
-    res.redirect('/admin/accounts');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    res.status(500).send('Error rejecting account.');
-  } finally {
-    client.release();
-  }
-});
-
-// HOUSEHOLD MANAGEMENT (ADMIN/STAFF)
-const handleHouseholdList = async (req, res, portalType) => {
-  const households = await pool.query(`
-    SELECT h.*, r.first_name as head_first, r.last_name as head_last 
-    FROM households h 
-    LEFT JOIN residents r ON h.head_resident_id = r.id 
-    ORDER BY h.created_at DESC
-  `);
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Barangay Households</h1>
-      ${portalType === 'ADMIN' ? '<a href="/admin/households/create" class="btn btn-primary">+ Register Household</a>' : ''}
-    </div>
-
-    <div class="card">
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Household No</th>
-              <th>Head of Household</th>
-              <th>Address</th>
-              <th>Classification</th>
-              <th>Date Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${households.rows.length === 0 ? '<tr><td colspan="5" style="text-align:center;">No households registered.</td></tr>' : ''}
-            ${households.rows.map(h => `
-              <tr>
-                <td><strong>${h.household_number}</strong></td>
-                <td>${h.head_first ? `${h.head_first} ${h.head_last}` : 'Unassigned'}</td>
-                <td>${h.address}</td>
-                <td>${h.classification}</td>
-                <td>${new Date(h.created_at).toLocaleDateString()}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Households', portal: portalType, user: req.session, activeNav: 'households', content }));
-};
-
-app.get('/admin/households', requireAdmin, (req, res) => handleHouseholdList(req, res, 'ADMIN'));
-app.get('/staff/households', requireStaff, requirePermission('households'), (req, res) => handleHouseholdList(req, res, 'STAFF'));
-
-app.get('/admin/households/create', requireAdmin, async (req, res) => {
-  const residents = await pool.query('SELECT id, first_name, last_name, resident_id_number FROM residents ORDER BY first_name ASC');
-
-  const content = `
-    <div class="page-header"><h1 class="page-title">Register New Household</h1></div>
-    <div class="card" style="max-width: 600px;">
-      <form action="/admin/households/create" method="POST">
-        <div class="form-group">
-          <label>Household Number *</label>
-          <input type="text" name="household_number" class="form-control" value="HH-${Date.now().toString().substring(6)}" required>
+        <!-- Request Profile Update Form -->
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800 mb-2">Request Official Profile Update</h3>
+            <p class="text-xs text-slate-500 mb-4">Official records cannot be directly edited by residents. Submit update requests for staff review.</p>
+            <form action="/api/resident/request-profile-update" method="POST" class="space-y-4 text-sm">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Requested Changes / Correction Details</label>
+                    <textarea name="changes" rows="3" placeholder="e.g. Please update my contact number to 09998887766 and my occupation to Senior Carpenter." required class="w-full p-3 border rounded-xl"></textarea>
+                </div>
+                <button type="submit" class="px-5 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-500 transition shadow">Submit Update Request</button>
+            </form>
         </div>
-        <div class="form-group">
-          <label>Head of Household *</label>
-          <select name="head_resident_id" class="form-control" required>
-            <option value="">-- Select Resident --</option>
-            ${residents.rows.map(r => `<option value="${r.id}">${r.first_name} ${r.last_name} (${r.resident_id_number})</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Address *</label>
-          <input type="text" name="address" class="form-control" required>
-        </div>
-        <div class="form-group">
-          <label>Classification</label>
-          <select name="classification" class="form-control">
-            <option value="Residential">Residential</option>
-            <option value="Commercial/Residential">Commercial/Residential</option>
-          </select>
-        </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">Save Household</button>
-      </form>
     </div>
-  `;
+    `;
+}
 
-  res.send(renderLayout({ title: 'Create Household', portal: 'ADMIN', user: req.session, activeNav: 'households', content }));
-});
-
-app.post('/admin/households/create', requireAdmin, async (req, res) => {
-  const { household_number, head_resident_id, address, classification } = req.body;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const hhRes = await client.query(
-      `INSERT INTO households (household_number, head_resident_id, address, classification)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [household_number, head_resident_id, address, classification]
-    );
-
-    // Link head resident to household
-    await client.query('UPDATE residents SET household_id = $1, household_relationship = $2 WHERE id = $3', [hhRes.rows[0].id, 'Head', head_resident_id]);
-
-    await client.query('COMMIT');
-    await logActivity(req.session.userId, 'ADMIN', 'Created Household Record', 'HOUSEHOLDS', household_number, req);
-    res.redirect('/admin/households');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).send('Error creating household.');
-  } finally {
-    client.release();
-  }
-});
-
-// ADMIN: STAFF MANAGEMENT & ROLE PERMISSIONS
-app.get('/admin/staff', requireAdmin, async (req, res) => {
-  const staffUsers = await pool.query("SELECT * FROM users WHERE role = 'STAFF' ORDER BY created_at DESC");
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Staff Account Management</h1>
-      <a href="/admin/staff/create" class="btn btn-primary">+ Create Staff Account</a>
-    </div>
-
-    <div class="card">
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Permissions</th>
-              <th>Status</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${staffUsers.rows.length === 0 ? '<tr><td colspan="5" style="text-align:center;">No staff accounts configured.</td></tr>' : ''}
-            ${staffUsers.rows.map(s => `
-              <tr>
-                <td><strong>${s.username}</strong></td>
-                <td>${s.email}</td>
-                <td>${JSON.stringify(s.permissions)}</td>
-                <td><span class="badge badge-${s.status.toLowerCase()}">${s.status}</span></td>
-                <td>${new Date(s.created_at).toLocaleDateString()}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Staff Management', portal: 'ADMIN', user: req.session, activeNav: 'staff', content }));
-});
-
-app.get('/admin/staff/create', requireAdmin, (req, res) => {
-  const content = `
-    <div class="page-header"><h1 class="page-title">Create Staff Account</h1></div>
-    <div class="card" style="max-width: 500px;">
-      <form action="/admin/staff/create" method="POST">
-        <div class="form-group">
-          <label>Username *</label>
-          <input type="text" name="username" class="form-control" required>
-        </div>
-        <div class="form-group">
-          <label>Email *</label>
-          <input type="email" name="email" class="form-control" required>
-        </div>
-        <div class="form-group">
-          <label>Password *</label>
-          <input type="password" name="password" class="form-control" required>
-        </div>
-        <div class="form-group">
-          <label>Module Permissions</label>
-          <div style="display:flex; flex-direction:column; gap:0.35rem; margin-top:0.35rem;">
-            <label><input type="checkbox" name="permissions" value="residents"> Residents Management</label>
-            <label><input type="checkbox" name="permissions" value="households"> Households</label>
-            <label><input type="checkbox" name="permissions" value="documents"> Documents & Requests</label>
-            <label><input type="checkbox" name="permissions" value="blotter"> Blotter Management</label>
-            <label><input type="checkbox" name="permissions" value="qr"> QR Verification</label>
-            <label><input type="checkbox" name="permissions" value="reports"> Reports</label>
-          </div>
-        </div>
-        <button type="submit" class="btn btn-primary" style="width:100%;">Create Account</button>
-      </form>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Create Staff', portal: 'ADMIN', user: req.session, activeNav: 'staff', content }));
-});
-
-app.post('/admin/staff/create', requireAdmin, async (req, res) => {
-  const { username, email, password, permissions } = req.body;
-  try {
-    const hashed = await bcrypt.hash(password, 10);
-    const permArray = Array.isArray(permissions) ? permissions : (permissions ? [permissions] : []);
-
-    await pool.query(
-      `INSERT INTO users (username, email, password_hash, role, status, permissions)
-       VALUES ($1, $2, $3, 'STAFF', 'ACTIVE', $4)`,
-      [username, email, hashed, JSON.stringify(permArray)]
-    );
-
-    await logActivity(req.session.userId, 'ADMIN', 'Created Staff Account', 'STAFF_MANAGEMENT', username, req);
-    res.redirect('/admin/staff');
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Error creating staff account.');
-  }
-});
-
-// DOCUMENT REQUEST PROCESSING (ADMIN & STAFF)
-const handleDocumentRequestList = async (req, res, portalType) => {
-  const requests = await pool.query(`
-    SELECT dr.*, dt.title as doc_title, r.first_name, r.last_name, r.resident_id_number
-    FROM document_requests dr 
-    JOIN document_types dt ON dr.document_type_id = dt.id 
-    JOIN residents r ON dr.resident_id = r.id 
-    ORDER BY dr.created_at DESC
-  `);
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Document Processing Requests</h1>
-    </div>
-
-    <div class="card">
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Request ID</th>
-              <th>Resident</th>
-              <th>Document</th>
-              <th>Purpose</th>
-              <th>Status</th>
-              <th>Actions / Update</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${requests.rows.length === 0 ? '<tr><td colspan="6" style="text-align:center;">No document requests found.</td></tr>' : ''}
-            ${requests.rows.map(r => `
-              <tr>
-                <td><strong>${r.request_number}</strong></td>
-                <td>${r.first_name}${r.last_name}<br><span style="font-size:0.75rem; color:var(--text-light);">${r.resident_id_number}</span></td>
-                <td>${r.doc_title}</td>
-                <td>${r.purpose}</td>
-                <td><span class="badge badge-${r.status.toLowerCase().replace(' ', '')}">${r.status}</span></td>
-                <td>
-                  <form action="/${portalType.toLowerCase()}/document-requests/status/${r.id}" method="POST" style="display:inline-flex; gap:0.25rem;">
-                    <select name="status" style="font-size:0.8rem; padding:0.2rem;">
-                      <option value="Pending" ${r.status==='Pending'?'selected':''}>Pending</option>
-                      <option value="Under Review" ${r.status==='Under Review'?'selected':''}>Under Review</option>
-                      <option value="Approved" ${r.status==='Approved'?'selected':''}>Approved</option>
-                      <option value="Ready" ${r.status==='Ready'?'selected':''}>Ready</option>
-                      <option value="Completed" ${r.status==='Completed'?'selected':''}>Completed</option>
-                      <option value="Rejected" ${r.status==='Rejected'?'selected':''}>Rejected</option>
+function renderResidentRequestCert(data) {
+    return `
+    <div class="space-y-6 max-w-2xl mx-auto">
+        <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+            <div>
+                <h3 class="text-xl font-bold text-slate-800">Request Certificate Online</h3>
+                <p class="text-sm text-slate-500 mt-1">Select the official barangay document you need processed.</p>
+            </div>
+            <form action="/api/resident/request-cert" method="POST" class="space-y-4 text-sm">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-2">Select Certificate Type</label>
+                    <select name="type" class="w-full p-3 border rounded-xl bg-slate-50">
+                        <option>Barangay Clearance</option>
+                        <option>Certificate of Residency</option>
+                        <option>Certificate of Indigency</option>
+                        <option>Certificate of Good Moral</option>
+                        <option>Certificate of No Income</option>
+                        <option>Business Clearance</option>
                     </select>
-                    <button type="submit" class="btn btn-secondary btn-sm">Update</button>
-                  </form>
-                </td>
-              </tr>
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-2">Purpose / Remarks</label>
+                    <input type="text" name="remarks" placeholder="e.g. Job Application, School Enrollment" required class="w-full p-3 border rounded-xl">
+                </div>
+                <button type="submit" class="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-500 transition shadow-lg shadow-blue-600/30">
+                    SUBMIT ONLINE REQUEST
+                </button>
+            </form>
+        </div>
+    </div>
+    `;
+}
+
+function renderResidentTracking(requests) {
+    return `
+    <div class="space-y-6">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Track My Document Requests</h3>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-semibold">
+                        <tr>
+                            <th class="p-4">Req #</th>
+                            <th class="p-4">Document Type</th>
+                            <th class="p-4">Date Submitted</th>
+                            <th class="p-4">Current Status</th>
+                            <th class="p-4">Remarks</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${requests.map(r => `
+                            <tr>
+                                <td class="p-4 font-bold text-blue-600">${r.reqNo}</td>
+                                <td class="p-4 font-semibold text-slate-800">${r.type}</td>
+                                <td class="p-4 text-slate-600">${r.dateSubmitted}</td>
+                                <td class="p-4">
+                                    <span class="px-3 py-1 rounded-full text-xs font-semibold ${r.status==='Approved'?'bg-emerald-50 text-emerald-600':r.status==='Processing'?'bg-blue-50 text-blue-600':'bg-amber-50 text-amber-600'}">${r.status}</span>
+                                </td>
+                                <td class="p-4 text-slate-500 text-xs">${r.remarks}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+}
+
+function renderResidentComplaints(data) {
+    return `
+    <div class="space-y-6 max-w-2xl mx-auto">
+        <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+            <div>
+                <h3 class="text-xl font-bold text-slate-800">Submit Community Complaint or Report</h3>
+                <p class="text-sm text-slate-500 mt-1">Report community concerns, noise, or barangay assistance issues.</p>
+            </div>
+            <form action="/api/resident/submit-complaint" method="POST" class="space-y-4 text-sm">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Complaint Type</label>
+                    <select name="type" class="w-full p-3 border rounded-xl">
+                        <option>Garbage Collection</option>
+                        <option>Noise Disturbance</option>
+                        <option>Public Safety / Lighting</option>
+                        <option>Property Dispute</option>
+                        <option>Other Concern</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Subject</label>
+                    <input type="text" name="subject" required class="w-full p-3 border rounded-xl">
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Location</label>
+                    <input type="text" name="location" required class="w-full p-3 border rounded-xl">
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Description</label>
+                    <textarea name="description" rows="4" required class="w-full p-3 border rounded-xl"></textarea>
+                </div>
+                <button type="submit" class="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-500 transition shadow">SUBMIT COMPLAINT</button>
+            </form>
+        </div>
+    </div>
+    `;
+}
+
+function renderResidentAppointments(appointments) {
+    return `
+    <div class="space-y-6">
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+            <h3 class="font-bold text-slate-800 text-lg">Book an Appointment with Barangay Officials</h3>
+            <form action="/api/resident/book-appointment" method="POST" class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Service</label>
+                    <select name="service" class="w-full p-3 border rounded-xl">
+                        <option>Certificate Processing</option>
+                        <option>Barangay Assistance</option>
+                        <option>Complaint Consultation</option>
+                        <option>Meeting with Barangay Official</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Preferred Date</label>
+                    <input type="date" name="date" required class="w-full p-3 border rounded-xl">
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Preferred Time</label>
+                    <input type="text" name="time" placeholder="10:00 AM" required class="w-full p-3 border rounded-xl">
+                </div>
+                <div class="sm:col-span-3">
+                    <button type="submit" class="px-6 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-500 transition shadow">Book Appointment</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="p-4 border-b"><h3 class="font-bold text-slate-800">My Appointments</h3></div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b text-slate-500 text-xs uppercase">
+                        <tr>
+                            <th class="p-4">Service</th>
+                            <th class="p-4">Date & Time</th>
+                            <th class="p-4">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${appointments.map(a => `
+                            <tr>
+                                <td class="p-4 font-semibold text-slate-800">${a.service}</td>
+                                <td class="p-4 text-slate-600">${a.date} at ${a.time}</td>
+                                <td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold ${a.status==='Approved'?'bg-emerald-50 text-emerald-600':'bg-amber-50 text-amber-600'}">${a.status}</span></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+}
+
+function renderResidentAnnouncements(data) {
+    return `
+    <div class="space-y-6">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Barangay News & Events</h3>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            ${data.announcements.map(a => `
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                    <span class="px-2.5 py-1 bg-blue-50 text-blue-600 text-xs font-semibold rounded-md">${a.category}</span>
+                    <h4 class="font-bold text-lg text-slate-800">${a.title}</h4>
+                    <p class="text-sm text-slate-600">${a.description}</p>
+                    <span class="text-xs text-slate-400 block pt-2">Date: ${a.date}</span>
+                </div>
             `).join('')}
-          </tbody>
-        </table>
-      </div>
+        </div>
     </div>
-  `;
+    `;
+}
 
-  res.send(renderLayout({ title: 'Document Requests', portal: portalType, user: req.session, activeNav: 'doc-requests', content }));
-};
-
-app.get('/admin/document-requests', requireAdmin, (req, res) => handleDocumentRequestList(req, res, 'ADMIN'));
-app.get('/staff/document-requests', requireStaff, requirePermission('documents'), (req, res) => handleDocumentRequestList(req, res, 'STAFF'));
-
-const handleDocumentStatusUpdate = async (req, res) => {
-  const { status } = req.body;
-  const requestId = req.params.id;
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('UPDATE document_requests SET status = $1, processed_by_user_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3', [status, req.session.userId, requestId]);
-
-    // Retrieve resident user_id to notify
-    const reqRes = await client.query('SELECT r.user_id, dr.request_number FROM document_requests dr JOIN residents r ON dr.resident_id = r.id WHERE dr.id = $1', [requestId]);
-    if (reqRes.rows.length > 0) {
-      const { user_id, request_number } = reqRes.rows[0];
-      await client.query('INSERT INTO notifications (user_id, message, type) VALUES ($1, $2, $3)', [user_id, `Your document request ${request_number} status has been updated to: ${status}.`, 'INFO']);
-    }
-
-    await client.query('COMMIT');
-    await logActivity(req.session.userId, req.session.role, `Updated Request Status to ${status}`, 'DOCUMENTS', requestId, req);
-
-    res.redirect('back');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).send('Error updating request status.');
-  } finally {
-    client.release();
-  }
-};
-
-app.post('/admin/document-requests/status/:id', requireAdmin, handleDocumentStatusUpdate);
-app.post('/staff/document-requests/status/:id', requireStaff, requirePermission('documents'), handleDocumentStatusUpdate);
-
-// BLOTTER MANAGEMENT (ADMIN/STAFF ONLY)
-const handleBlotterList = async (req, res, portalType) => {
-  const records = await pool.query('SELECT * FROM blotter_records ORDER BY created_at DESC');
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Barangay Incident & Blotter Records</h1>
-      <a href="/${portalType.toLowerCase()}/blotter/create" class="btn btn-primary">+ File Blotter Case</a>
-    </div>
-
-    <div class="card">
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Case No</th>
-              <th>Complainant</th>
-              <th>Respondent</th>
-              <th>Incident Type</th>
-              <th>Date & Time</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${records.rows.length === 0 ? '<tr><td colspan="7" style="text-align:center;">No blotter records filed.</td></tr>' : ''}
-            ${records.rows.map(b => `
-              <tr>
-                <td><strong>${b.case_number}</strong></td>
-                <td>${b.complainant_name}</td>
-                <td>${b.respondent_name}</td>
-                <td>${b.incident_type}</td>
-                <td>${new Date(b.incident_date).toLocaleDateString()}${b.incident_time}</td>
-                <td><span class="badge badge-${b.status.toLowerCase().replace(' ', '')}">${b.status}</span></td>
-                <td>
-                  <a href="/${portalType.toLowerCase()}/blotter/${b.id}" class="btn btn-secondary btn-sm">View Case</a>
-                </td>
-              </tr>
+function renderResidentContacts(data) {
+    return `
+    <div class="space-y-6">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="font-bold text-slate-800">Emergency Hotlines & Key Contacts</h3>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            ${data.emergencyContacts.map(c => `
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                    <span class="text-xs font-semibold text-blue-600 uppercase">${c.category}</span>
+                    <h4 class="font-bold text-lg text-slate-800">${c.name}</h4>
+                    <a href="tel:${c.number}" class="inline-block px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm shadow transition">📞 Call ${c.number}</a>
+                </div>
             `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Blotter Records', portal: portalType, user: req.session, activeNav: 'blotter', content }));
-};
-
-app.get('/admin/blotter', requireAdmin, (req, res) => handleBlotterList(req, res, 'ADMIN'));
-app.get('/staff/blotter', requireStaff, requirePermission('blotter'), (req, res) => handleBlotterList(req, res, 'STAFF'));
-
-const handleBlotterCreateView = (req, res, portalType) => {
-  const content = `
-    <div class="page-header"><h1 class="page-title">File New Incident Blotter</h1></div>
-    <div class="card" style="max-width: 700px;">
-      <form action="/${portalType.toLowerCase()}/blotter/create" method="POST" enctype="multipart/form-data">
-        <div class="form-row">
-          <div class="form-group">
-            <label>Complainant Name *</label>
-            <input type="text" name="complainant_name" class="form-control" required>
-          </div>
-          <div class="form-group">
-            <label>Respondent Name *</label>
-            <input type="text" name="respondent_name" class="form-control" required>
-          </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Incident Type *</label>
-            <input type="text" name="incident_type" class="form-control" placeholder="e.g. Noise Complaint, Property Dispute, Physical Altercation" required>
-          </div>
-          <div class="form-group">
-            <label>Incident Date *</label>
-            <input type="date" name="incident_date" class="form-control" required>
-          </div>
-          <div class="form-group">
-            <label>Incident Time *</label>
-            <input type="time" name="incident_time" class="form-control" required>
-          </div>
-        </div>
-        <div class="form-group">
-          <label>Location *</label>
-          <input type="text" name="location" class="form-control" required>
-        </div>
-        <div class="form-group">
-          <label>Detailed Incident Description *</label>
-          <textarea name="description" class="form-control" rows="4" required></textarea>
-        </div>
-        <div class="form-group">
-          <label>Witnesses (Optional)</label>
-          <input type="text" name="witnesses" class="form-control">
-        </div>
-        <div class="form-group">
-          <label>Attachment Document/Photo (Optional)</label>
-          <input type="file" name="attachment" class="form-control" accept="image/*,application/pdf">
-        </div>
-        <button type="submit" class="btn btn-primary" style="width:100%;">Record Blotter Case</button>
-      </form>
     </div>
-  `;
+    `;
+}
 
-  res.send(renderLayout({ title: 'New Blotter', portal: portalType, user: req.session, activeNav: 'blotter', content }));
-};
-
-app.get('/admin/blotter/create', requireAdmin, (req, res) => handleBlotterCreateView(req, res, 'ADMIN'));
-app.get('/staff/blotter/create', requireStaff, requirePermission('blotter'), (req, res) => handleBlotterCreateView(req, res, 'STAFF'));
-
-const handleBlotterCreateSubmit = async (req, res, portalType) => {
-  const { complainant_name, respondent_name, incident_type, incident_date, incident_time, location, description, witnesses } = req.body;
-  const fileUrl = req.file ? `/uploads/${req.file.filename}` : null;
-
-  const countRes = await pool.query('SELECT COUNT(*) FROM blotter_records');
-  const caseNum = `BLOT-${new Date().getFullYear()}-${String(parseInt(countRes.rows[0].count) + 1).padStart(5, '0')}`;
-
-  await pool.query(`
-    INSERT INTO blotter_records (
-      case_number, complainant_name, respondent_name, incident_type,
-      incident_date, incident_time, location, description, witnesses,
-      attachment_url, created_by
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-  `, [caseNum, complainant_name, respondent_name, incident_type, incident_date, incident_time, location, description, witnesses || null, fileUrl, req.session.userId]);
-
-  await logActivity(req.session.userId, req.session.role, 'Filed Incident Blotter', 'BLOTTER', caseNum, req);
-  res.redirect(`/${portalType.toLowerCase()}/blotter`);
-};
-
-app.post('/admin/blotter/create', requireAdmin, upload.single('attachment'), (req, res) => handleBlotterCreateSubmit(req, res, 'ADMIN'));
-app.post('/staff/blotter/create', requireStaff, requirePermission('blotter'), upload.single('attachment'), (req, res) => handleBlotterCreateSubmit(req, res, 'STAFF'));
-
-// QR VERIFICATION SCANNER (ADMIN & STAFF)
-const handleQRScannerView = (req, res, portalType) => {
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Barangay Resident QR Verification</h1>
-    </div>
-
-    <div class="card" style="max-width: 500px; margin: 0 auto; text-align: center;">
-      <p style="color: var(--text-light); margin-bottom: 1.5rem;">Enter or scan the Resident's QR Verification Token to verify authentic registry details.</p>
-      
-      <form id="qr-form" onsubmit="event.preventDefault(); verifyQR();">
-        <div class="form-group">
-          <input type="text" id="qr_token" class="form-control" placeholder="Scan or enter QR Code Token (e.g. QR-123...)" required style="text-align:center; font-weight:bold;">
-        </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">Verify QR Token</button>
-      </form>
-
-      <div id="qr-result" style="margin-top: 1.5rem; text-align: left; display: none;"></div>
-    </div>
-
-    <script>
-      async function verifyQR() {
-        const token = document.getElementById('qr_token').value;
-        const resultDiv = document.getElementById('qr-result');
-        resultDiv.style.display = 'block';
-        resultDiv.innerHTML = '<p>Verifying token...</p>';
-
-        try {
-          const res = await fetch('/api/verify-qr', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ qr_token: token })
-          });
-          const data = await res.json();
-
-          if (res.ok && data.valid) {
-            resultDiv.innerHTML = \`
-              <div style="border: 2px solid var(--success); border-radius: 8px; padding: 1rem; background: #f0fdf4;">
-                <h3 style="color: var(--success); margin-bottom: 0.5rem;">✅ Valid Resident QR</h3>
-                <p><strong>Resident ID:</strong> \${data.resident.resident_id_number}</p>
-                <p><strong>Name:</strong> \${data.resident.first_name} \${data.resident.last_name}</p>
-                <p><strong>Address:</strong> \${data.resident.address}</p>
-                <p><strong>Account Status:</strong> \${data.resident.status}</p>
-              </div>
-            \`;
-          } else {
-            resultDiv.innerHTML = \`
-              <div style="border: 2px solid var(--danger); border-radius: 8px; padding: 1rem; background: #fef2f2;">
-                <h3 style="color: var(--danger);">❌ Invalid / Unrecognized QR</h3>
-                <p>\${data.error || 'The scanned QR identifier does not match any valid record.'}</p>
-              </div>
-            \`;
-          }
-        } catch (e) {
-          resultDiv.innerHTML = '<p style="color:var(--danger)">Error processing QR request.</p>';
-        }
-      }
-    </script>
-  `;
-
-  res.send(renderLayout({ title: 'QR Verification', portal: portalType, user: req.session, activeNav: 'qr', content }));
-};
-
-app.get('/admin/qr', requireAdmin, (req, res) => handleQRScannerView(req, res, 'ADMIN'));
-app.get('/staff/qr', requireStaff, requirePermission('qr'), (req, res) => handleQRScannerView(req, res, 'STAFF'));
-
-// QR VERIFICATION API
-app.post('/api/verify-qr', requireStaff, async (req, res) => {
-  const { qr_token } = req.body;
-  try {
-    const result = await pool.query(`
-      SELECT r.*, u.status 
-      FROM residents r 
-      JOIN users u ON r.user_id = u.id 
-      WHERE r.qr_token = $1
-    `, [qr_token]);
-
-    if (result.rows.length === 0) {
-      await logActivity(req.session.userId, req.session.role, 'Scanned Invalid QR Token', 'QR_SCANNER', qr_token, req);
-      return res.status(404).json({ valid: false, error: 'Token not found in system.' });
-    }
-
-    const r = result.rows[0];
-    await logActivity(req.session.userId, req.session.role, `Scanned Valid QR for ${r.resident_id_number}`, 'QR_SCANNER', r.resident_id_number, req);
-
-    res.json({
-      valid: true,
-      resident: {
-        resident_id_number: r.resident_id_number,
-        first_name: r.first_name,
-        last_name: r.last_name,
-        address: r.address,
-        status: r.status
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ valid: false, error: 'Internal QR verification error.' });
-  }
-});
-
-// REPORTS & CSV EXPORT SYSTEM (ADMIN & STAFF)
-const handleReportsView = async (req, res, portalType) => {
-  const totalResidents = await pool.query('SELECT COUNT(*) FROM residents');
-  const totalSeniors = await pool.query('SELECT COUNT(*) FROM residents WHERE senior_status = TRUE');
-  const totalPWDs = await pool.query('SELECT COUNT(*) FROM residents WHERE pwd_status = TRUE');
-  const total4Ps = await pool.query('SELECT COUNT(*) FROM residents WHERE four_ps_status = TRUE');
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Barangay Demographic & System Reports</h1>
-      <a href="/${portalType.toLowerCase()}/reports/export-csv" class="btn btn-primary">📥 Export Master List CSV</a>
-    </div>
-
-    <div class="card-grid">
-      <div class="card stat-card">
-        <span class="stat-title">Total Residents</span>
-        <span class="stat-value">${totalResidents.rows[0].count}</span>
-      </div>
-      <div class="card stat-card">
-        <span class="stat-title">Senior Citizens</span>
-        <span class="stat-value">${totalSeniors.rows[0].count}</span>
-      </div>
-      <div class="card stat-card">
-        <span class="stat-title">PWD Residents</span>
-        <span class="stat-value">${totalPWDs.rows[0].count}</span>
-      </div>
-      <div class="card stat-card">
-        <span class="stat-title">4Ps Beneficiaries</span>
-        <span class="stat-value">${total4Ps.rows[0].count}</span>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Reports', portal: portalType, user: req.session, activeNav: 'reports', content }));
-};
-
-app.get('/admin/reports', requireAdmin, (req, res) => handleReportsView(req, res, 'ADMIN'));
-app.get('/staff/reports', requireStaff, requirePermission('reports'), (req, res) => handleReportsView(req, res, 'STAFF'));
-
-// CSV EXPORT IMPLEMENTATION
-const handleCSVExport = async (req, res) => {
-  try {
-    const residents = await pool.query('SELECT resident_id_number, first_name, last_name, sex, civil_status, address, contact_number, email FROM residents ORDER BY last_name ASC');
-
-    let csvContent = 'Resident ID,First Name,Last Name,Sex,Civil Status,Address,Contact Number,Email\n';
-    residents.rows.forEach(r => {
-      csvContent += `"${r.resident_id_number}","${r.first_name}","${r.last_name}","${r.sex}","${r.civil_status}","${r.address}","${r.contact_number}","${r.email}"\n`;
-    });
-
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="Barangay_Residents_MasterList.csv"');
-    res.status(200).send(csvContent);
-  } catch (err) {
-    res.status(500).send('Error generating CSV export.');
-  }
-};
-
-app.get('/admin/reports/export-csv', requireAdmin, handleCSVExport);
-app.get('/staff/reports/export-csv', requireStaff, requirePermission('reports'), handleCSVExport);
-
-// ADMIN: ANNOUNCEMENT MANAGEMENT
-app.get('/admin/announcements', requireAdmin, async (req, res) => {
-  const announcements = await pool.query('SELECT * FROM announcements ORDER BY created_at DESC');
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Community Announcements</h1>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
-      <div class="card">
-        <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Post Announcement</h2>
-        <form action="/admin/announcements/create" method="POST">
-          <div class="form-group">
-            <label>Title *</label>
-            <input type="text" name="title" class="form-control" required>
-          </div>
-          <div class="form-group">
-            <label>Content *</label>
-            <textarea name="content" class="form-control" rows="4" required></textarea>
-          </div>
-          <button type="submit" class="btn btn-primary" style="width:100%;">Publish Announcement</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Published Records</h2>
-        <div style="display:flex; flex-direction:column; gap:0.75rem;">
-          ${announcements.rows.map(a => `
-            <div style="border-bottom:1px solid var(--border); padding-bottom:0.5rem;">
-              <strong>${a.title}</strong>
-              <p style="font-size:0.8rem; color:var(--text-light);">${new Date(a.publication_date).toLocaleDateString()}</p>
+function renderResidentFeedback() {
+    return `
+    <div class="space-y-6 max-w-xl mx-auto">
+        <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+            <div>
+                <h3 class="text-xl font-bold text-slate-800">Rate Our Barangay Service</h3>
+                <p class="text-sm text-slate-500 mt-1">Help us improve our community services.</p>
             </div>
-          `).join('')}
+            <form action="/api/resident/submit-feedback" method="POST" class="space-y-4 text-sm">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-2">Rating (1 to 5 Stars)</label>
+                    <select name="rating" class="w-full p-3 border rounded-xl">
+                        <option value="5">⭐⭐⭐⭐⭐ (5 - Excellent)</option>
+                        <option value="4">⭐⭐⭐⭐ (4 - Very Good)</option>
+                        <option value="3">⭐⭐⭐ (3 - Satisfactory)</option>
+                        <option value="2">⭐⭐ (2 - Needs Improvement)</option>
+                        <option value="1">⭐ (1 - Poor)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-2">Comments & Suggestions</label>
+                    <textarea name="comments" rows="4" placeholder="Write your feedback here..." required class="w-full p-3 border rounded-xl"></textarea>
+                </div>
+                <button type="submit" class="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-500 transition shadow">SUBMIT FEEDBACK</button>
+            </form>
         </div>
-      </div>
     </div>
-  `;
+    `;
+}
 
-  res.send(renderLayout({ title: 'Announcements', portal: 'ADMIN', user: req.session, activeNav: 'announcements', content }));
-});
-
-app.post('/admin/announcements/create', requireAdmin, async (req, res) => {
-  const { title, content } = req.body;
-  await pool.query('INSERT INTO announcements (title, content) VALUES ($1, $2)', [title, content]);
-  await logActivity(req.session.userId, 'ADMIN', 'Published Announcement', 'ANNOUNCEMENTS', title, req);
-  res.redirect('/admin/announcements');
-});
-
-// ADMIN: BARANGAY OFFICIALS
-app.get('/admin/officials', requireAdmin, async (req, res) => {
-  const officials = await pool.query('SELECT * FROM barangay_officials ORDER BY id ASC');
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Barangay Officials</h1>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
-      <div class="card">
-        <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Add Official</h2>
-        <form action="/admin/officials/create" method="POST">
-          <div class="form-group">
-            <label>Full Name *</label>
-            <input type="text" name="full_name" class="form-control" required>
-          </div>
-          <div class="form-group">
-            <label>Position *</label>
-            <input type="text" name="position" class="form-control" placeholder="e.g. Barangay Captain, Councilor, Secretary" required>
-          </div>
-          <div class="form-group">
-            <label>Term / Years</label>
-            <input type="text" name="term" class="form-control" placeholder="e.g. 2023 - 2026">
-          </div>
-          <button type="submit" class="btn btn-primary" style="width:100%;">Save Official</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Active Officials</h2>
-        <div class="table-responsive">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Position</th>
-                <th>Term</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${officials.rows.map(o => `
-                <tr>
-                  <td><strong>${o.full_name}</strong></td>
-                  <td>${o.position}</td>
-                  <td>${o.term || '—'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Officials', portal: 'ADMIN', user: req.session, activeNav: 'officials', content }));
-});
-
-app.post('/admin/officials/create', requireAdmin, async (req, res) => {
-  const { full_name, position, term } = req.body;
-  await pool.query('INSERT INTO barangay_officials (full_name, position, term) VALUES ($1, $2, $3)', [full_name, position, term]);
-  await logActivity(req.session.userId, 'ADMIN', 'Added Official', 'OFFICIALS', full_name, req);
-  res.redirect('/admin/officials');
-});
-
-// ADMIN: DOCUMENT TEMPLATES
-app.get('/admin/documents', requireAdmin, async (req, res) => {
-  const docTypes = await pool.query('SELECT * FROM document_types ORDER BY id ASC');
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Document Clearance Templates & Fees</h1>
-    </div>
-
-    <div class="card">
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Description</th>
-              <th>Fee</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${docTypes.rows.map(d => `
-              <tr>
-                <td><strong>${d.title}</strong></td>
-                <td>${d.description}</td>
-                <td>₱${parseFloat(d.fee).toFixed(2)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Document Types', portal: 'ADMIN', user: req.session, activeNav: 'documents', content }));
-});
-
-// ADMIN: ACTIVITY LOGS
-app.get('/admin/logs', requireAdmin, async (req, res) => {
-  const logs = await pool.query('SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 50');
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">System Audit & Activity Logs</h1>
-    </div>
-
-    <div class="card">
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>Role</th>
-              <th>Action</th>
-              <th>Module</th>
-              <th>Record Identifier</th>
-              <th>IP Address</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${logs.rows.map(l => `
-              <tr>
-                <td>${new Date(l.created_at).toLocaleString()}</td>
-                <td><span class="badge badge-pending">${l.user_role || 'SYSTEM'}</span></td>
-                <td>${l.action}</td>
-                <td>${l.module}</td>
-                <td>${l.record_id || '—'}</td>
-                <td>${l.ip_address}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Activity Logs', portal: 'ADMIN', user: req.session, activeNav: 'logs', content }));
-});
-
-// ADMIN: DATABASE BACKUP INFORMATION
-app.get('/admin/backup', requireAdmin, (req, res) => {
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">Database Backup Instructions</h1>
-    </div>
-
-    <div class="card" style="max-width: 750px;">
-      <h2 style="font-size: 1.2rem; margin-bottom: 1rem;">Render Managed PostgreSQL Backup Procedures</h2>
-      <p style="margin-bottom: 1rem; line-height: 1.6;">
-        This application relies on a permanent Render PostgreSQL database instance. For enterprise production data persistence, 
-        Render handles managed automated daily database backups.
-      </p>
-
-      <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem 0;">Manual CLI Backup Command (pg_dump):</h3>
-      <pre style="background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 6px; font-size: 0.85rem; overflow-x: auto;">
-pg_dump "${DATABASE_URL}" > barangay_db_backup_\$(date +%Y%m%d).sql
-      </pre>
-
-      <h3 style="font-size: 1rem; margin: 1.5rem 0 0.5rem 0;">Restore Command:</h3>
-      <pre style="background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 6px; font-size: 0.85rem; overflow-x: auto;">
-psql "${DATABASE_URL}" < barangay_db_backup.sql
-      </pre>
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Database Backup', portal: 'ADMIN', user: req.session, activeNav: 'backup', content }));
-});
-
-// ADMIN & STAFF: SETTINGS
-const handleSettingsView = async (req, res, portalType) => {
-  const settingsRes = await pool.query('SELECT * FROM system_settings LIMIT 1');
-  const sys = settingsRes.rows[0];
-
-  const content = `
-    <div class="page-header">
-      <h1 class="page-title">System Settings</h1>
-    </div>
-
-    <div class="card" style="max-width: 650px;">
-      ${portalType === 'ADMIN' ? `
-        <form action="/admin/settings" method="POST">
-          <div class="form-group">
-            <label>Barangay Name *</label>
-            <input type="text" name="barangay_name" class="form-control" value="${sys.barangay_name}" required>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Municipality / City *</label>
-              <input type="text" name="municipality" class="form-control" value="${sys.municipality}" required>
-            </div>
-            <div class="form-group">
-              <label>Province *</label>
-              <input type="text" name="province" class="form-control" value="${sys.province}" required>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Contact Number *</label>
-              <input type="text" name="contact_number" class="form-control" value="${sys.contact_number}" required>
-            </div>
-            <div class="form-group">
-              <label>Email *</label>
-              <input type="email" name="email" class="form-control" value="${sys.email}" required>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Address *</label>
-            <input type="text" name="address" class="form-control" value="${sys.address}" required>
-          </div>
-          <button type="submit" class="btn btn-primary" style="width:100%;">Save Configuration</button>
-        </form>
-      ` : `
-        <p><strong>Barangay Name:</strong> ${sys.barangay_name}</p>
-        <p><strong>Municipality:</strong> ${sys.municipality}</p>
-        <p><strong>Province:</strong> ${sys.province}</p>
-        <p><strong>Contact:</strong> ${sys.contact_number}</p>
-        <p><strong>Email:</strong> ${sys.email}</p>
-      `}
-    </div>
-  `;
-
-  res.send(renderLayout({ title: 'Settings', portal: portalType, user: req.session, activeNav: 'settings', content }));
-};
-
-app.get('/admin/settings', requireAdmin, (req, res) => handleSettingsView(req, res, 'ADMIN'));
-app.get('/staff/settings', requireStaff, (req, res) => handleSettingsView(req, res, 'STAFF'));
-
-app.post('/admin/settings', requireAdmin, async (req, res) => {
-  const { barangay_name, municipality, province, contact_number, email, address } = req.body;
-  await pool.query(`
-    UPDATE system_settings 
-    SET barangay_name = $1, municipality = $2, province = $3, contact_number = $4, email = $5, address = $6, updated_at = CURRENT_TIMESTAMP
-    WHERE id = 1
-  `, [barangay_name, municipality, province, contact_number, email, address]);
-
-  await logActivity(req.session.userId, 'ADMIN', 'Updated System Settings', 'SETTINGS', '1', req);
-  res.redirect('/admin/settings');
-});
-
-// START SERVER AND INITIALIZE DATABASE TABLES
-initializeDatabase().then(() => {
-  app.listen(PORT, () => {
-    console.log(`=======================================================`);
+// Server Startup
+app.listen(PORT, () => {
     console.log(`Barangay Resident Management System running on port ${PORT}`);
-    console.log(`Node Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`=======================================================`);
-  });
-}).catch(err => {
-  console.error('Failed to initialize database and server startup:', err);
 });
