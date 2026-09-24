@@ -1,17 +1,16 @@
 {
-"name": "barangay-resident-management-system",
-"version": "1.0.0",
-"description": "Complete Barangay Resident Management System with Staff and Resident Portals",
-"main": "app.js",
-"scripts": {
-"start": "node app.js"
-},
-"dependencies": {
-"express": "^4.19.2",
-"express-session": "^1.18.0",
-"bcryptjs": "^2.4.3"
-},
-"engines": {
-"node": ">=18.0.0"
-}
+  "name": "barangay-resident-management-system",
+  "version": "1.0.0",
+  "description": "Fully Functional Barangay Resident Management System",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "private": true
 }
