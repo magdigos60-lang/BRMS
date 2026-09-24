@@ -1,7 +1,7 @@
 {
   "name": "barangay-resident-management-system",
   "version": "1.0.0",
-  "description": "Complete Barangay Resident Management System Web Application",
+  "description": "Complete Barangay Resident Management System",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
