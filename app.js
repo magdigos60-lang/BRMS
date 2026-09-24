@@ -1,2045 +1,1886 @@
-/**
- * Barangay Resident Management System - Single File Application
- * Node.js + Express + SQLite + Embedded Vanilla JS / Tailwind CSS Frontend
- */
+/*************************************************************
+ * BARANGAY RESIDENT MANAGEMENT SYSTEM (BRMS)
+ * Fully functional Node.js + Express + SQLite Application
+ *************************************************************/
 
 const express = require('express');
-const session = require('express-session');
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcryptjs');
-const multer = require('multer');
+const session = require('express-session');
 const path = require('path');
 const fs = require('fs');
+const multer = require('multer');
+const QRCode = require('qrcode');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Ensure data directory exists for SQLite
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+// Ensure uploads directory exists
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-const dbFile = path.join(dataDir, 'database.sqlite');
-const db = new sqlite3.Database(dbFile, (err) => {
-    if (err) {
-        console.error('Error opening database', err.message);
-    } else {
-        console.log('Connected to SQLite database.');
-        initDatabase();
-    }
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, 'uploads/'),
+    filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
 });
+const upload = multer({ storage });
 
-// Configure Multer for in-memory file uploads (stored as base64 in DB for simplicity & portability)
-const upload = multer({
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith('image/')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only image files are allowed!'), false);
-        }
-    }
-});
-
-// Middleware setup
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(express.json({ limit: '10mb' }));
+// Middleware
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use('/uploads', express.static(uploadDir));
 app.use(session({
     secret: process.env.SESSION_SECRET || 'brgy-secret-key-2026',
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+    cookie: { maxAge: 24 * 60 * 60 * 1000 }
 }));
 
-// Helper function for logging activities
-function logActivity(db, userId, userRole, action, details) {
-    const stmt = db.prepare(`INSERT INTO activity_logs (user_id, user_role, action, details, timestamp) VALUES (?, ?, ?, ?, datetime('now', 'localtime'))`);
-    stmt.run(userId || 'System', userRole || 'System', action, details);
-    stmt.finalize();
+// Database Initialization
+const dbFile = path.join(__dirname, 'database.sqlite');
+const db = new sqlite3.Database(dbFile, (err) => {
+    if (err) console.error('Database connection error:', err.message);
+    else console.log('Connected to SQLite database.');
+});
+
+db.serialize(() => {
+    // 1. Settings Table
+    db.run(`CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )`);
+
+    // Default settings
+    const defaultSettings = {
+        brgy_name: 'Barangay San Jose',
+        brgy_address: 'Main Street',
+        municipality: 'Sample Municipality',
+        province: 'Sample Province',
+        contact_number: '09123456789',
+        email: 'sanjose@barangay.gov.ph',
+        captain: 'Hon. Juaning Capitan',
+        secretary: 'Maria Sekretarya',
+        logo: ''
+    };
+    Object.keys(defaultSettings).forEach(k => {
+        db.get(`SELECT value FROM settings WHERE key = ?`, [k], (err, row) => {
+            if (!row) {
+                db.run(`INSERT INTO settings (key, value) VALUES (?, ?)`, [k, defaultSettings[k]]);
+            }
+        });
+    });
+
+    // 2. Staff Table
+    db.run(`CREATE TABLE IF NOT EXISTS staff (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        full_name TEXT,
+        role TEXT, -- Administrator, Barangay Captain, Barangay Secretary, Staff
+        status TEXT DEFAULT 'Active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`, () => {
+        // Default Admin Account
+        db.get(`SELECT id FROM staff WHERE username = 'admin'`, async (err, row) => {
+            if (!row) {
+                const hashed = await bcrypt.hash('admin123', 10);
+                db.run(`INSERT INTO staff (username, password, full_name, role) VALUES (?, ?, ?, ?)`,
+                    ['admin', hashed, 'System Administrator', 'Administrator']);
+            }
+        });
+    });
+
+    // 3. Residents Table
+    db.run(`CREATE TABLE IF NOT EXISTS residents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resident_id TEXT UNIQUE,
+        first_name TEXT,
+        middle_name TEXT,
+        last_name TEXT,
+        suffix TEXT,
+        dob TEXT,
+        gender TEXT,
+        civil_status TEXT,
+        address TEXT,
+        purok TEXT,
+        contact_number TEXT,
+        email TEXT,
+        occupation TEXT,
+        educational_attainment TEXT,
+        nationality TEXT,
+        voter_status TEXT,
+        pwd_status TEXT,
+        senior_citizen_status TEXT,
+        solo_parent_status TEXT,
+        four_ps_status TEXT,
+        photo TEXT,
+        date_registered TEXT,
+        resident_status TEXT DEFAULT 'Active', -- Active, Archived
+        password TEXT, -- For resident portal
+        account_status TEXT DEFAULT 'Pending' -- Pending, Approved, Rejected
+    )`);
+
+    // 4. Households Table
+    db.run(`CREATE TABLE IF NOT EXISTS households (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        household_id TEXT UNIQUE,
+        household_head_id INTEGER,
+        address TEXT,
+        purok TEXT,
+        date_registered TEXT,
+        status TEXT DEFAULT 'Active'
+    )`);
+
+    // 5. Puroks Table
+    db.run(`CREATE TABLE IF NOT EXISTS puroks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE,
+        description TEXT
+    )`);
+
+    // 6. Certificates Table
+    db.run(`CREATE TABLE IF NOT EXISTS certificates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cert_number TEXT UNIQUE,
+        resident_id TEXT,
+        cert_type TEXT,
+        purpose TEXT,
+        status TEXT DEFAULT 'Pending', -- Pending, Processing, Approved, Rejected, Ready for Release, Released
+        remarks TEXT,
+        date_issued TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // 7. Appointments Table
+    db.run(`CREATE TABLE IF NOT EXISTS appointments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resident_id TEXT,
+        service TEXT,
+        appointment_date TEXT,
+        appointment_time TEXT,
+        purpose TEXT,
+        status TEXT DEFAULT 'Pending', -- Pending, Approved, Rescheduled, Completed, Cancelled
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // 8. Blotter Table
+    db.run(`CREATE TABLE IF NOT EXISTS blotter (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        case_number TEXT UNIQUE,
+        complainant TEXT,
+        respondent TEXT,
+        witness TEXT,
+        incident_date TEXT,
+        incident_time TEXT,
+        location TEXT,
+        incident_type TEXT,
+        description TEXT,
+        action_taken TEXT,
+        settlement TEXT,
+        status TEXT DEFAULT 'Open' -- Open, Under Investigation, Settled, Closed
+    )`);
+
+    // 9. Assistance Table
+    db.run(`CREATE TABLE IF NOT EXISTS assistance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resident_id TEXT,
+        assistance_type TEXT,
+        details TEXT,
+        status TEXT DEFAULT 'Pending', -- Pending, Approved, Rejected, Released
+        remarks TEXT,
+        date_requested DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // 10. Businesses Table
+    db.run(`CREATE TABLE IF NOT EXISTS businesses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_name TEXT,
+        owner_name TEXT,
+        address TEXT,
+        purok TEXT,
+        business_type TEXT,
+        contact_number TEXT,
+        registration_date TEXT,
+        permit_number TEXT UNIQUE,
+        permit_expiration TEXT,
+        status TEXT DEFAULT 'Active'
+    )`);
+
+    // 11. Announcements Table
+    db.run(`CREATE TABLE IF NOT EXISTS announcements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        category TEXT,
+        content TEXT,
+        date_posted DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // 12. Notifications Table
+    db.run(`CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resident_id TEXT,
+        message TEXT,
+        is_read INTEGER DEFAULT 0,
+        date_created DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // 13. Activity Logs Table
+    db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_name TEXT,
+        action TEXT,
+        details TEXT,
+        date_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+});
+
+// Helper function to log activities
+function logActivity(userName, action, details) {
+    db.run(`INSERT INTO activity_logs (user_name, action, details) VALUES (?, ?, ?)`, [userName, action, details]);
 }
 
-// Initialize Database Tables
-function initDatabase() {
-    db.serialize(() => {
-        // Settings table for Barangay customization
-        db.run(`CREATE TABLE IF NOT EXISTS settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            barangay_name TEXT DEFAULT 'Barangay San Isidro',
-            municipality TEXT DEFAULT 'Municipality of Sample',
-            province TEXT DEFAULT 'Province of Laguna',
-            captain TEXT DEFAULT 'Hon. Juan Dela Cruz',
-            contact_number TEXT DEFAULT '09123456789',
-            email TEXT DEFAULT 'brgy.sanisidro@example.com',
-            address TEXT DEFAULT 'Poblacion, San Isidro',
-            primary_color TEXT DEFAULT '#1e40af',
-            secondary_color TEXT DEFAULT '#3b82f6',
-            id_validity_years TEXT DEFAULT '2',
-            logo_base64 TEXT DEFAULT ''
-        )`);
+// Helper to notify a resident
+function sendNotification(residentId, message) {
+    db.run(`INSERT INTO notifications (resident_id, message) VALUES (?, ?)`, [residentId, message]);
+}
 
-        // Users table (Staff / Admins)
-        db.run(`CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            full_name TEXT NOT NULL,
-            role TEXT CHECK(role IN ('Super Admin', 'Barangay Admin', 'Barangay Staff')) NOT NULL,
-            email TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
+// Helper to calculate age
+function calculateAge(dob) {
+    if (!dob) return 0;
+    const diff = Date.now() - new Date(dob).getTime();
+    const ageDate = new Date(diff);
+    return Math.abs(ageDate.getUTCFullYear() - 1970);
+}
 
-        // Puroks table
-        db.run(`CREATE TABLE IF NOT EXISTS puroks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            description TEXT
-        )`);
-
-        // Households table
-        db.run(`CREATE TABLE IF NOT EXISTS households (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            household_number TEXT UNIQUE NOT NULL,
-            head_name TEXT NOT NULL,
-            address TEXT NOT NULL,
-            purok TEXT NOT NULL
-        )`);
-
-        // Residents table
-        db.run(`CREATE TABLE IF NOT EXISTS residents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            resident_id TEXT UNIQUE,
-            first_name TEXT NOT NULL,
-            middle_name TEXT,
-            last_name TEXT NOT NULL,
-            suffix TEXT,
-            dob TEXT NOT NULL,
-            gender TEXT NOT NULL,
-            civil_status TEXT NOT NULL,
-            address TEXT NOT NULL,
-            purok TEXT NOT NULL,
-            contact_number TEXT,
-            email TEXT,
-            occupation TEXT,
-            educational_attainment TEXT,
-            nationality TEXT DEFAULT 'Filipino',
-            voter_status TEXT DEFAULT 'No',
-            pwd_status TEXT DEFAULT 'No',
-            senior_citizen_status TEXT DEFAULT 'No',
-            solo_parent_status TEXT DEFAULT 'No',
-            four_ps_status TEXT DEFAULT 'No',
-            household_number TEXT,
-            password TEXT,
-            photo TEXT,
-            status TEXT CHECK(status IN ('Pending', 'Active', 'Inactive', 'Moved Out', 'Deceased', 'Archived', 'Rejected')) DEFAULT 'Pending',
-            registration_date DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Profile update requests table
-        db.run(`CREATE TABLE IF NOT EXISTS profile_updates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            resident_id TEXT NOT NULL,
-            update_data TEXT NOT NULL,
-            status TEXT DEFAULT 'Pending',
-            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Certificates table
-        db.run(`CREATE TABLE IF NOT EXISTS certificates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cert_number TEXT UNIQUE,
-            resident_id TEXT NOT NULL,
-            cert_type TEXT NOT NULL,
-            purpose TEXT,
-            status TEXT CHECK(status IN ('Pending', 'Processing', 'Approved', 'Ready for Release', 'Released', 'Rejected')) DEFAULT 'Pending',
-            remarks TEXT,
-            release_date TEXT,
-            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Blotter cases table
-        db.run(`CREATE TABLE IF NOT EXISTS blotters (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_number TEXT UNIQUE,
-            complainant TEXT NOT NULL,
-            respondent TEXT NOT NULL,
-            witness TEXT,
-            incident_date TEXT NOT NULL,
-            incident_time TEXT NOT NULL,
-            location TEXT NOT NULL,
-            incident_type TEXT NOT NULL,
-            description TEXT NOT NULL,
-            action_taken TEXT,
-            settlement TEXT,
-            status TEXT CHECK(status IN ('Open', 'Under Investigation', 'Settled', 'Referred', 'Closed')) DEFAULT 'Open',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Appointments table
-        db.run(`CREATE TABLE IF NOT EXISTS appointments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            resident_id TEXT NOT NULL,
-            service_type TEXT NOT NULL,
-            appointment_date TEXT NOT NULL,
-            appointment_time TEXT NOT NULL,
-            purpose TEXT,
-            status TEXT CHECK(status IN ('Pending', 'Approved', 'Rescheduled', 'Cancelled', 'Completed')) DEFAULT 'Pending',
-            remarks TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Assistance requests table
-        db.run(`CREATE TABLE IF NOT EXISTS assistance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            resident_id TEXT NOT NULL,
-            assistance_type TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            status TEXT CHECK(status IN ('Pending', 'Approved', 'Rejected', 'Released')) DEFAULT 'Pending',
-            remarks TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Businesses table
-        db.run(`CREATE TABLE IF NOT EXISTS businesses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            business_name TEXT NOT NULL,
-            owner_name TEXT NOT NULL,
-            address TEXT NOT NULL,
-            business_type TEXT NOT NULL,
-            contact_number TEXT,
-            permit_number TEXT UNIQUE,
-            permit_status TEXT CHECK(status IN ('Active', 'Pending Renewal', 'Expired', 'Revoked')) DEFAULT 'Active',
-            expiration_date TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Announcements table
-        db.run(`CREATE TABLE IF NOT EXISTS announcements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            category TEXT NOT NULL,
-            content TEXT NOT NULL,
-            date_posted TEXT DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Complaints table
-        db.run(`CREATE TABLE IF NOT EXISTS complaints (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            resident_id TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            details TEXT NOT NULL,
-            status TEXT CHECK(status IN ('Pending', 'Reviewing', 'Resolved', 'Dismissed')) DEFAULT 'Pending',
-            remarks TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Activity Logs table
-        db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            user_role TEXT,
-            action TEXT NOT NULL,
-            details TEXT,
-            timestamp TEXT NOT NULL
-        )`);
-
-        // Seed default settings if empty
-        db.get(`SELECT COUNT(*) as count FROM settings`, (err, row) => {
-            if (row && row.count === 0) {
-                db.run(`INSERT INTO settings (barangay_name, municipality, province, captain, contact_number, email, address) VALUES ('Barangay San Isidro', 'Municipality of Sample', 'Province of Laguna', 'Hon. Juan Dela Cruz', '09123456789', 'brgy.sanisidro@example.com', 'Poblacion, San Isidro')`);
+// Helper to generate unique Resident ID
+function generateResidentId(callback) {
+    db.get(`SELECT resident_id FROM residents ORDER BY id DESC LIMIT 1`, (err, row) => {
+        let nextNum = 1;
+        if (row && row.resident_id) {
+            const parts = row.resident_id.split('-');
+            if (parts.length === 2) {
+                nextNum = parseInt(parts[1], 10) + 1;
             }
-        });
-
-        // Seed default super admin if empty
-        db.get(`SELECT COUNT(*) as count FROM users`, (err, row) => {
-            if (row && row.count === 0) {
-                const hashedPass = bcrypt.hashSync('password123', 10);
-                db.run(`INSERT INTO users (username, password, full_name, role, email) VALUES ('admin', ?, 'Super Administrator', 'Super Admin', 'admin@brgy.gov.ph')`, [hashedPass], () => {
-                    console.log('Default super admin account created (username: admin, password: password123)');
-                });
-            }
-        });
-
-        // Seed default puroks if empty
-        db.get(`SELECT COUNT(*) as count FROM puroks`, (err, row) => {
-            if (row && row.count === 0) {
-                const defaultPuroks = ['Purok 1 - Centro', 'Purok 2 - Riverside', 'Purok 3 - Hillside', 'Purok 4 - Lakeside'];
-                const stmt = db.prepare(`INSERT INTO puroks (name, description) VALUES (?, ?)`);
-                defaultPuroks.forEach(p => stmt.run(p, 'Standard barangay purok'));
-                stmt.finalize();
-            }
-        });
+        }
+        const newId = 'BRGY-' + String(nextNum).padStart(6, '0');
+        callback(newId);
     });
 }
 
-// Authentication Middleware
-function requireStaff(req, res, next) {
-    if (req.session && req.session.user && ['Super Admin', 'Barangay Admin', 'Barangay Staff'].includes(req.session.user.role)) {
-        return next();
-    }
-    if (req.xhr || req.headers.accept?.includes('json')) {
-        return res.status(401).json({ error: 'Unauthorized. Please login as staff.' });
-    }
-    res.redirect('/login');
+// Helper to generate Certificate Number
+function generateCertNumber(callback) {
+    const randomNum = Math.floor(100000 + Math.random() * 900000);
+    const certNo = 'CERT-' + new Date().getFullYear() + '-' + randomNum;
+    db.get(`SELECT id FROM certificates WHERE cert_number = ?`, [certNo], (err, row) => {
+        if (row) generateCertNumber(callback);
+        else callback(certNo);
+    });
 }
 
-function requireSuperAdmin(req, res, next) {
-    if (req.session && req.session.user && req.session.user.role === 'Super Admin') {
-        return next();
-    }
-    if (req.xhr || req.headers.accept?.includes('json')) {
-        return res.status(403).json({ error: 'Forbidden. Super Admin access required.' });
-    }
-    res.redirect('/staff');
-}
-
-function requireResident(req, res, next) {
-    if (req.session && req.session.resident) {
-        return next();
-    }
-    if (req.xhr || req.headers.accept?.includes('json')) {
-        return res.status(401).json({ error: 'Unauthorized. Please login as resident.' });
-    }
-    res.redirect('/login');
-}
-
-// ==================== API ROUTES ====================
-
-// Settings API
-app.get('/api/settings', (req, res) => {
-    db.get(`SELECT * FROM settings LIMIT 1`, (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(row || {});
-    });
-});
-
-app.post('/api/settings', requireStaff, (req, res) => {
-    const { barangay_name, municipality, province, captain, contact_number, email, address, primary_color, secondary_color, id_validity_years, logo_base64 } = req.body;
-    db.run(`UPDATE settings SET barangay_name = ?, municipality = ?, province = ?, captain = ?, contact_number = ?, email = ?, address = ?, primary_color = ?, secondary_color = ?, id_validity_years = ?, logo_base64 = COALESCE(NULLIF(?, ''), logo_base64) WHERE id = 1`,
-        [barangay_name, municipality, province, captain, contact_number, email, address, primary_color, secondary_color, id_validity_years, logo_base64],
-        function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            logActivity(db, req.session.user.username, req.session.user.role, 'Update Settings', 'Updated barangay configuration settings.');
-            res.json({ success: true, message: 'Settings updated successfully' });
-        }
-    );
-});
-
-// Authentication Routes
-app.post('/api/login/staff', (req, res) => {
-    const { username, password } = req.body;
-    db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, user) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!user || !bcrypt.compareSync(password, user.password)) {
-            return res.status(400).json({ error: 'Invalid username or password' });
-        }
-        req.session.user = { id: user.id, username: user.username, full_name: user.full_name, role: user.role };
-        logActivity(db, user.username, user.role, 'Staff Login', `Staff ${user.username} logged in.`);
-        res.json({ success: true, role: user.role });
-    });
-});
-
-app.post('/api/login/resident', (req, res) => {
-    const { resident_id, password } = req.body;
-    db.get(`SELECT * FROM residents WHERE resident_id = ?`, [resident_id], (err, resident) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!resident || resident.status !== 'Active' || !bcrypt.compareSync(password, resident.password)) {
-            return res.status(400).json({ error: 'Invalid Resident ID, password, or account not yet active/approved' });
-        }
-        req.session.resident = { id: resident.id, resident_id: resident.resident_id, full_name: `${resident.first_name} ${resident.last_name}` };
-        logActivity(db, resident.resident_id, 'Resident', 'Resident Login', `Resident ${resident.resident_id} logged in.`);
-        res.json({ success: true });
-    });
-});
-
-app.post('/api/logout', (req, res) => {
-    req.session.destroy(() => {
-        res.json({ success: true });
-    });
-});
-
-app.get('/api/session', (req, res) => {
-    if (req.session.user) {
-        res.json({ type: 'staff', user: req.session.user });
-    } else if (req.session.resident) {
-        res.json({ type: 'resident', resident: req.session.resident });
-    } else {
-        res.json({ type: null });
-    }
-});
-
-// Public Resident Registration
-app.post('/api/register', upload.single('photo'), (req, res) => {
-    const data = req.body;
-    const photoBase64 = req.file ? `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}` : '';
-    const hashedPassword = bcrypt.hashSync(data.password || 'default123', 10);
-
-    const query = `INSERT INTO residents (first_name, middle_name, last_name, suffix, dob, gender, civil_status, address, purok, contact_number, email, occupation, educational_attainment, nationality, voter_status, pwd_status, senior_citizen_status, solo_parent_status, four_ps_status, household_number, password, photo, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`;
-    
-    db.run(query, [
-        data.first_name, data.middle_name, data.last_name, data.suffix, data.dob, data.gender, data.civil_status,
-        data.address, data.purok, data.contact_number, data.email, data.occupation, data.educational_attainment,
-        data.nationality || 'Filipino', data.voter_status || 'No', data.pwd_status || 'No', data.senior_citizen_status || 'No',
-        data.solo_parent_status || 'No', data.four_ps_status || 'No', data.household_number, hashedPassword, photoBase64
-    ], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        logActivity(db, 'Public', 'Guest', 'Resident Registration', `New registration submitted for ${data.first_name} ${data.last_name}`);
-        res.json({ success: true, message: 'Registration submitted successfully. Pending staff review.' });
-    });
-});
-
-// ==================== STAFF PORTAL APIs ====================
-
-// Dashboard Statistics
-app.get('/api/staff/stats', requireStaff, (req, res) => {
-    const stats = {};
-    db.serialize(() => {
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Active'`, (err, row) => { stats.total_residents = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM households`, (err, row) => { stats.total_households = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Active' AND gender = 'Male'`, (err, row) => { stats.male = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Active' AND gender = 'Female'`, (err, row) => { stats.female = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Active' AND (strftime('%Y', 'now') - strftime('%Y', dob)) < 18`, (err, row) => { stats.minors = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Active' AND (strftime('%Y', 'now') - strftime('%Y', dob)) >= 18`, (err, row) => { stats.adults = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Active' AND senior_citizen_status = 'Yes'`, (err, row) => { stats.senior_citizens = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Active' AND pwd_status = 'Yes'`, (err, row) => { stats.pwd = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Active' AND solo_parent_status = 'Yes'`, (err, row) => { stats.solo_parents = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Active' AND voter_status = 'Yes'`, (err, row) => { stats.voters = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE status = 'Pending'`, (err, row) => { stats.pending_registrations = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM certificates WHERE status = 'Pending'`, (err, row) => { stats.pending_certificates = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM appointments WHERE status = 'Pending'`, (err, row) => { stats.pending_appointments = row.count; });
-        db.get(`SELECT COUNT(*) as count FROM profile_updates WHERE status = 'Pending'`, (err, row), () => {
-            db.get(`SELECT COUNT(*) as count FROM profile_updates WHERE status = 'Pending'`, (err2, row2) => {
-                stats.pending_requests = (row ? row.count : 0) + (row2 ? row2.count : 0);
-                res.json(stats);
-            });
-        });
-    });
-});
-
-// Resident CRUD & Management
-app.get('/api/staff/residents', requireStaff, (req, res) => {
-    const { status = 'Active', search = '', purok = '' } = req.query;
-    let query = `SELECT * FROM residents WHERE 1=1`;
-    let params = [];
-
-    if (status === 'Archived') {
-        query += ` AND status IN ('Archived', 'Inactive', 'Moved Out', 'Deceased')`;
-    } else if (status) {
-        query += ` AND status = ?`;
-        params.push(status);
-    }
-
-    if (search) {
-        query += ` AND (first_name LIKE ? OR last_name LIKE ? OR resident_id LIKE ? OR household_number LIKE ?)`;
-        const s = `%${search}%`;
-        params.push(s, s, s, s);
-    }
-
-    if (purok) {
-        query += ` AND purok = ?`;
-        params.push(purok);
-    }
-
-    query += ` ORDER BY last_name ASC`;
-
-    db.all(query, params, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/staff/residents/approve', requireStaff, (req, res) => {
-    const { id } = req.body;
-    // Generate unique resident ID e.g., BRGY-2026-000001
-    const year = new Date().getFullYear();
-    db.get(`SELECT COUNT(*) as count FROM residents WHERE resident_id IS NOT NULL`, (err, row) => {
-        const seq = String((row?.count || 0) + 1).padStart(6, '0');
-        const resident_id = `BRGY-${year}-${seq}`;
-
-        db.run(`UPDATE residents SET status = 'Active', resident_id = ? WHERE id = ?`, [resident_id, id], function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            logActivity(db, req.session.user.username, req.session.user.role, 'Approve Resident', `Approved resident registration with ID ${resident_id}`);
-            res.json({ success: true, resident_id });
-        });
-    });
-});
-
-app.post('/api/staff/residents/reject', requireStaff, (req, res) => {
-    const { id } = req.body;
-    db.run(`UPDATE residents SET status = 'Rejected' WHERE id = ?`, [id], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        logActivity(db, req.session.user.username, req.session.user.role, 'Reject Resident', `Rejected resident ID ${id}`);
-        res.json({ success: true });
-    });
-});
-
-app.post('/api/staff/residents/status', requireStaff, (req, res) => {
-    const { id, status } = req.body;
-    db.run(`UPDATE residents SET status = ? WHERE id = ?`, [status, id], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        logActivity(db, req.session.user.username, req.session.user.role, 'Update Resident Status', `Updated resident ${id} status to ${status}`);
-        res.json({ success: true });
-    });
-});
-
-app.put('/api/staff/residents/:id', requireStaff, upload.single('photo'), (req, res) => {
-    const id = req.params.id;
-    const data = req.body;
-    const photoClause = req.file ? `, photo = 'data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}'` : '';
-
-    const query = `UPDATE residents SET first_name = ?, middle_name = ?, last_name = ?, suffix = ?, dob = ?, gender = ?, civil_status = ?, address = ?, purok = ?, contact_number = ?, email = ?, occupation = ?, educational_attainment = ?, nationality = ?, voter_status = ?, pwd_status = ?, senior_citizen_status = ?, solo_parent_status = ?, four_ps_status = ?, household_number = ? ${photoClause} WHERE id = ?`;
-
-    db.run(query, [
-        data.first_name, data.middle_name, data.last_name, data.suffix, data.dob, data.gender, data.civil_status,
-        data.address, data.purok, data.contact_number, data.email, data.occupation, data.educational_attainment,
-        data.nationality, data.voter_status, data.pwd_status, data.senior_citizen_status, data.solo_parent_status,
-        data.four_ps_status, data.household_number, id
-    ], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        logActivity(db, req.session.user.username, req.session.user.role, 'Edit Resident', `Updated resident record ID ${id}`);
-        res.json({ success: true });
-    });
-});
-
-// Household Management
-app.get('/api/staff/households', requireStaff, (req, res) => {
-    db.all(`SELECT * FROM households ORDER BY household_number ASC`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/staff/households', requireStaff, (req, res) => {
-    const { household_number, head_name, address, purok } = req.body;
-    db.run(`INSERT INTO households (household_number, head_name, address, purok) VALUES (?, ?, ?, ?)`,
-        [household_number, head_name, address, purok], function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            logActivity(db, req.session.user.username, req.session.user.role, 'Create Household', `Created household ${household_number}`);
-            res.json({ success: true });
-        }
-    );
-});
-
-// Purok Management
-app.get('/api/staff/puroks', requireStaff, (req, res) => {
-    db.all(`SELECT p.*, (SELECT COUNT(*) FROM residents r WHERE r.purok = p.name AND r.status = 'Active') as resident_count, (SELECT COUNT(*) FROM households h WHERE h.purok = p.name) as household_count FROM puroks p`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/staff/puroks', requireStaff, (req, res) => {
-    const { name, description } = req.body;
-    db.run(`INSERT INTO puroks (name, description) VALUES (?, ?)`, [name, description], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        logActivity(db, req.session.user.username, req.session.user.role, 'Add Purok', `Added purok ${name}`);
-        res.json({ success: true });
-    });
-});
-
-app.delete('/api/staff/puroks/:id', requireStaff, (req, res) => {
-    const id = req.params.id;
-    db.get(`SELECT name FROM puroks WHERE id = ?`, [id], (err, purok) => {
-        if (!purok) return res.status(404).json({ error: 'Purok not found' });
-        db.get(`SELECT COUNT(*) as count FROM residents WHERE purok = ?`, [purok.name], (err, row) => {
-            if (row.count > 0) return res.status(400).json({ error: 'Cannot delete purok with assigned residents.' });
-            db.run(`DELETE FROM puroks WHERE id = ?`, [id], function(err) {
-                if (err) return res.status(500).json({ error: err.message });
-                res.json({ success: true });
-            });
-        });
-    });
-});
-
-// Certificate Management
-app.get('/api/staff/certificates', requireStaff, (req, res) => {
-    db.all(`SELECT c.*, r.first_name, r.last_name, r.resident_id as res_id FROM certificates c JOIN residents r ON c.resident_id = r.resident_id ORDER BY c.id DESC`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/staff/certificates', requireStaff, (req, res) => {
-    const { resident_id, cert_type, purpose, release_date } = req.body;
-    const year = new Date().getFullYear();
-    db.get(`SELECT COUNT(*) as count FROM certificates`, (err, row) => {
-        const cert_number = `CERT-${year}-${String((row?.count || 0) + 1).padStart(6, '0')}`;
-        db.run(`INSERT INTO certificates (cert_number, resident_id, cert_type, purpose, status, release_date) VALUES (?, ?, ?, ?, 'Pending', ?)`,
-            [cert_number, resident_id, cert_type, purpose, release_date], function(err) {
-                if (err) return res.status(500).json({ error: err.message });
-                res.json({ success: true, cert_number });
-            }
-        );
-    });
-});
-
-app.put('/api/staff/certificates/:id', requireStaff, (req, res) => {
-    const id = req.params.id;
-    const { status, remarks, release_date } = req.body;
-    db.run(`UPDATE certificates SET status = ?, remarks = ?, release_date = ? WHERE id = ?`,
-        [status, remarks, release_date, id], function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-        }
-    );
-});
-
-// Blotter Management
-app.get('/api/staff/blotters', requireStaff, (req, res) => {
-    db.all(`SELECT * FROM blotters ORDER BY id DESC`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/staff/blotters', requireStaff, (req, res) => {
-    const data = req.body;
-    const year = new Date().getFullYear();
-    db.get(`SELECT COUNT(*) as count FROM blotters`, (err, row) => {
-        const case_number = `BLOT-${year}-${String((row?.count || 0) + 1).padStart(4, '0')}`;
-        db.run(`INSERT INTO blotters (case_number, complainant, respondent, witness, incident_date, incident_time, location, incident_type, description, action_taken, settlement, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [case_number, data.complainant, data.respondent, data.witness, data.incident_date, data.incident_time, data.location, data.incident_type, data.description, data.action_taken, data.settlement, data.status || 'Open'],
-            function(err) {
-                if (err) return res.status(500).json({ error: err.message });
-                res.json({ success: true, case_number });
-            }
-        );
-    });
-});
-
-app.put('/api/staff/blotters/:id', requireStaff, (req, res) => {
-    const id = req.params.id;
-    const data = req.body;
-    db.run(`UPDATE blotters SET complainant = ?, respondent = ?, witness = ?, incident_date = ?, incident_time = ?, location = ?, incident_type = ?, description = ?, action_taken = ?, settlement = ?, status = ? WHERE id = ?`,
-        [data.complainant, data.respondent, data.witness, data.incident_date, data.incident_time, data.location, data.incident_type, data.description, data.action_taken, data.settlement, data.status, id],
-        function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-        }
-    );
-});
-
-// Appointment Management
-app.get('/api/staff/appointments', requireStaff, (req, res) => {
-    db.all(`SELECT a.*, r.first_name, r.last_name FROM appointments a JOIN residents r ON a.resident_id = r.resident_id ORDER BY a.id DESC`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.put('/api/staff/appointments/:id', requireStaff, (req, res) => {
-    const id = req.params.id;
-    const { status, remarks } = req.body;
-    db.run(`UPDATE appointments SET status = ?, remarks = ? WHERE id = ?`, [status, remarks, id], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
-});
-
-// Assistance Management
-app.get('/api/staff/assistance', requireStaff, (req, res) => {
-    db.all(`SELECT a.*, r.first_name, r.last_name FROM assistance a JOIN residents r ON a.resident_id = r.resident_id ORDER BY a.id DESC`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.put('/api/staff/assistance/:id', requireStaff, (req, res) => {
-    const id = req.params.id;
-    const { status, remarks } = req.body;
-    db.run(`UPDATE assistance SET status = ?, remarks = ? WHERE id = ?`, [status, remarks, id], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
-});
-
-// Business Management
-app.get('/api/staff/businesses', requireStaff, (req, res) => {
-    db.all(`SELECT * FROM businesses ORDER BY id DESC`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/staff/businesses', requireStaff, (req, res) => {
-    const data = req.body;
-    db.run(`INSERT INTO businesses (business_name, owner_name, address, business_type, contact_number, permit_number, permit_status, expiration_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [data.business_name, data.owner_name, data.address, data.business_type, data.contact_number, data.permit_number, data.permit_status || 'Active', data.expiration_date],
-        function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-        }
-    );
-});
-
-// Announcements
-app.get('/api/staff/announcements', requireStaff, (req, res) => {
-    db.all(`SELECT * FROM announcements ORDER BY id DESC`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/staff/announcements', requireStaff, (req, res) => {
-    const { title, category, content } = req.body;
-    db.run(`INSERT INTO announcements (title, category, content) VALUES (?, ?, ?)`, [title, category, content], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
-});
-
-app.delete('/api/staff/announcements/:id', requireStaff, (req, res) => {
-    db.run(`DELETE FROM announcements WHERE id = ?`, [req.params.id], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
-});
-
-// Resident Complaints
-app.get('/api/staff/complaints', requireStaff, (req, res) => {
-    db.all(`SELECT c.*, r.first_name, r.last_name FROM complaints c JOIN residents r ON c.resident_id = r.resident_id ORDER BY c.id DESC`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.put('/api/staff/complaints/:id', requireStaff, (req, res) => {
-    const { status, remarks } = req.body;
-    db.run(`UPDATE complaints SET status = ?, remarks = ? WHERE id = ?`, [status, remarks, req.params.id], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
-});
-
-// User Management (Super Admin only)
-app.get('/api/staff/users', requireSuperAdmin, (req, res) => {
-    db.all(`SELECT id, username, full_name, role, email, created_at FROM users`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/staff/users', requireSuperAdmin, (req, res) => {
-    const { username, password, full_name, role, email } = req.body;
-    const hashed = bcrypt.hashSync(password, 10);
-    db.run(`INSERT INTO users (username, password, full_name, role, email) VALUES (?, ?, ?, ?, ?)`,
-        [username, hashed, full_name, role, email], function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.delete('/api/staff/users/:id', requireSuperAdmin, (req, res) => {
-    db.run(`DELETE FROM users WHERE id = ?`, [req.params.id], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
-});
-
-// Activity Logs
-app.get('/api/staff/logs', requireStaff, (req, res) => {
-    db.all(`SELECT * FROM activity_logs ORDER BY id DESC LIMIT 100`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-// Profile update requests approval
-app.get('/api/staff/profile-updates', requireStaff, (req, res) => {
-    db.all(`SELECT p.*, r.first_name, r.last_name FROM profile_updates p JOIN residents r ON p.resident_id = r.resident_id WHERE p.status = 'Pending'`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/staff/profile-updates/approve', requireStaff, (req, res) => {
-    const { id } = req.body;
-    db.get(`SELECT * FROM profile_updates WHERE id = ?`, [id], (err, reqRow) => {
-        if (!reqRow) return res.status(404).json({ error: 'Request not found' });
-        const updateData = JSON.parse(reqRow.update_data);
-        
-        let fields = [];
-        let values = [];
-        for (const [key, val] of Object.entries(updateData)) {
-            fields.push(`${key} = ?`);
-            values.push(val);
-        }
-        values.push(reqRow.resident_id);
-
-        db.run(`UPDATE residents SET ${fields.join(', ')} WHERE resident_id = ?`, values, function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            db.run(`UPDATE profile_updates SET status = 'Approved' WHERE id = ?`, [id], () => {
-                res.json({ success: true });
-            });
-        });
-    });
-});
-
-// ==================== RESIDENT PORTAL APIs ====================
-
-app.get('/api/resident/profile', requireResident, (req, res) => {
-    db.get(`SELECT * FROM residents WHERE resident_id = ?`, [req.session.resident.resident_id], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (row) delete row.password;
-        res.json(row || {});
-    });
-});
-
-app.post('/api/resident/profile-update-request', requireResident, (req, res) => {
-    const updateData = JSON.stringify(req.body);
-    db.run(`INSERT INTO profile_updates (resident_id, update_data, status) VALUES (?, ?, 'Pending')`,
-        [req.session.resident.resident_id, updateData], function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.get('/api/resident/certificates', requireResident, (req, res) => {
-    db.all(`SELECT * FROM certificates WHERE resident_id = ? ORDER BY id DESC`, [req.session.resident.resident_id], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/resident/certificates', requireResident, (req, res) => {
-    const { cert_type, purpose } = req.body;
-    const year = new Date().getFullYear();
-    db.get(`SELECT COUNT(*) as count FROM certificates`, (err, row) => {
-        const cert_number = `CERT-${year}-${String((row?.count || 0) + 1).padStart(6, '0')}`;
-        db.run(`INSERT INTO certificates (cert_number, resident_id, cert_type, purpose, status) VALUES (?, ?, ?, ?, 'Pending')`,
-            [cert_number, req.session.resident.resident_id, cert_type, purpose], function(err) {
-                if (err) return res.status(500).json({ error: err.message });
-                res.json({ success: true });
-            }
-        );
-    });
-});
-
-app.get('/api/resident/appointments', requireResident, (req, res) => {
-    db.all(`SELECT * FROM appointments WHERE resident_id = ? ORDER BY id DESC`, [req.session.resident.resident_id], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/resident/appointments', requireResident, (req, res) => {
-    const { service_type, appointment_date, appointment_time, purpose } = req.body;
-    db.run(`INSERT INTO appointments (resident_id, service_type, appointment_date, appointment_time, purpose, status) VALUES (?, ?, ?, ?, ?, 'Pending')`,
-        [req.session.resident.resident_id, service_type, appointment_date, appointment_time, purpose], function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.get('/api/resident/assistance', requireResident, (req, res) => {
-    db.all(`SELECT * FROM assistance WHERE resident_id = ? ORDER BY id DESC`, [req.session.resident.resident_id], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/resident/assistance', requireResident, (req, res) => {
-    const { assistance_type, reason } = req.body;
-    db.run(`INSERT INTO assistance (resident_id, assistance_type, reason, status) VALUES (?, ?, ?, 'Pending')`,
-        [req.session.resident.resident_id, assistance_type, reason], function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.get('/api/resident/complaints', requireResident, (req, res) => {
-    db.all(`SELECT * FROM complaints WHERE resident_id = ? ORDER BY id DESC`, [req.session.resident.resident_id], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.post('/api/resident/complaints', requireResident, (req, res) => {
-    const { subject, details } = req.body;
-    db.run(`INSERT INTO complaints (resident_id, subject, details, status) VALUES (?, ?, ?, 'Pending')`,
-        [req.session.resident.resident_id, subject, details], function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.get('/api/resident/announcements', requireResident, (req, res) => {
-    db.all(`SELECT * FROM announcements ORDER BY id DESC`, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-// QR Code Verification Endpoint (Public)
-app.get('/api/verify/:resident_id', (req, res) => {
-    const resident_id = req.params.resident_id;
-    db.get(`SELECT r.resident_id, r.first_name, r.middle_name, r.last_name, r.suffix, r.status, s.barangay_name FROM residents r, settings s WHERE r.resident_id = ?`, [resident_id], (err, row) => {
-        if (err || !row) {
-            return res.status(404).json({ valid: false, message: 'Resident ID not found.' });
-        }
-        res.json({
-            valid: row.status === 'Active',
-            resident_id: row.resident_id,
-            name: `${row.first_name} ${row.middle_name ? row.middle_name[0] + '.' : ''} ${row.last_name} ${row.suffix || ''}`,
-            barangay: row.barangay_name,
-            status: row.status
-        });
-    });
-});
-
-
-// ==================== HTML FRONTEND VIEWS ====================
-
-// Serve Verification Page
-app.get('/verify/:resident_id', (req, res) => {
-    const resident_id = req.params.resident_id;
-    res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ID Verification - Barangay Management System</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-8 text-center" id="verification-card">
-        <div class="animate-pulse">Loading verification details...</div>
-    </div>
-    <script>
-        fetch('/api/verify/${resident_id}')
-            .then(res => res.json())
-            .then(data => {
-                const card = document.getElementById('verification-card');
-                if (data.valid) {
-                    card.innerHTML = \`
-                        <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-bold">✓</div>
-                        <h2 class="text-2xl font-bold text-slate-800 mb-1">VALID RESIDENT ID</h2>
-                        <p class="text-sm text-green-600 font-semibold mb-6">Status: \${data.status}</p>
-                        <div class="bg-slate-50 rounded-xl p-4 text-left space-y-2 mb-6 border border-slate-200">
-                            <div><span class="text-xs text-slate-400 block">Resident ID</span><span class="font-mono font-bold text-slate-700">\${data.resident_id}</span></div>
-                            <div><span class="text-xs text-slate-400 block">Full Name</span><span class="font-bold text-slate-700">\${data.name}</span></div>
-                            <div><span class="text-xs text-slate-400 block">Barangay</span><span class="font-semibold text-slate-700">\${data.barangay}</span></div>
-                        </div>
-                        <p class="text-xs text-slate-400">Official verified record from Barangay Resident Management System.</p>
-                    \`;
-                } else {
-                    card.innerHTML = \`
-                        <div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-bold">✕</div>
-                        <h2 class="text-2xl font-bold text-slate-800 mb-1">INVALID OR INACTIVE ID</h2>
-                        <p class="text-sm text-red-500 mb-4">\${data.message || 'This ID is not currently active.'}</p>
-                        <p class="text-xs text-slate-400">Please contact the barangay hall for assistance.</p>
-                    \`;
-                }
-            })
-            .catch(() => {
-                document.getElementById('verification-card').innerHTML = '<p class="text-red-500">Error verifying ID.</p>';
-            });
-    </script>
-</body>
-</html>`);
-});
-
-// Serve Registration Page (/register)
-app.get('/register', (req, res) => {
-    res.send(renderHTMLPage('Resident Registration', 'register'));
-});
-
-// Serve Login Page (/login)
-app.get('/login', (req, res) => {
-    res.send(renderHTMLPage('Login Portal', 'login'));
-});
-
-// Serve Staff Portal (/staff)
-app.get('/staff', (req, res) => {
-    res.send(renderHTMLPage('Staff Portal', 'staff'));
-});
-
-// Serve Resident Portal (/resident)
-app.get('/resident', (req, res) => {
-    res.send(renderHTMLPage('Resident Portal', 'resident'));
-});
-
-// Root route redirects to login
-app.get('/', (req, res) => {
-    res.redirect('/login');
-});
-
-// Master HTML & Frontend Single File Render Engine
-function renderHTMLPage(title, view) {
+// Helper to render HTML wrapper
+function renderHTML(title, bodyContent, userRole, userName) {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title} - Barangay Management System</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>${title} - Barangay Resident Management System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; }
+        :root {
+            --primary: #1e3a8a;
+            --primary-dark: #172554;
+            --accent: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg-light: #f8fafc;
+            --text-dark: #1e293b;
+            --border: #cbd5e1;
+            --sidebar-width: 260px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+        body { background-color: var(--bg-light); color: var(--text-dark); display: flex; min-height: 100vh; }
+        
+        /* Sidebar */
+        aside { width: var(--sidebar-width); background: var(--primary-dark); color: #fff; display: flex; flex-direction: column; position: fixed; height: 100vh; overflow-y: auto; z-index: 100; transition: all 0.3s; }
+        .sidebar-brand { padding: 20px; font-size: 1.1rem; font-weight: 700; display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .sidebar-brand img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+        .sidebar-menu { list-style: none; padding: 15px 0; flex: 1; }
+        .sidebar-menu li a { display: flex; align-items: center; gap: 12px; padding: 12px 20px; color: #cbd5e1; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: 0.2s; }
+        .sidebar-menu li a:hover, .sidebar-menu li a.active { background: var(--accent); color: #fff; }
+        .sidebar-menu li a i { width: 20px; text-align: center; }
+
+        /* Main Content */
+        .main-container { flex: 1; margin-left: var(--sidebar-width); display: flex; flex-direction: column; }
+        header { background: #fff; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .header-title { font-size: 1.25rem; font-weight: 600; color: var(--primary); }
+        .user-profile { display: flex; align-items: center; gap: 15px; }
+        .user-profile span { font-weight: 500; font-size: 0.9rem; }
+        .logout-btn { background: var(--danger); color: #fff; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500; }
+
+        .content-body { padding: 30px; flex: 1; }
+
+        /* Cards & Grids */
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 4px solid var(--accent); display: flex; justify-content: space-between; align-items: center; }
+        .stat-card.green { border-color: var(--success); }
+        .stat-card.yellow { border-color: var(--warning); }
+        .stat-card.red { border-color: var(--danger); }
+        .stat-info h3 { font-size: 1.8rem; font-weight: 700; color: var(--text-dark); margin-bottom: 5px; }
+        .stat-info p { font-size: 0.85rem; color: #64748b; font-weight: 500; text-transform: uppercase; }
+        .stat-icon { font-size: 2.2rem; color: #cbd5e1; }
+
+        /* Tables & Forms */
+        .card { background: #fff; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); padding: 25px; margin-bottom: 30px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
+        .card-header h2 { font-size: 1.15rem; font-weight: 600; color: var(--text-dark); }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--border); }
+        th { background: #f1f5f9; font-weight: 600; color: #475569; }
+        tr:hover { background: #f8fafc; }
+
+        .btn { background: var(--accent); color: #fff; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; font-size: 0.9rem; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; transition: 0.2s; }
+        .btn:hover { opacity: 0.9; }
+        .btn-success { background: var(--success); }
+        .btn-danger { background: var(--danger); }
+        .btn-warning { background: var(--warning); color: #fff; }
+        .btn-secondary { background: #64748b; }
+        .btn-sm { padding: 5px 10px; font-size: 0.8rem; }
+
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .form-group { display: flex; flex-direction: column; gap: 6px; }
+        .form-group label { font-size: 0.85rem; font-weight: 600; color: #475569; }
+        .form-control { padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; outline: none; transition: 0.2s; }
+        .form-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+
+        .badge { padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block; text-transform: uppercase; }
+        .badge-success { background: #d1fae5; color: #065f46; }
+        .badge-warning { background: #fef3c7; color: #92400e; }
+        .badge-danger { background: #fee2e2; color: #991b1b; }
+        .badge-info { background: #dbeafe; color: #1e40af; }
+
+        .filters-bar { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+        
+        /* Modal */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; overflow-y: auto; padding: 20px; }
+        .modal-content { background: #fff; padding: 30px; border-radius: 10px; width: 100%; max-width: 600px; max-height: 90vh; overflow-y: auto; position: relative; }
+        .close-modal { position: absolute; top: 20px; right: 20px; font-size: 1.2rem; cursor: pointer; color: #64748b; }
+
+        /* Print Layout for 8 IDs on 1 Bond Paper (8.5 x 11 inches) */
         @media print {
-            .no-print { display: none !important; }
-            body { background: white !important; }
+            body { background: #fff; display: block; }
+            aside, header, .no-print { display: none !important; }
+            .main-container { margin: 0; padding: 0; }
+            .print-grid { display: grid; grid-template-columns: repeat(2, 3.375in); grid-template-rows: repeat(4, 2.125in); gap: 0.2in; justify-content: center; align-content: center; width: 8.5in; height: 11in; margin: 0 auto; page-break-after: always; }
+            .id-card-print { width: 3.375in; height: 2.125in; border: 1px dashed #999; padding: 10px; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; background: #fff; font-size: 10pt; }
+        }
+
+        .id-card-ui { width: 340px; height: 215px; border: 1px solid var(--border); border-radius: 12px; background: #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.1); padding: 15px; display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden; }
+        .id-header { display: flex; align-items: center; gap: 10px; border-bottom: 2px solid var(--primary); padding-bottom: 8px; }
+        .id-header img { width: 35px; height: 35px; border-radius: 50%; object-fit: cover; }
+        .id-header h4 { font-size: 0.85rem; color: var(--primary); font-weight: 700; line-height: 1.1; }
+        .id-header p { font-size: 0.65rem; color: #64748b; }
+        .id-body { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+        .id-body img.res-photo { width: 75px; height: 85px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border); }
+        .id-details p { font-size: 0.75rem; margin-bottom: 2px; }
+        .id-details strong { color: var(--text-dark); }
+        .id-footer { display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid var(--border); padding-top: 6px; margin-top: auto; }
+        .id-footer p { font-size: 0.6rem; color: #64748b; }
+
+        @media (max-width: 768px) {
+            aside { width: 70px; }
+            aside .sidebar-brand span, aside .sidebar-menu span { display: none; }
+            .main-container { margin-left: 70px; }
         }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
-    <div id="app" class="flex-1 flex flex-col">
-        <!-- Dynamic App Content Loaded via Vanilla JS -->
-        <div class="flex items-center justify-center flex-1 p-6">
-            <div class="text-center">
-                <i class="fa-solid fa-spinner fa-spin text-4xl text-blue-600 mb-3"></i>
-                <p class="text-slate-500 font-medium">Loading Barangay System...</p>
+<body>
+    ${userRole ? `
+    <aside>
+        <div class="sidebar-brand">
+            <img src="/uploads/logo.png" onerror="this.src='https://via.placeholder.com/40'" alt="Logo">
+            <span>Barangay BRMS</span>
+        </div>
+        <ul class="sidebar-menu">
+            ${userRole === 'Resident' ? `
+                <li><a href="/resident/dashboard" ${title.includes('Dashboard') ? 'class="active"' : ''}><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+                <li><a href="/resident/profile" ${title.includes('Profile') ? 'class="active"' : ''}><i class="fa-solid fa-id-card"></i><span>My Digital ID</span></a></li>
+                <li><a href="/resident/certificates" ${title.includes('Certificate') ? 'class="active"' : ''}><i class="fa-solid fa-file-lines"></i><span>Certificates</span></a></li>
+                <li><a href="/resident/appointments" ${title.includes('Appointment') ? 'class="active"' : ''}><i class="fa-solid fa-calendar-check"></i><span>Appointments</span></a></li>
+                <li><a href="/resident/complaints" ${title.includes('Complaint') ? 'class="active"' : ''}><i class="fa-solid fa-triangle-exclamation"></i><span>Complaints</span></a></li>
+                <li><a href="/resident/assistance" ${title.includes('Assistance') ? 'class="active"' : ''}><i class="fa-solid fa-hand-holding-heart"></i><span>Assistance</span></a></li>
+                <li><a href="/resident/announcements" ${title.includes('Announcement') ? 'class="active"' : ''}><i class="fa-solid fa-bullhorn"></i><span>Announcements</span></a></li>
+            ` : `
+                <li><a href="/staff/dashboard" ${title.includes('Dashboard') ? 'class="active"' : ''}><i class="fa-solid fa-chart-pie"></i><span>Dashboard</span></a></li>
+                <li><a href="/staff/residents" ${title.includes('Resident') ? 'class="active"' : ''}><i class="fa-solid fa-users"></i><span>Residents</span></a></li>
+                <li><a href="/staff/households" ${title.includes('Household') ? 'class="active"' : ''}><i class="fa-solid fa-house-chimney"></i><span>Households</span></a></li>
+                <li><a href="/staff/puroks" ${title.includes('Purok') ? 'class="active"' : ''}><i class="fa-solid fa-map-location-dot"></i><span>Puroks</span></a></li>
+                <li><a href="/staff/certificates" ${title.includes('Certificate') ? 'class="active"' : ''}><i class="fa-solid fa-file-invoice"></i><span>Certificates</span></a></li>
+                <li><a href="/staff/appointments" ${title.includes('Appointment') ? 'class="active"' : ''}><i class="fa-solid fa-calendar-days"></i><span>Appointments</span></a></li>
+                <li><a href="/staff/blotter" ${title.includes('Blotter') ? 'class="active"' : ''}><i class="fa-solid fa-scale-balanced"></i><span>Blotter</span></a></li>
+                <li><a href="/staff/assistance" ${title.includes('Assistance') ? 'class="active"' : ''}><i class="fa-solid fa-hand-holding-medical"></i><span>Assistance</span></a></li>
+                <li><a href="/staff/businesses" ${title.includes('Business') ? 'class="active"' : ''}><i class="fa-solid fa-store"></i><span>Businesses</span></a></li>
+                <li><a href="/staff/announcements" ${title.includes('Announcement') ? 'class="active"' : ''}><i class="fa-solid fa-bullhorn"></i><span>Announcements</span></a></li>
+                <li><a href="/staff/print-ids" ${title.includes('Print IDs') ? 'class="active"' : ''}><i class="fa-solid fa-print"></i><span>Print IDs</span></a></li>
+                <li><a href="/staff/reports" ${title.includes('Report') ? 'class="active"' : ''}><i class="fa-solid fa-chart-bar"></i><span>Reports</span></a></li>
+                <li><a href="/staff/archives" ${title.includes('Archive') ? 'class="active"' : ''}><i class="fa-solid fa-box-archive"></i><span>Archives</span></a></li>
+                ${userRole === 'Administrator' ? `
+                    <li><a href="/staff/accounts" ${title.includes('Account') ? 'class="active"' : ''}><i class="fa-solid fa-user-shield"></i><span>Staff Accounts</span></a></li>
+                    <li><a href="/staff/settings" ${title.includes('Settings') ? 'class="active"' : ''}><i class="fa-solid fa-gears"></i><span>Settings</span></a></li>
+                    <li><a href="/staff/logs" ${title.includes('Logs') ? 'class="active"' : ''}><i class="fa-solid fa-clock-rotate-left"></i><span>Activity Logs</span></a></li>
+                ` : ''}
+            `}
+        </ul>
+    </aside>
+    <div class="main-container">
+        <header class="no-print">
+            <div class="header-title">${title}</div>
+            <div class="user-profile">
+                <span><i class="fa-solid fa-user-circle"></i> ${userName} (${userRole})</span>
+                <a href="/logout" class="logout-btn">Logout</a>
             </div>
+        </header>
+        <div class="content-body">
+            ${bodyContent}
         </div>
     </div>
-
-    <script>
-        const currentView = '${view}';
-
-        // Load Settings and Render View
-        document.addEventListener('DOMContentLoaded', () => {
-            fetch('/api/settings')
-                .then(res => res.json())
-                .then(settings => {
-                    window.brgySettings = settings;
-                    initRouter(currentView);
-                })
-                .catch(() => initRouter(currentView));
-        });
-
-        function initRouter(view) {
-            const app = document.getElementById('app');
-            if (view === 'login') renderLogin(app);
-            else if (view === 'register') renderRegister(app);
-            else if (view === 'staff') checkAuthAndRenderStaff(app);
-            else if (view === 'resident') checkAuthAndRenderResident(app);
-            else app.innerHTML = '<div class="p-12 text-center text-red-500">Page not found</div>';
-        }
-
-        // ================= LOGIN PAGE =================
-        function renderLogin(container) {
-            container.innerHTML = \`
-                <div class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-900 to-slate-900">
-                    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 border border-slate-100">
-                        <div class="text-center mb-8">
-                            <div class="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-bold shadow-inner">
-                                \${window.brgySettings?.logo_base64 ? '<img src="'+window.brgySettings.logo_base64+'" class="w-full h-full object-cover rounded-full"/>' : '<i class="fa-solid fa-landmark"></i>'}
-                            </div>
-                            <h1 class="text-2xl font-bold text-slate-800">\${window.brgySettings?.barangay_name || 'Barangay System'}</h1>
-                            <p class="text-sm text-slate-500 mt-1">Resident & Staff Management Portal</p>
-                        </div>
-
-                        <div class="flex border-b border-slate-200 mb-6">
-                            <button onclick="switchLoginTab('staff')" id="tab-staff" class="flex-1 pb-3 font-semibold text-blue-600 border-b-2 border-blue-600 transition">Staff Login</button>
-                            <button onclick="switchLoginTab('resident')" id="tab-resident" class="flex-1 pb-3 font-medium text-slate-400 hover:text-slate-600 transition">Resident Login</button>
-                        </div>
-
-                        <!-- Staff Form -->
-                        <form id="form-staff" onsubmit="handleStaffLogin(event)" class="space-y-4">
-                            <div>
-                                <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Username</label>
-                                <input type="text" name="username" required class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Password</label>
-                                <input type="password" name="password" required class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none">
-                            </div>
-                            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl shadow-lg transition">Staff Sign In</button>
-                        </form>
-
-                        <!-- Resident Form -->
-                        <form id="form-resident" onsubmit="handleResidentLogin(event)" class="space-y-4 hidden">
-                            <div>
-                                <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Resident ID (e.g. BRGY-2026-000001)</label>
-                                <input type="text" name="resident_id" required placeholder="BRGY-YYYY-######" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none uppercase">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Password</label>
-                                <input type="password" name="password" required class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none">
-                            </div>
-                            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl shadow-lg transition">Resident Sign In</button>
-                            <div class="text-center mt-4">
-                                <a href="/register" class="text-sm text-blue-600 hover:underline">Don't have an account? Register here</a>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            \`;
-        }
-
-        function switchLoginTab(tab) {
-            const isStaff = tab === 'staff';
-            document.getElementById('form-staff').classList.toggle('hidden', !isStaff);
-            document.getElementById('form-resident').classList.toggle('hidden', isStaff);
-            document.getElementById('tab-staff').className = isStaff ? 'flex-1 pb-3 font-semibold text-blue-600 border-b-2 border-blue-600 transition' : 'flex-1 pb-3 font-medium text-slate-400 hover:text-slate-600 transition';
-            document.getElementById('tab-resident').className = !isStaff ? 'flex-1 pb-3 font-semibold text-emerald-600 border-b-2 border-emerald-600 transition' : 'flex-1 pb-3 font-medium text-slate-400 hover:text-slate-600 transition';
-        }
-
-        function handleStaffLogin(e) {
-            e.preventDefault();
-            const data = Object.fromEntries(new FormData(e.target));
-            fetch('/api/login/staff', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            }).then(res => res.json()).then(res => {
-                if (res.success) window.location.href = '/staff';
-                else alert(res.error || 'Login failed');
-            });
-        }
-
-        function handleResidentLogin(e) {
-            e.preventDefault();
-            const data = Object.fromEntries(new FormData(e.target));
-            fetch('/api/login/resident', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            }).then(res => res.json()).then(res => {
-                if (res.success) window.location.href = '/resident';
-                else alert(res.error || 'Login failed');
-            });
-        }
-
-        // ================= REGISTRATION PAGE =================
-        function renderRegister(container) {
-            container.innerHTML = \`
-                <div class="min-h-screen py-12 px-4 bg-slate-100 flex items-center justify-center">
-                    <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-8 border border-slate-200">
-                        <div class="text-center mb-6">
-                            <h1 class="text-2xl font-bold text-slate-800">Barangay Resident Registration</h1>
-                            <p class="text-sm text-slate-500">Fill in your complete official details for verification.</p>
-                        </div>
-                        <form onsubmit="handleRegistrationSubmit(event)" class="space-y-4">
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">First Name *</label><input type="text" name="first_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Middle Name</label><input type="text" name="middle_name" class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Last Name *</label><input type="text" name="last_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                            </div>
-                            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Suffix</label><input type="text" name="suffix" placeholder="Jr., III" class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Date of Birth *</label><input type="date" name="dob" required class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Gender *</label><select name="gender" class="w-full px-3 py-2 rounded-lg border border-slate-200"><option>Male</option><option>Female</option></select></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Civil Status *</label><select name="civil_status" class="w-full px-3 py-2 rounded-lg border border-slate-200"><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></div>
-                            </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Street Address *</label><input type="text" name="address" required class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Purok/Zone *</label><input type="text" name="purok" required placeholder="Purok 1 - Centro" class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                            </div>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Contact Number</label><input type="text" name="contact_number" placeholder="09XXXXXXXXX" class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Email Address</label><input type="email" name="email" class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Household Number</label><input type="text" name="household_number" placeholder="HH-001" class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                            </div>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Occupation</label><input type="text" name="occupation" class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Educational Attainment</label><select name="educational_attainment" class="w-full px-3 py-2 rounded-lg border border-slate-200"><option>Elementary Undergraduate</option><option>Elementary Graduate</option><option>High School Undergraduate</option><option>High School Graduate</option><option>College Undergraduate</option><option>College Graduate</option><option>Vocational</option><option>None</option></select></div>
-                                <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Password for Portal *</label><input type="password" name="password" required class="w-full px-3 py-2 rounded-lg border border-slate-200"></div>
-                            </div>
-                            <div class="grid grid-cols-2 md:grid-cols-6 gap-3 pt-2">
-                                <div><label class="block text-xs text-slate-500">Registered Voter</label><select name="voter_status" class="w-full p-2 border rounded text-sm"><option>No</option><option>Yes</option></select></div>
-                                <div><label class="block text-xs text-slate-500">PWD Status</label><select name="pwd_status" class="w-full p-2 border rounded text-sm"><option>No</option><option>Yes</option></select></div>
-                                <div><label class="block text-xs text-slate-500">Senior Citizen</label><select name="senior_citizen_status" class="w-full p-2 border rounded text-sm"><option>No</option><option>Yes</option></select></div>
-                                <div><label class="block text-xs text-slate-500">Solo Parent</label><select name="solo_parent_status" class="w-full p-2 border rounded text-sm"><option>No</option><option>Yes</option></select></div>
-                                <div><label class="block text-xs text-slate-500">4Ps Beneficiary</label><select name="four_ps_status" class="w-full p-2 border rounded text-sm"><option>No</option><option>Yes</option></select></div>
-                                <div><label class="block text-xs text-slate-500">Resident Photo</label><input type="file" name="photo" accept="image/*" class="w-full text-xs"></div>
-                            </div>
-                            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl shadow transition mt-6">Submit Registration</button>
-                            <div class="text-center pt-2"><a href="/login" class="text-sm text-blue-600 hover:underline">Already registered? Back to Login</a></div>
-                        </form>
-                    </div>
-                </div>
-            \`;
-        }
-
-        function handleRegistrationSubmit(e) {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            fetch('/api/register', {
-                method: 'POST',
-                body: formData
-            }).then(res => res.json()).then(res => {
-                if (res.success) {
-                    alert('Registration submitted successfully! Pending staff verification.');
-                    window.location.href = '/login';
-                } else {
-                    alert(res.error || 'Registration failed');
-                }
-            });
-        }
-
-        // ================= STAFF PORTAL =================
-        function checkAuthAndRenderStaff(container) {
-            fetch('/api/session').then(res => res.json()).then(session => {
-                if (!session.user) { window.location.href = '/login'; return; }
-                renderStaffDashboard(container, session.user);
-            });
-        }
-
-        function renderStaffDashboard(container, user) {
-            container.innerHTML = \`
-                <div class="flex h-screen overflow-hidden bg-slate-100">
-                    <!-- Sidebar -->
-                    <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col no-print">
-                        <div class="p-6 border-b border-slate-800 flex items-center space-x-3">
-                            <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">
-                                <i class="fa-solid fa-landmark"></i>
-                            </div>
-                            <div>
-                                <h2 class="font-bold text-white text-sm truncate">\${window.brgySettings?.barangay_name || 'Barangay'}</h2>
-                                <p class="text-xs text-slate-400">Staff Portal</p>
-                            </div>
-                        </div>
-                        <nav class="flex-1 overflow-y-auto p-4 space-y-1 text-sm">
-                            <button onclick="loadStaffSection('dashboard')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-chart-pie w-5"></i><span>Dashboard</span></button>
-                            <button onclick="loadStaffSection('residents')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-users w-5"></i><span>Resident Management</span></button>
-                            <button onclick="loadStaffSection('households')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-house w-5"></i><span>Households</span></button>
-                            <button onclick="loadStaffSection('puroks')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-map-location-dot w-5"></i><span>Puroks</span></button>
-                            <button onclick="loadStaffSection('certificates')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-file-contract w-5"></i><span>Certificates</span></button>
-                            <button onclick="loadStaffSection('blotters')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-scale-balanced w-5"></i><span>Blotter Cases</span></button>
-                            <button onclick="loadStaffSection('appointments')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-calendar-check w-5"></i><span>Appointments</span></button>
-                            <button onclick="loadStaffSection('assistance')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-hand-holding-heart w-5"></i><span>Assistance</span></button>
-                            <button onclick="loadStaffSection('businesses')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-store w-5"></i><span>Businesses</span></button>
-                            <button onclick="loadStaffSection('announcements')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-bullhorn w-5"></i><span>Announcements</span></button>
-                            <button onclick="loadStaffSection('complaints')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-triangle-exclamation w-5"></i><span>Complaints</span></button>
-                            <button onclick="loadStaffSection('print_ids')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-id-card w-5"></i><span>Print ID Sheets</span></button>
-                            <button onclick="loadStaffSection('reports')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-file-excel w-5"></i><span>Reports</span></button>
-                            \${user.role === 'Super Admin' ? '<button onclick="loadStaffSection(\\'users\\')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-user-shield w-5"></i><span>User Management</span></button>' : ''}
-                            <button onclick="loadStaffSection('settings')" class="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg hover:bg-slate-800 text-left transition"><i class="fa-solid fa-gear w-5"></i><span>Settings</span></button>
-                        </nav>
-                        <div class="p-4 border-t border-slate-800">
-                            <button onclick="logout()" class="w-full flex items-center justify-center space-x-2 bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white py-2 rounded-lg transition"><i class="fa-solid fa-right-from-bracket"></i><span>Logout</span></button>
-                        </div>
-                    </aside>
-
-                    <!-- Main Content Area -->
-                    <main class="flex-1 flex flex-col overflow-y-auto">
-                        <header class="bg-white border-b border-slate-200 px-8 py-4 flex justify-between items-center no-print">
-                            <h1 id="page-title" class="text-xl font-bold text-slate-800">Dashboard</h1>
-                            <div class="flex items-center space-x-4">
-                                <span class="text-sm font-medium text-slate-600">\${user.full_name} (<span class="text-blue-600">\${user.role}</span>)</span>
-                            </div>
-                        </header>
-                        <div id="staff-content" class="p-8 flex-1">
-                            <!-- Section Content Loaded Here -->
-                        </div>
-                    </main>
-                </div>
-            \`;
-            loadStaffSection('dashboard');
-        }
-
-        function logout() {
-            fetch('/api/logout', { method: 'POST' }).then(() => window.location.href = '/login');
-        }
-
-        function loadStaffSection(section) {
-            const content = document.getElementById('staff-content');
-            const title = document.getElementById('page-title');
-            if (title) title.innerText = section.replace('_', ' ').toUpperCase();
-
-            if (section === 'dashboard') renderStaffDashboardHome(content);
-            else if (section === 'residents') renderStaffResidents(content);
-            else if (section === 'households') renderStaffHouseholds(content);
-            else if (section === 'puroks') renderStaffPuroks(content);
-            else if (section === 'certificates') renderStaffCertificates(content);
-            else if (section === 'blotters') renderStaffBlotters(content);
-            else if (section === 'appointments') renderStaffAppointments(content);
-            else if (section === 'assistance') renderStaffAssistance(content);
-            else if (section === 'businesses') renderStaffBusinesses(content);
-            else if (section === 'announcements') renderStaffAnnouncements(content);
-            else if (section === 'complaints') renderStaffComplaints(content);
-            else if (section === 'print_ids') renderStaffPrintIDs(content);
-            else if (section === 'reports') renderStaffReports(content);
-            else if (section === 'users') renderStaffUsers(content);
-            else if (section === 'settings') renderStaffSettings(content);
-        }
-
-        // Dashboard Home Statistics
-        function renderStaffDashboardHome(container) {
-            fetch('/api/staff/stats').then(res => res.json()).then(stats => {
-                container.innerHTML = \`
-                    <div class="space-y-6">
-                        <!-- Registration Link Banner -->
-                        <div class="bg-blue-50 border border-blue-200 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-4">
-                            <div>
-                                <h3 class="font-bold text-blue-900 text-lg">Public Resident Registration Link</h3>
-                                <p class="text-sm text-blue-700">Share this link with residents so they can register their accounts online.</p>
-                                <code class="bg-white px-3 py-1 rounded border border-blue-200 text-xs font-mono mt-2 inline-block">\${window.location.origin}/register</code>
-                            </div>
-                            <button onclick="navigator.clipboard.writeText(window.location.origin + '/register'); alert('Registration link copied to clipboard!');" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-xl shadow transition text-sm">Copy Link</button>
-                        </div>
-
-                        <!-- Stats Grid -->
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <div class="text-slate-400 text-xs font-semibold uppercase mb-1">Total Residents</div>
-                                <div class="text-3xl font-bold text-slate-800">\${stats.total_residents || 0}</div>
-                            </div>
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <div class="text-slate-400 text-xs font-semibold uppercase mb-1">Households</div>
-                                <div class="text-3xl font-bold text-slate-800">\${stats.total_households || 0}</div>
-                            </div>
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <div class="text-slate-400 text-xs font-semibold uppercase mb-1">Senior Citizens</div>
-                                <div class="text-3xl font-bold text-slate-800">\${stats.senior_citizens || 0}</div>
-                            </div>
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <div class="text-slate-400 text-xs font-semibold uppercase mb-1">Registered Voters</div>
-                                <div class="text-3xl font-bold text-slate-800">\${stats.voters || 0}</div>
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <div class="text-slate-400 text-xs font-semibold uppercase mb-1">Male / Female</div>
-                                <div class="text-xl font-bold text-slate-800">\${stats.male || 0} / \${stats.female || 0}</div>
-                            </div>
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <div class="text-slate-400 text-xs font-semibold uppercase mb-1">Minors / Adults</div>
-                                <div class="text-xl font-bold text-slate-800">\${stats.minors || 0} / \${stats.adults || 0}</div>
-                            </div>
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <div class="text-slate-400 text-xs font-semibold uppercase mb-1">PWD / Solo Parent</div>
-                                <div class="text-xl font-bold text-slate-800">\${stats.pwd || 0} / \${stats.solo_parents || 0}</div>
-                            </div>
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <div class="text-slate-400 text-xs font-semibold uppercase mb-1">Pending Approvals</div>
-                                <div class="text-xl font-bold text-amber-600">\${stats.pending_registrations || 0} Reg / \${stats.pending_certificates || 0} Cert</div>
-                            </div>
-                        </div>
-                    </div>
-                \`;
-            });
-        }
-
-        // Resident Management Section
-        function renderStaffResidents(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <div class="flex flex-col md:flex-row justify-between gap-4 items-center">
-                        <div class="flex gap-2 w-full md:w-auto">
-                            <input type="text" id="res-search" placeholder="Search name, ID, household..." class="px-4 py-2 rounded-xl border border-slate-200 text-sm w-full md:w-64" oninput="loadResidentsList()">
-                            <select id="res-status" class="px-4 py-2 rounded-xl border border-slate-200 text-sm" onchange="loadResidentsList()">
-                                <option value="Active">Active</option>
-                                <option value="Pending">Pending</option>
-                                <option value="Archived">Archived / Inactive</option>
-                                <option value="Rejected">Rejected</option>
-                            </select>
-                        </div>
-                        <button onclick="openAddResidentModal()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-xl text-sm shadow transition">+ Add Resident</button>
-                    </div>
-
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase">
-                                    <th class="p-4">ID</th>
-                                    <th class="p-4">Name</th>
-                                    <th class="p-4">Purok / Address</th>
-                                    <th class="p-4">Household</th>
-                                    <th class="p-4">Status</th>
-                                    <th class="p-4 text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="residents-tbody" class="divide-y divide-slate-100 text-sm">
-                                <tr><td colspan="6" class="p-8 text-center text-slate-400">Loading residents...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            loadResidentsList();
-        }
-
-        function loadResidentsList() {
-            const search = document.getElementById('res-search')?.value || '';
-            const status = document.getElementById('res-status')?.value || 'Active';
-            fetch(\`/api/staff/residents?status=\${status}&search=\${search}\`)
-                .then(res => res.json())
-                .then(rows => {
-                    const tbody = document.getElementById('residents-tbody');
-                    if (!tbody) return;
-                    if (rows.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400">No residents found.</td></tr>';
-                        return;
-                    }
-                    tbody.innerHTML = rows.map(r => \`
-                        <tr class="hover:bg-slate-50 transition">
-                            <td class="p-4 font-mono font-medium text-slate-600">\${r.resident_id || 'Pending'}</td>
-                            <td class="p-4 font-semibold text-slate-800">\${r.first_name} \\${r.last_name} \${r.suffix || ''}</td>
-                            <td class="p-4 text-slate-600">\${r.purok}</td>
-                            <td class="p-4 text-slate-600">\${r.household_number || 'N/A'}</td>
-                            <td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold \${r.status === 'Active' ? 'bg-green-100 text-green-700' : r.status === 'Pending' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-650'}">\${r.status}</span></td>
-                            <td class="p-4 text-right space-x-2">
-                                \${r.status === 'Pending' ? \`<button onclick="approveResident(\${r.id})" class="text-green-600 hover:underline font-semibold">Approve</button><button onclick="rejectResident(\${r.id})" class="text-red-600 hover:underline">Reject</button>\` : ''}
-                                <select onchange="updateResidentStatus(\${r.id}, this.value)" class="text-xs border rounded p-1">
-                                    <option value="" disabled selected>Status...</option>
-                                    <option value="Active">Active</option>
-                                    <option value="Inactive">Inactive</option>
-                                    <option value="Moved Out">Moved Out</option>
-                                    <option value="Deceased">Deceased</option>
-                                    <option value="Archived">Archive</option>
-                                </select>
-                            </td>
-                        </tr>
-                    \`).join('');
-                });
-        }
-
-        function approveResident(id) {
-            fetch('/api/staff/residents/approve', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id })
-            }).then(res => res.json()).then(res => {
-                if (res.success) { alert('Resident approved with ID: ' + res.resident_id); loadResidentsList(); }
-            });
-        }
-
-        function rejectResident(id) {
-            if (!confirm('Reject this registration?')) return;
-            fetch('/api/staff/residents/reject', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id })
-            }).then(res => res.json()).then(() => loadResidentsList());
-        }
-
-        function updateResidentStatus(id, status) {
-            fetch('/api/staff/residents/status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, status })
-            }).then(res => res.json()).then(() => loadResidentsList());
-        }
-
-        function openAddResidentModal() {
-            // Redirect or open modal for adding resident (or use register form functionality)
-            window.location.href = '/register';
-        }
-
-        // Household Section
-        function renderStaffHouseholds(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <div class="flex justify-between items-center">
-                        <h2 class="text-lg font-bold">Household Records</h2>
-                        <button onclick="promptAddHousehold()" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">+ Add Household</button>
-                    </div>
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase"><th class="p-4">Household No.</th><th class="p-4">Household Head</th><th class="p-4">Address</th><th class="p-4">Purok</th></tr></thead>
-                            <tbody id="household-tbody" class="divide-y text-sm"><tr><td colspan="4" class="p-6 text-center text-slate-400">Loading households...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/households').then(res => res.json()).then(rows => {
-                const tbody = document.getElementById('household-tbody');
-                if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="4" class="p-6 text-center text-slate-400">No households recorded.</td></tr>'; return; }
-                tbody.innerHTML = rows.map(h => \`<tr><td class="p-4 font-mono font-bold">\${h.household_number}</td><td class="p-4 font-semibold">\${h.head_name}</td><td class="p-4">\${h.address}</td><td class="p-4">\${h.purok}</td></tr>\`).join('');
-            });
-        }
-
-        function promptAddHousehold() {
-            const num = prompt('Enter Household Number (e.g., HH-001):');
-            if (!num) return;
-            const head = prompt('Enter Household Head Name:');
-            const address = prompt('Enter Street Address:');
-            const purok = prompt('Enter Purok:');
-            fetch('/api/staff/households', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ household_number: num, head_name: head, address, purok })
-            }).then(() => loadStaffSection('households'));
-        }
-
-        // Purok Section
-        function renderStaffPuroks(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <div class="flex justify-between items-center">
-                        <h2 class="text-lg font-bold">Purok Management</h2>
-                        <button onclick="promptAddPurok()" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">+ Add Purok</button>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" id="puroks-grid">
-                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">Loading puroks...</div>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/puroks').then(res => res.json()).then(rows => {
-                const grid = document.getElementById('puroks-grid');
-                grid.innerHTML = rows.map(p => \`
-                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
-                        <div>
-                            <h3 class="font-bold text-slate-800 text-lg mb-1">\${p.name}</h3>
-                            <p class="text-xs text-slate-500 mb-4">\${p.description || 'Barangay Purok Zone'}</p>
-                            <div class="space-y-2 text-sm">
-                                <div class="flex justify-between"><span class="text-slate-400">Residents:</span><span class="font-bold text-slate-700">\${p.resident_count}</span></div>
-                                <div class="flex justify-between"><span class="text-slate-400">Households:</span><span class="font-bold text-slate-700">\${p.household_count}</span></div>
-                            </div>
-                        </div>
-                        <button onclick="deletePurok(\${p.id})" class="mt-6 text-xs text-red-500 hover:underline text-left">Delete Purok</button>
-                    </div>
-                \`).join('');
-            });
-        }
-
-        function promptAddPurok() {
-            const name = prompt('Enter Purok Name (e.g., Purok 5 - Orchard):');
-            if (!name) return;
-            const desc = prompt('Enter Description:');
-            fetch('/api/staff/puroks', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, description: desc })
-            }).then(() => loadStaffSection('puroks'));
-        }
-
-        function deletePurok(id) {
-            if (!confirm('Delete purok?')) return;
-            fetch('/api/staff/puroks/' + id, { method: 'DELETE' }).then(res => res.json()).then(res => {
-                if (res.error) alert(res.error);
-                else loadStaffSection('puroks');
-            });
-        }
-
-        // Certificate Management Section
-        function renderStaffCertificates(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <div class="flex justify-between items-center">
-                        <h2 class="text-lg font-bold">Certificate Requests</h2>
-                    </div>
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase"><th class="p-4">Cert #</th><th class="p-4">Resident</th><th class="p-4">Type & Purpose</th><th class="p-4">Status</th><th class="p-4 text-right">Actions</th></tr></thead>
-                            <tbody id="cert-tbody" class="divide-y text-sm"><tr><td colspan="5" class="p-6 text-center text-slate-400">Loading certificates...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/certificates').then(res => res.json()).then(rows => {
-                const tbody = document.getElementById('cert-tbody');
-                if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-400">No certificate requests.</td></tr>'; return; }
-                tbody.innerHTML = rows.map(c => \`
-                    <tr>
-                        <td class="p-4 font-mono font-bold">\${c.cert_number}</td>
-                        <td class="p-4 font-semibold">\${c.first_name} \${c.last_name}</td>
-                        <td class="p-4"><span class="font-medium text-slate-800">\${c.cert_type}</span><br><span class="text-xs text-slate-500">\${c.purpose || ''}</span></td>
-                        <td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold \${c.status === 'Approved' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}">\${c.status}</span></td>
-                        <td class="p-4 text-right space-x-2">
-                            <button onclick="updateCertStatus(\${c.id}, 'Approved')" class="text-green-600 font-semibold hover:underline">Approve</button>
-                            <button onclick="updateCertStatus(\${c.id}, 'Released')" class="text-blue-600 font-semibold hover:underline">Release</button>
-                        </td>
-                    </tr>
-                \`).join('');
-            });
-        }
-
-        function updateCertStatus(id, status) {
-            fetch('/api/staff/certificates/' + id, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status, remarks: 'Updated by staff' })
-            }).then(() => loadStaffSection('certificates'));
-        }
-
-        // Blotter Section
-        function renderStaffBlotters(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <div class="flex justify-between items-center">
-                        <h2 class="text-lg font-bold">Blotter Cases</h2>
-                        <button onclick="promptAddBlotter()" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">+ File Blotter</button>
-                    </div>
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase"><th class="p-4">Case #</th><th class="p-4">Complainant vs Respondent</th><th class="p-4">Incident Type</th><th class="p-4">Status</th></tr></thead>
-                            <tbody id="blotter-tbody" class="divide-y text-sm"><tr><td colspan="4" class="p-6 text-center text-slate-400">Loading blotter cases...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/blotters').then(res => res.json()).then(rows => {
-                const tbody = document.getElementById('blotter-tbody');
-                if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="4" class="p-6 text-center text-slate-400">No blotter records.</td></tr>'; return; }
-                tbody.innerHTML = rows.map(b => \`<tr><td class="p-4 font-mono font-bold">\${b.case_number}</td><td class="p-4 font-semibold">\${b.complainant} vs \${b.respondent}</td><td class="p-4">\${b.incident_type}</td><td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">\${b.status}</span></td></tr>\`).join('');
-            });
-        }
-
-        function promptAddBlotter() {
-            const comp = prompt('Complainant Name:');
-            if (!comp) return;
-            const resp = prompt('Respondent Name:');
-            const type = prompt('Incident Type (e.g. Disputed Boundaries, Noise Complaint):');
-            const desc = prompt('Incident Description:');
-            fetch('/api/staff/blotters', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ complainant: comp, respondent: resp, witness: '', incident_date: new Date().toISOString().split('T')[0], incident_time: '12:00', location: 'Barangay Hall', incident_type: type, description: desc, action_taken: 'Recorded', settlement: '', status: 'Open' })
-            }).then(() => loadStaffSection('blotters'));
-        }
-
-        // Appointment Section
-        function renderStaffAppointments(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <h2 class="text-lg font-bold">Appointments</h2>
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase"><th class="p-4">Resident</th><th class="p-4">Service</th><th class="p-4">Date & Time</th><th class="p-4">Status</th><th class="p-4 text-right">Actions</th></tr></thead>
-                            <tbody id="appt-tbody" class="divide-y text-sm"><tr><td colspan="5" class="p-6 text-center text-slate-400">Loading appointments...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/appointments').then(res => res.json()).then(rows => {
-                const tbody = document.getElementById('appt-tbody');
-                if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-400">No appointments.</td></tr>'; return; }
-                tbody.innerHTML = rows.map(a => \`
-                    <tr>
-                        <td class="p-4 font-semibold">\${a.first_name} \${a.last_name}</td>
-                        <td class="p-4">\${a.service_type}</td>
-                        <td class="p-4">\${a.appointment_date} \${a.appointment_time}</td>
-                        <td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">\${a.status}</span></td>
-                        <td class="p-4 text-right"><button onclick="updateAppt(\${a.id}, 'Approved')" class="text-green-600 font-semibold hover:underline">Approve</button></td>
-                    </tr>
-                \`).join('');
-            });
-        }
-
-        function updateAppt(id, status) {
-            fetch('/api/staff/appointments/' + id, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status, remarks: 'Approved' })
-            }).then(() => loadStaffSection('appointments'));
-        }
-
-        // Assistance Section
-        function renderStaffAssistance(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <h2 class="text-lg font-bold">Assistance Requests</h2>
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase"><th class="p-4">Resident</th><th class="p-4">Type</th><th class="p-4">Reason</th><th class="p-4">Status</th><th class="p-4 text-right">Actions</th></tr></thead>
-                            <tbody id="assist-tbody" class="divide-y text-sm"><tr><td colspan="5" class="p-6 text-center text-slate-400">Loading assistance requests...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/assistance').then(res => res.json()).then(rows => {
-                const tbody = document.getElementById('assist-tbody');
-                if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-400">No requests.</td></tr>'; return; }
-                tbody.innerHTML = rows.map(a => \`
-                    <tr>
-                        <td class="p-4 font-semibold">\${a.first_name} \${a.last_name}</td>
-                        <td class="p-4">\${a.assistance_type}</td>
-                        <td class="p-4">\${a.reason}</td>
-                        <td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">\${a.status}</span></td>
-                        <td class="p-4 text-right"><button onclick="updateAssist(\${a.id}, 'Approved')" class="text-green-600 font-semibold hover:underline">Approve</button></td>
-                    </tr>
-                \`).join('');
-            });
-        }
-
-        function updateAssist(id, status) {
-            fetch('/api/staff/assistance/' + id, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status, remarks: 'Approved' })
-            }).then(() => loadStaffSection('assistance'));
-        }
-
-        // Business Section
-        function renderStaffBusinesses(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <div class="flex justify-between items-center"><h2 class="text-lg font-bold">Local Businesses</h2><button onclick="promptAddBusiness()" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">+ Register Business</button></div>
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase"><th class="p-4">Business Name</th><th class="p-4">Owner</th><th class="p-4">Type</th><th class="p-4">Permit #</th></tr></thead>
-                            <tbody id="biz-tbody" class="divide-y text-sm"><tr><td colspan="4" class="p-6 text-center text-slate-400">Loading businesses...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/businesses').then(res => res.json()).then(rows => {
-                const tbody = document.getElementById('biz-tbody');
-                if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="4" class="p-6 text-center text-slate-400">No businesses registered.</td></tr>'; return; }
-                tbody.innerHTML = rows.map(b => \`<tr><td class="p-4 font-bold">\${b.business_name}</td><td class="p-4">\${b.owner_name}</td><td class="p-4">\${b.business_type}</td><td class="p-4 font-mono">\${b.permit_number}</td></tr>\`).join('');
-            });
-        }
-
-        function promptAddBusiness() {
-            const name = prompt('Business Name:');
-            if (!name) return;
-            const owner = prompt('Owner Name:');
-            const type = prompt('Business Type (e.g. Sari-Sari Store):');
-            const permit = prompt('Permit Number:');
-            fetch('/api/staff/businesses', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ business_name: name, owner_name: owner, address: 'Barangay', business_type: type, contact_number: '09000000000', permit_number: permit, permit_status: 'Active', expiration_date: '2026-12-31' })
-            }).then(() => loadStaffSection('businesses'));
-        }
-
-        // Announcements Section
-        function renderStaffAnnouncements(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <div class="flex justify-between items-center"><h2 class="text-lg font-bold">Announcements</h2><button onclick="promptAddAnnouncement()" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">+ Post Announcement</button></div>
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase"><th class="p-4">Title</th><th class="p-4">Category</th><th class="p-4">Content</th><th class="p-4 text-right">Actions</th></tr></thead>
-                            <tbody id="ann-tbody" class="divide-y text-sm"><tr><td colspan="4" class="p-6 text-center text-slate-400">Loading announcements...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/announcements').then(res => res.json()).then(rows => {
-                const tbody = document.getElementById('ann-tbody');
-                if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="4" class="p-6 text-center text-slate-400">No announcements.</td></tr>'; return; }
-                tbody.innerHTML = rows.map(a => \`<tr><td class="p-4 font-bold">\${a.title}</td><td class="p-4">\${a.category}</td><td class="p-4">\${a.content}</td><td class="p-4 text-right"><button onclick="deleteAnn(\${a.id})" class="text-red-500">Delete</button></td></tr>\`).join('');
-            });
-        }
-
-        function promptAddAnnouncement() {
-            const title = prompt('Announcement Title:');
-            if (!title) return;
-            const category = prompt('Category (e.g., General, Event, Emergency):');
-            const content = prompt('Content / Details:');
-            fetch('/api/staff/announcements', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, category, content })
-            }).then(() => loadStaffSection('announcements'));
-        }
-
-        function deleteAnn(id) {
-            fetch('/api/staff/announcements/' + id, { method: 'DELETE' }).then(() => loadStaffSection('announcements'));
-        }
-
-        // Complaints Section
-        function renderStaffComplaints(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <h2 class="text-lg font-bold">Resident Community Complaints</h2>
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase"><th class="p-4">Resident</th><th class="p-4">Subject</th><th class="p-4">Details</th><th class="p-4">Status</th></tr></thead>
-                            <tbody id="comp-tbody" class="divide-y text-sm"><tr><td colspan="4" class="p-6 text-center text-slate-400">Loading complaints...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/complaints').then(res => res.json()).then(rows => {
-                const tbody = document.getElementById('comp-tbody');
-                if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="4" class="p-6 text-center text-slate-400">No complaints.</td></tr>'; return; }
-                tbody.innerHTML = rows.map(c => \`<tr><td class="p-4 font-semibold">\${c.first_name} \${c.last_name}</td><td class="p-4 font-bold">\${c.subject}</td><td class="p-4">\${c.details}</td><td class="p-4"><span class="px-2 py-1 rounded bg-amber-100 text-amber-700 text-xs">\${c.status}</span></td></tr>\`).join('');
-            });
-        }
-
-        // Print ID Sheets Section (8 IDs on 8.5x11 bond paper grid)
-        function renderStaffPrintIDs(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <div class="flex justify-between items-center no-print">
-                        <div>
-                            <h2 class="text-lg font-bold">Printable Resident ID Sheet</h2>
-                            <p class="text-sm text-slate-500">Generates exactly 8 standard ID cards in a 2x4 grid optimized for 8.5 x 11 inch paper.</p>
-                        </div>
-                        <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-xl shadow transition">Print ID Sheet</button>
-                    </div>
-
-                    <!-- 8-Up ID Grid Sheet (Letter Paper proportion) -->
-                    <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 mx-auto max-w-4xl" style="width: 8.5in; min-height: 11in;">
-                        <div id="print-grid" class="grid grid-cols-2 gap-4">
-                            <div class="text-center p-8 text-slate-400">Loading active residents for ID generation...</div>
-                        </div>
-                    </div>
-                </div>
-            \`;
-
-            fetch('/api/staff/residents?status=Active').then(res => res.json()).then(rows => {
-                const grid = document.getElementById('print-grid');
-                if (rows.length === 0) { grid.innerHTML = '<div class="col-span-2 text-center text-slate-400 p-8">No active residents found.</div>'; return; }
-                
-                // Take up to 8 residents for the page sheet
-                const pageResidents = rows.slice(0, 8);
-                grid.innerHTML = pageResidents.map((r, i) => \`
-                    <div class="border-2 border-dashed border-slate-300 rounded-xl p-3 flex flex-col justify-between bg-white relative overflow-hidden" style="height: 2.3in;">
-                        <div class="flex items-center space-x-2 border-b pb-2">
-                            <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xs">BRGY</div>
-                            <div>
-                                <h4 class="font-bold text-xs uppercase text-slate-800">\${window.brgySettings?.barangay_name || 'Barangay'}</h4>
-                                <p class="text-[9px] text-slate-500">OFFICIAL RESIDENT ID</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center space-x-3 my-2">
-                            <div class="w-12 h-14 bg-slate-200 rounded overflow-hidden flex-shrink-0">
-                                \${r.photo ? '<img src="'+r.photo+'" class="w-full h-full object-cover"/>' : '<div class="w-full h-full flex items-center justify-center text-[10px] text-slate-400">PHOTO</div>'}
-                            </div>
-                            <div class="text-left overflow-hidden">
-                                <div class="font-bold text-xs truncate">\${r.last_name}, \${r.first_name}</div>
-                                <div class="text-[10px] font-mono text-blue-600 font-bold">\${r.resident_id}</div>
-                                <div class="text-[9px] text-slate-600 truncate">Purok: \${r.purok}</div>
-                                <div class="text-[9px] text-slate-600 truncate">DOB: \${r.dob}</div>
-                            </div>
-                        </div>
-                        <div class="flex justify-between items-end border-t pt-1">
-                            <span class="text-[8px] text-slate-400">Valid: \${new Date().getFullYear() + 2}</span>
-                            <div class="w-12 h-4 border-b border-slate-800"></div>
-                        </div>
-                    </div>
-                \`).join('');
-            });
-        }
-
-        // Reports Section
-        function renderStaffReports(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <h2 class="text-lg font-bold">Barangay Reports & Export</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                            <h3 class="font-bold mb-2">Master Resident Report</h3>
-                            <p class="text-xs text-slate-500 mb-4">Complete list of all active residents with demographics.</p>
-                            <button onclick="window.print()" class="bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-semibold">Print Report</button>
-                        </div>
-                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                            <h3 class="font-bold mb-2">Household & Purok Report</h3>
-                            <p class="text-xs text-slate-500 mb-4">Household groupings and population per purok.</p>
-                            <button onclick="window.print()" class="bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-semibold">Print Report</button>
-                        </div>
-                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                            <h3 class="font-bold mb-2">Blotter & Case Report</h3>
-                            <p class="text-xs text-slate-500 mb-4">Summary of community blotters and incident status.</p>
-                            <button onclick="window.print()" class="bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-semibold">Print Report</button>
-                        </div>
-                    </div>
-                </div>
-            \`;
-        }
-
-        // User Management Section
-        function renderStaffUsers(container) {
-            container.innerHTML = \`
-                <div class="space-y-6">
-                    <div class="flex justify-between items-center"><h2 class="text-lg font-bold">Staff User Management</h2><button onclick="promptAddUser()" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">+ Add Staff User</button></div>
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase"><th class="p-4">Username</th><th class="p-4">Full Name</th><th class="p-4">Role</th><th class="p-4 text-right">Actions</th></tr></thead>
-                            <tbody id="user-tbody" class="divide-y text-sm"><tr><td colspan="4" class="p-6 text-center text-slate-400">Loading users...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            \`;
-            fetch('/api/staff/users').then(res => res.json()).then(rows => {
-                const tbody = document.getElementById('user-tbody');
-                tbody.innerHTML = rows.map(u => \`<tr><td class="p-4 font-mono">\${u.username}</td><td class="p-4 font-semibold">\${u.full_name}</td><td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">\${u.role}</span></td><td class="p-4 text-right"><button onclick="deleteUser(\${u.id})" class="text-red-500">Delete</button></td></tr>\`).join('');
-            });
-        }
-
-        function promptAddUser() {
-            const username = prompt('Username:');
-            if (!username) return;
-            const password = prompt('Password:');
-            const full_name = prompt('Full Name:');
-            const role = prompt('Role (Super Admin, Barangay Admin, Barangay Staff):');
-            fetch('/api/staff/users', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password, full_name, role, email: 'admin@brgy.gov.ph' })
-            }).then(() => loadStaffSection('users'));
-        }
-
-        function deleteUser(id) {
-            fetch('/api/staff/users/' + id, { method: 'DELETE' }).then(() => loadStaffSection('users'));
-        }
-
-        // Settings Section
-        function renderStaffSettings(container) {
-            container.innerHTML = \`
-                <div class="max-w-xl bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
-                    <h2 class="text-lg font-bold mb-6">Barangay Customization Settings</h2>
-                    <form onsubmit="saveSettings(event)" class="space-y-4">
-                        <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Barangay Name</label><input type="text" name="barangay_name" value="\${window.brgySettings?.barangay_name || ''}" class="w-full p-2.5 border rounded-xl"></div>
-                        <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Municipality / City</label><input type="text" name="municipality" value="\${window.brgySettings?.municipality || ''}" class="w-full p-2.5 border rounded-xl"></div>
-                        <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Province</label><input type="text" name="province" value="\${window.brgySettings?.province || ''}" class="w-full p-2.5 border rounded-xl"></div>
-                        <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Barangay Captain</label><input type="text" name="captain" value="\${window.brgySettings?.captain || ''}" class="w-full p-2.5 border rounded-xl"></div>
-                        <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Contact Number</label><input type="text" name="contact_number" value="\${window.brgySettings?.contact_number || ''}" class="w-full p-2.5 border rounded-xl"></div>
-                        <div><label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Barangay Logo Image</label><input type="file" id="logo-file" accept="image/*" class="w-full text-sm"></div>
-                        <button type="submit" class="bg-blue-600 text-white font-semibold px-6 py-2.5 rounded-xl shadow">Save Settings</button>
-                    </form>
-                </div>
-            \`;
-        }
-
-        function saveSettings(e) {
-            e.preventDefault();
-            const data = Object.fromEntries(new FormData(e.target));
-            const fileInput = document.getElementById('logo-file');
-            
-            const submitData = (logoBase64) => {
-                if (logoBase64) data.logo_base64 = logoBase64;
-                fetch('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                }).then(res => res.json()).then(res => {
-                    if (res.success) { alert('Settings saved successfully!'); window.location.reload(); }
-                });
-            };
-
-            if (fileInput.files[0]) {
-                const reader = new FileReader();
-                reader.onload = (e) => submitData(e.target.result);
-                reader.readAsDataURL(fileInput.files[0]);
-            } else {
-                submitData(null);
-            }
-        }
-
-
-        // ================= RESIDENT PORTAL =================
-        function checkAuthAndRenderResident(container) {
-            fetch('/api/session').then(res => res.json()).then(session => {
-                if (!session.resident) { window.location.href = '/login'; return; }
-                renderResidentPortal(container, session.resident);
-            });
-        }
-
-        function renderResidentPortal(container, resident) {
-            container.innerHTML = \`
-                <div class="min-h-screen bg-slate-100 flex flex-col">
-                    <header class="bg-white border-b px-8 py-4 flex justify-between items-center shadow-sm">
-                        <div class="flex items-center space-x-3">
-                            <div class="w-10 h-10 bg-emerald-600 text-white rounded-full flex items-center justify-center font-bold">
-                                <i class="fa-solid fa-user"></i>
-                            </div>
-                            <div>
-                                <h2 class="font-bold text-slate-800" id="res-name-hdr">\${resident.full_name}</h2>
-                                <p class="text-xs text-emerald-600 font-mono" id="res-id-hdr">\${resident.resident_id}</p>
-                            </div>
-                        </div>
-                        <button onclick="logoutResident()" class="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white px-4 py-2 rounded-xl text-sm font-semibold transition">Logout</button>
-                    </header>
-
-                    <main class="flex-1 max-w-5xl w-full mx-auto p-6 space-y-6">
-                        <!-- Digital ID Card Section -->
-                        <div class="bg-gradient-to-r from-blue-900 to-slate-900 text-white rounded-2xl shadow-xl p-8 flex flex-col md:flex-row items-center justify-between gap-6">
-                            <div class="space-y-2">
-                                <div class="text-xs uppercase tracking-widest text-blue-400 font-semibold">\${window.brgySettings?.barangay_name || 'Barangay'}</div>
-                                <h3 class="text-2xl font-bold">Digital Resident ID</h3>
-                                <p class="text-sm text-slate-300">Show this digital ID for official barangay transactions and verification.</p>
-                                <div class="pt-2"><span class="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-xs font-semibold">Active Status</span></div>
-                            </div>
-                            <div class="bg-white text-slate-800 rounded-xl p-4 shadow-lg w-72 text-center" id="digital-id-card">
-                                <div class="font-bold text-xs uppercase text-blue-900 mb-1">\${window.brgySettings?.barangay_name || 'Barangay'}</div>
-                                <div class="w-20 h-24 bg-slate-200 mx-auto rounded overflow-hidden my-2" id="id-photo-container"></div>
-                                <div class="font-bold text-sm" id="id-full-name">Loading...</div>
-                                <div class="text-xs font-mono font-bold text-blue-600 mb-2" id="id-number">\${resident.resident_id}</div>
-                                <div id="qrcode" class="flex justify-center my-2"></div>
-                                <div class="text-[9px] text-slate-400">Scan QR Code to Verify</div>
-                            </div>
-                        </div>
-
-                        <!-- Services Grid -->
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
-                                <div>
-                                    <h4 class="font-bold text-slate-800 text-lg mb-1">Request Certificate</h4>
-                                    <p class="text-xs text-slate-500 mb-4">Request Barangay Clearance, Indigency, Residency, etc.</p>
-                                </div>
-                                <button onclick="promptRequestCert()" class="bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold">Request Now</button>
-                            </div>
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
-                                <div>
-                                    <h4 class="font-bold text-slate-800 text-lg mb-1">Book Appointment</h4>
-                                    <p class="text-xs text-slate-500 mb-4">Schedule consultation or official appointment.</p>
-                                </div>
-                                <button onclick="promptBookAppt()" class="bg-emerald-600 text-white py-2 rounded-xl text-sm font-semibold">Book Appointment</button>
-                            </div>
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
-                                <div>
-                                    <h4 class="font-bold text-slate-800 text-lg mb-1">Submit Complaint</h4>
-                                    <p class="text-xs text-slate-500 mb-4">File community concerns or neighbor disputes.</p>
-                                </div>
-                                <button onclick="promptComplaint()" class="bg-amber-600 text-white py-2 rounded-xl text-sm font-semibold">File Complaint</button>
-                            </div>
-                        </div>
-                    </main>
-                </div>
-            \`;
-
-            // Load Resident Profile details for ID Card & QR code
-            fetch('/api/resident/profile').then(res => res.json()).then(p => {
-                document.getElementById('id-full-name').innerText = \`\\${p.first_name} \\${p.last_name}\`;
-                if (p.photo) {
-                    document.getElementById('id-photo-container').innerHTML = \`<img src="\${p.photo}" class="w-full h-full object-cover"/>\`;
-                }
-                // Generate QR Code pointing to verification URL
-                const verifyUrl = window.location.origin + '/verify/' + p.resident_id;
-                new QRCode(document.getElementById('qrcode'), {
-                    text: verifyUrl,
-                    width: 80,
-                    height: 80
-                });
-            });
-        }
-
-        function logoutResident() {
-            fetch('/api/logout', { method: 'POST' }).then(() => window.location.href = '/login');
-        }
-
-        function promptRequestCert() {
-            const type = prompt('Select Certificate Type:\n1. Barangay Clearance\n2. Certificate of Residency\n3. Certificate of Indigency');
-            if (!type) return;
-            const purpose = prompt('State Purpose:');
-            fetch('/api/resident/certificates', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ cert_type: type, purpose })
-            }).then(res => res.json()).then(() => alert('Certificate request submitted successfully!'));
-        }
-
-        function promptBookAppt() {
-            const service = prompt('Service Type (e.g. Consultation, Clearance Processing):');
-            if (!service) return;
-            const date = prompt('Appointment Date (YYYY-MM-DD):');
-            const time = prompt('Appointment Time (e.g. 10:00 AM):');
-            fetch('/api/resident/appointments', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ service_type: service, appointment_date: date, appointment_time: time, purpose: 'General' })
-            }).then(() => alert('Appointment booked successfully!'));
-        }
-
-        function promptComplaint() {
-            const subject = prompt('Complaint Subject:');
-            if (!subject) return;
-            const details = prompt('Complaint Details:');
-            fetch('/api/resident/complaints', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ subject, details })
-            }).then(() => alert('Complaint submitted successfully!'));
-        }
-    </script>
+    ` : bodyContent}
 </body>
 </html>`;
 }
+
+// ================= PUBLIC ROUTES =================
+
+// Login selection / Staff Login Page
+app.get('/login', (req, res) => {
+    db.all(`SELECT key, value FROM settings`, (err, rows) => {
+        const settings = {};
+        rows.forEach(r => settings[r.key] = r.value);
+        
+        const html = `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>Staff Login - ${settings.brgy_name || 'BRMS'}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+            <style>
+                body { background: #f1f5f9; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .login-card { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 100%; max-width: 400px; text-align: center; }
+                .login-card img { width: 70px; height: 70px; border-radius: 50%; object-fit: cover; margin-bottom: 15px; }
+                .login-card h2 { color: #1e3a8a; margin-bottom: 5px; font-size: 1.3rem; }
+                .login-card p { color: #64748b; font-size: 0.85rem; margin-bottom: 25px; }
+                .form-group { text-align: left; margin-bottom: 15px; }
+                .form-group label { display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px; }
+                .form-control { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box; }
+                .btn { width: 100%; background: #1e3a8a; color: #fff; padding: 12px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+                .links { margin-top: 20px; font-size: 0.85rem; display: flex; justify-content: space-between; }
+                .links a { color: #3b82f6; text-decoration: none; }
+            </style>
+        </head>
+        <body>
+            <div class="login-card">
+                <h2>${settings.brgy_name}</h2>
+                <p>Staff & Administrator Portal</p>
+                ${req.query.error ? `<p style="color:red; font-size:0.8rem; margin-bottom:15px;">Invalid username or password</p>` : ''}
+                <form action="/login" method="POST">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" name="username" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn">Login to Staff Portal</button>
+                </form>
+                <div class="links">
+                    <a href="/resident-login">Resident Portal</a>
+                    <a href="/register">Register Online</a>
+                </div>
+            </div>
+        </body>
+        </html>`;
+        res.send(html);
+    });
+});
+
+app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+    db.get(`SELECT * FROM staff WHERE username = ? AND status = 'Active'`, [username], async (err, user) => {
+        if (user && await bcrypt.compare(password, user.password)) {
+            req.session.userId = user.id;
+            req.session.userName = user.full_name;
+            req.session.userRole = user.role;
+            logActivity(user.full_name, 'Login', 'Staff logged into the system.');
+            res.redirect('/staff/dashboard');
+        } else {
+            res.redirect('/login?error=1');
+        }
+    });
+});
+
+// Resident Login Page
+app.get('/resident-login', (req, res) => {
+    db.all(`SELECT key, value FROM settings`, (err, rows) => {
+        const settings = {};
+        rows.forEach(r => settings[r.key] = r.value);
+        
+        const html = `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>Resident Login - ${settings.brgy_name || 'BRMS'}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+            <style>
+                body { background: #f1f5f9; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .login-card { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 100%; max-width: 400px; text-align: center; }
+                .login-card h2 { color: #1e3a8a; margin-bottom: 5px; font-size: 1.3rem; }
+                .login-card p { color: #64748b; font-size: 0.85rem; margin-bottom: 25px; }
+                .form-group { text-align: left; margin-bottom: 15px; }
+                .form-group label { display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px; }
+                .form-control { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box; }
+                .btn { width: 100%; background: #10b981; color: #fff; padding: 12px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+                .links { margin-top: 20px; font-size: 0.85rem; display: flex; justify-content: space-between; }
+                .links a { color: #3b82f6; text-decoration: none; }
+            </style>
+        </head>
+        <body>
+            <div class="login-card">
+                <h2>${settings.brgy_name}</h2>
+                <p>Resident Portal Login</p>
+                ${req.query.error ? `<p style="color:red; font-size:0.8rem; margin-bottom:15px;">Invalid email/ID or password, or account pending approval</p>` : ''}
+                <form action="/resident-login" method="POST">
+                    <div class="form-group">
+                        <label>Resident ID or Email</label>
+                        <input type="text" name="identifier" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn">Login to Resident Portal</button>
+                </form>
+                <div class="links">
+                    <a href="/login">Staff Portal</a>
+                    <a href="/register">Register Online</a>
+                </div>
+            </div>
+        </body>
+        </html>`;
+        res.send(html);
+    });
+});
+
+app.post('/resident-login', (req, res) => {
+    const { identifier, password } = req.body;
+    db.get(`SELECT * FROM residents WHERE (resident_id = ? OR email = ?) AND account_status = 'Approved'`, [identifier, identifier], async (err, resident) => {
+        if (resident && resident.password && await bcrypt.compare(password, resident.password)) {
+            req.session.residentId = resident.resident_id;
+            req.session.userName = `${resident.first_name} ${resident.last_name}`;
+            req.session.userRole = 'Resident';
+            res.redirect('/resident/dashboard');
+        } else {
+            res.redirect('/resident-login?error=1');
+        }
+    });
+});
+
+// Public Registration Page
+app.get('/register', (req, res) => {
+    db.all(`SELECT name FROM puroks`, (err, puroks) => {
+        db.all(`SELECT key, value FROM settings`, (err2, rows) => {
+            const settings = {};
+            rows.forEach(r => settings[r.key] = r.value);
+
+            const html = `<!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>Online Resident Registration - ${settings.brgy_name}</title>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+                <style>
+                    body { background: #f1f5f9; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+                    .reg-card { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 100%; max-width: 600px; }
+                    .reg-card h2 { color: #1e3a8a; text-align: center; margin-bottom: 5px; }
+                    .reg-card p { color: #64748b; text-align: center; font-size: 0.85rem; margin-bottom: 25px; }
+                    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+                    .form-group { margin-bottom: 15px; }
+                    .form-group.full { grid-column: span 2; }
+                    .form-group label { display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px; }
+                    .form-control { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box; }
+                    .btn { width: 100%; background: #3b82f6; color: #fff; padding: 12px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+                    .footer-links { text-align: center; margin-top: 15px; font-size: 0.85rem; }
+                    .footer-links a { color: #3b82f6; text-decoration: none; }
+                </style>
+            </head>
+            <body>
+                <div class="reg-card">
+                    <h2>${settings.brgy_name}</h2>
+                    <p>Online Resident Registration Form</p>
+                    ${req.query.success ? `<div style="background:#d1fae5; color:#065f46; padding:15px; border-radius:6px; margin-bottom:20px; text-align:center; font-weight:500;">Registration submitted successfully! Your account is pending staff verification and approval.</div>` : ''}
+                    <form action="/register" method="POST" enctype="multipart/form-data">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>First Name</label>
+                                <input type="text" name="first_name" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Middle Name</label>
+                                <input type="text" name="middle_name" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label>Last Name</label>
+                                <input type="text" name="last_name" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Suffix</label>
+                                <input type="text" name="suffix" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label>Date of Birth</label>
+                                <input type="date" name="dob" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Gender</label>
+                                <select name="gender" class="form-control" required>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Civil Status</label>
+                                <select name="civil_status" class="form-control">
+                                    <option value="Single">Single</option>
+                                    <option value="Married">Married</option>
+                                    <option value="Widowed">Widowed</option>
+                                    <option value="Divorced">Divorced</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Purok</label>
+                                <select name="purok" class="form-control" required>
+                                    ${puroks.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="form-group full">
+                                <label>Complete Address</label>
+                                <input type="text" name="address" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Contact Number</label>
+                                <input type="text" name="contact_number" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Email Address</label>
+                                <input type="email" name="email" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Password for Portal</label>
+                                <input type="password" name="password" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Resident Photo</label>
+                                <input type="file" name="photo" class="form-control" accept="image/*" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn">Submit Registration</button>
+                    </form>
+                    <div class="footer-links">
+                        <a href="/resident-login">Already have an account? Login here</a>
+                    </div>
+                </div>
+            </body>
+            </html>`;
+            res.send(html);
+        });
+    });
+});
+
+app.post('/register', upload.single('photo'), async (req, res) => {
+    const { first_name, middle_name, last_name, suffix, dob, gender, civil_status, address, purok, contact_number, email, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const photoPath = req.file ? '/uploads/' + req.file.filename : '';
+    const dateReg = new Date().toISOString().split('T')[0];
+
+    generateResidentId((residentId) => {
+        db.run(`INSERT INTO residents (resident_id, first_name, middle_name, last_name, suffix, dob, gender, civil_status, address, purok, contact_number, email, photo, date_registered, password, account_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
+            [residentId, first_name, middle_name, last_name, suffix, dob, gender, civil_status, address, purok, contact_number, email, photoPath, dateReg, hashedPassword],
+            (err) => {
+                if (err) console.error(err);
+                res.redirect('/register?success=1');
+            }
+        );
+    });
+});
+
+// Public Certificate Verification Route
+app.get('/verify/:certNo', (req, res) => {
+    const certNo = req.params.certNo;
+    db.get(`SELECT c.*, r.first_name, r.last_name, r.resident_id FROM certificates c JOIN residents r ON c.resident_id = r.resident_id WHERE c.cert_number = ?`, [certNo], (err, cert) => {
+        db.all(`SELECT key, value FROM settings`, (err2, rows) => {
+            const settings = {};
+            rows.forEach(r => settings[r.key] = r.value);
+
+            const html = `<!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>Certificate Verification - ${settings.brgy_name}</title>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+                <style>
+                    body { background: #f1f5f9; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                    .verify-card { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 100%; max-width: 500px; text-align: center; }
+                    .badge { padding: 8px 16px; border-radius: 20px; font-weight: 700; display: inline-block; margin: 15px 0; }
+                    .valid { background: #d1fae5; color: #065f46; }
+                    .invalid { background: #fee2e2; color: #991b1b; }
+                </style>
+            </head>
+            <body>
+                <div class="verify-card">
+                    <h2>${settings.brgy_name}</h2>
+                    <p>${settings.municipality}, ${settings.province}</p>
+                    <hr style="margin:20px 0; border:0; border-top:1px solid #cbd5e1;">
+                    ${cert ? `
+                        <h3>Certificate Verification</h3>
+                        <div class="badge valid">AUTHENTIC & VALID</div>
+                        <p><strong>Certificate Number:</strong> ${cert.cert_number}</p>
+                        <p><strong>Resident Name:</strong> ${cert.first_name}${cert.last_name}</p>
+                        <p><strong>Certificate Type:</strong> ${cert.cert_type}</p>
+                        <p><strong>Purpose:</strong> ${cert.purpose}</p>
+                        <p><strong>Date Issued:</strong> ${cert.date_issued || cert.created_at}</p>
+                    ` : `
+                        <h3>Certificate Verification</h3>
+                        <div class="badge invalid">INVALID OR NOT FOUND</div>
+                        <p>The certificate number you provided does not exist in our official records.</p>
+                    `}
+                </div>
+            </body>
+            </html>`;
+            res.send(html);
+        });
+    });
+});
+
+// Logout Route
+app.get('/logout', (req, res) => {
+    req.session.destroy(() => {
+        res.redirect('/login');
+    });
+});
+
+// ================= STAFF / ADMIN ROUTES =================
+
+app.use('/staff', (req, res, next) => {
+    if (req.session.userRole && req.session.userRole !== 'Resident') {
+        next();
+    } else {
+        res.redirect('/login');
+    }
+});
+
+// Staff Dashboard
+app.get('/staff/dashboard', (req, res) => {
+    db.all(`SELECT * FROM residents WHERE resident_status = 'Active'`, (err, residents) => {
+        db.all(`SELECT * FROM households WHERE status = 'Active'`, (err2, households) => {
+            db.all(`SELECT * FROM certificates`, (err3, certs) => {
+                db.all(`SELECT * FROM appointments`, (err4, appointments) => {
+                    db.all(`SELECT * FROM activity_logs ORDER BY id DESC LIMIT 5`, (err5, logs) => {
+                        db.all(`SELECT key, value FROM settings`, (err6, settingsRows) => {
+                            const settings = {};
+                            settingsRows.forEach(r => settings[r.key] = r.value);
+
+                            const totalResidents = residents.length;
+                            const totalHouseholds = households.length;
+                            const maleResidents = residents.filter(r => r.gender === 'Male').length;
+                            const femaleResidents = residents.filter(r => r.gender === 'Female').length;
+                            const seniorCitizens = residents.filter(r => calculateAge(r.dob) >= 60).length;
+                            const pwdResidents = residents.filter(r => r.pwd_status === 'Yes').length;
+                            const soloParents = residents.filter(r => r.solo_parent_status === 'Yes').length;
+                            const minors = residents.filter(r => calculateAge(r.dob) < 18).length;
+                            const registeredVoters = residents.filter(r => r.voter_status === 'Yes').length;
+                            const pendingRequests = certs.filter(c => c.status === 'Pending').length;
+                            const approvedRequests = certs.filter(c => c.status === 'Approved' || c.status === 'Ready for Release').length;
+                            const pendingAppointments = appointments.filter(a => a.status === 'Pending').length;
+
+                            const body = `
+                            <div class="card-grid">
+                                <div class="stat-card">
+                                    <div class="stat-info"><h3>${totalResidents}</h3><p>Total Residents</p></div>
+                                    <div class="stat-icon"><i class="fa-solid fa-users"></i></div>
+                                </div>
+                                <div class="stat-card green">
+                                    <div class="stat-info"><h3>${totalHouseholds}</h3><p>Total Households</p></div>
+                                    <div class="stat-icon"><i class="fa-solid fa-house-chimney"></i></div>
+                                </div>
+                                <div class="stat-card yellow">
+                                    <div class="stat-info"><h3>${seniorCitizens}</h3><p>Senior Citizens</p></div>
+                                    <div class="stat-icon"><i class="fa-solid fa-person-cane"></i></div>
+                                </div>
+                                <div class="stat-card red">
+                                    <div class="stat-info"><h3>${pendingRequests}</h3><p>Pending Requests</p></div>
+                                    <div class="stat-icon"><i class="fa-solid fa-file-clock"></i></div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-info"><h3>${registeredVoters}</h3><p>Registered Voters</p></div>
+                                    <div class="stat-icon"><i class="fa-solid fa-check-to-slot"></i></div>
+                                </div>
+                                <div class="stat-card green">
+                                    <div class="stat-info"><h3>${pendingAppointments}</h3><p>Pending Appointments</p></div>
+                                    <div class="stat-icon"><i class="fa-solid fa-calendar"></i></div>
+                                </div>
+                            </div>
+
+                            <div class="card">
+                                <div class="card-header"><h2>Recent System Activities</h2></div>
+                                <table>
+                                    <thead>
+                                        <tr><th>User</th><th>Action</th><th>Details</th><th>Date & Time</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        ${logs.map(l => `<tr><td>${l.user_name}</td><td>${l.action}</td><td>${l.details}</td><td>${l.date_time}</td></tr>`).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                            `;
+                            res.send(renderHTML('Staff Dashboard', body, req.session.userRole, req.session.userName));
+                        });
+                    });
+                });
+            });
+        });
+    });
+});
+
+// Resident Management
+app.get('/staff/residents', (req, res) => {
+    const { search, purok, gender, status } = req.query;
+    let query = `SELECT * FROM residents WHERE resident_status = 'Active'`;
+    const params = [];
+
+    if (search) {
+        query += ` AND (first_name LIKE ? OR last_name LIKE ? OR resident_id LIKE ? OR contact_number LIKE ?)`;
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (purok) {
+        query += ` AND purok = ?`;
+        params.push(purok);
+    }
+    if (gender) {
+        query += ` AND gender = ?`;
+        params.push(gender);
+    }
+    if (status === 'Senior') {
+        query += ` AND (strftime('%Y', 'now') - strftime('%Y', dob)) >= 60`;
+    }
+
+    db.all(query, params, (err, residents) => {
+        db.all(`SELECT name FROM puroks`, (err2, puroks) => {
+            const body = `
+            <div class="card">
+                <div class="card-header">
+                    <h2>Resident Management</h2>
+                    <a href="/staff/residents/add" class="btn"><i class="fa-solid fa-user-plus"></i> Add Resident</a>
+                </div>
+                <form method="GET" class="filters-bar">
+                    <input type="text" name="search" placeholder="Search name, ID, contact..." value="${search || ''}" class="form-control" style="flex:2;">
+                    <select name="purok" class="form-control" style="flex:1;">
+                        <option value="">All Puroks</option>
+                        ${puroks.map(p => `<option value="${p.name}" ${purok === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                    </select>
+                    <select name="gender" class="form-control" style="flex:1;">
+                        <option value="">All Genders</option>
+                        <option value="Male" ${gender === 'Male' ? 'selected' : ''}>Male</option>
+                        <option value="Female" ${gender === 'Female' ? 'selected' : ''}>Female</option>
+                    </select>
+                    <button type="submit" class="btn"><i class="fa-solid fa-search"></i> Filter</button>
+                    <a href="/staff/residents" class="btn btn-secondary">Reset</a>
+                </form>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Photo</th>
+                            <th>Full Name</th>
+                            <th>Age / Gender</th>
+                            <th>Purok / Address</th>
+                            <th>Contact</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${residents.map(r => `
+                            <tr>
+                                <td><strong>${r.resident_id}</strong></td>
+                                <td><img src="${r.photo || 'https://via.placeholder.com/40'}" style="width:35px; height:35px; border-radius:50%; object-fit:cover;"></td>
+                                <td>${r.first_name}${r.middle_name || ''} ${r.last_name}${r.suffix || ''}</td>
+                                <td>${calculateAge(r.dob)} /${r.gender}</td>
+                                <td>${r.purok} -${r.address}</td>
+                                <td>${r.contact_number}</td>
+                                <td><span class="badge ${r.account_status === 'Approved' ? 'badge-success' : 'badge-warning'}">${r.account_status}</span></td>
+                                <td>
+                                    <a href="/staff/residents/view/${r.id}" class="btn btn-sm" title="View"><i class="fa-solid fa-eye"></i></a>
+                                    <a href="/staff/residents/edit/${r.id}" class="btn btn-sm btn-warning" title="Edit"><i class="fa-solid fa-pen"></i></a>
+                                    <a href="/staff/residents/archive/${r.id}" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to archive this resident?')" title="Archive"><i class="fa-solid fa-box-archive"></i></a>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            `;
+            res.send(renderHTML('Resident Management', body, req.session.userRole, req.session.userName));
+        });
+    });
+});
+
+// Add Resident Form
+app.get('/staff/residents/add', (req, res) => {
+    db.all(`SELECT name FROM puroks`, (err, puroks) => {
+        const body = `
+        <div class="card">
+            <div class="card-header"><h2>Add New Resident</h2></div>
+            <form action="/staff/residents/add" method="POST" enctype="multipart/form-data">
+                <div class="form-grid">
+                    <div class="form-group"><label>First Name</label><input type="text" name="first_name" class="form-control" required></div>
+                    <div class="form-group"><label>Middle Name</label><input type="text" name="middle_name" class="form-control"></div>
+                    <div class="form-group"><label>Last Name</label><input type="text" name="last_name" class="form-control" required></div>
+                    <div class="form-group"><label>Suffix</label><input type="text" name="suffix" class="form-control"></div>
+                    <div class="form-group"><label>Date of Birth</label><input type="date" name="dob" class="form-control" required></div>
+                    <div class="form-group"><label>Gender</label><select name="gender" class="form-control"><option value="Male">Male</option><option value="Female">Female</option></select></div>
+                    <div class="form-group"><label>Civil Status</label><select name="civil_status" class="form-control"><option value="Single">Single</option><option value="Married">Married</option><option value="Widowed">Widowed</option></select></div>
+                    <div class="form-group"><label>Purok</label><select name="purok" class="form-control">${puroks.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}</select></div>
+                    <div class="form-group"><label>Address</label><input type="text" name="address" class="form-control" required></div>
+                    <div class="form-group"><label>Contact Number</label><input type="text" name="contact_number" class="form-control" required></div>
+                    <div class="form-group"><label>Email</label><input type="email" name="email" class="form-control"></div>
+                    <div class="form-group"><label>Occupation</label><input type="text" name="occupation" class="form-control"></div>
+                    <div class="form-group"><label>Voter Status</label><select name="voter_status" class="form-control"><option value="No">No</option><option value="Yes">Yes</option></select></div>
+                    <div class="form-group"><label>PWD Status</label><select name="pwd_status" class="form-control"><option value="No">No</option><option value="Yes">Yes</option></select></div>
+                    <div class="form-group"><label>Solo Parent Status</label><select name="solo_parent_status" class="form-control"><option value="No">No</option><option value="Yes">Yes</option></select></div>
+                    <div class="form-group"><label>Resident Photo</label><input type="file" name="photo" class="form-control" accept="image/*"></div>
+                </div>
+                <button type="submit" class="btn">Save Resident</button>
+            </form>
+        </div>
+        `;
+        res.send(renderHTML('Add Resident', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.post('/staff/residents/add', upload.single('photo'), async (req, res) => {
+    const { first_name, middle_name, last_name, suffix, dob, gender, civil_status, address, purok, contact_number, email, occupation, voter_status, pwd_status, solo_parent_status } = req.body;
+    const photoPath = req.file ? '/uploads/' + req.file.filename : '';
+    const dateReg = new Date().toISOString().split('T')[0];
+    const hashedPassword = await bcrypt.hash('password123', 10);
+
+    generateResidentId((residentId) => {
+        db.run(`INSERT INTO residents (resident_id, first_name, middle_name, last_name, suffix, dob, gender, civil_status, address, purok, contact_number, email, occupation, voter_status, pwd_status, solo_parent_status, photo, date_registered, password, account_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Approved')`,
+            [residentId, first_name, middle_name, last_name, suffix, dob, gender, civil_status, address, purok, contact_number, email, occupation, voter_status, pwd_status, solo_parent_status, photoPath, dateReg, hashedPassword],
+            (err) => {
+                logActivity(req.session.userName, 'Add Resident', `Added resident ${first_name} ${last_name} (${residentId})`);
+                res.redirect('/staff/residents');
+            }
+        );
+    });
+});
+
+// View Resident Details & Digital ID
+app.get('/staff/residents/view/:id', (req, res) => {
+    db.get(`SELECT * FROM residents WHERE id = ?`, [req.params.id], async (err, r) => {
+        if (!r) return res.redirect('/staff/residents');
+        const qrDataUrl = await QRCode.toDataURL(JSON.stringify({ resident_id: r.resident_id, name: `${r.first_name} ${r.last_name}`, barangay: 'San Jose' }));
+
+        const body = `
+        <div class="card">
+            <div class="card-header">
+                <h2>Resident Profile & Digital ID</h2>
+                <a href="/staff/residents" class="btn btn-secondary">Back to List</a>
+            </div>
+            <div style="display:flex; gap:30px; flex-wrap:wrap; align-items:flex-start;">
+                <div>
+                    <img src="${r.photo || 'https://via.placeholder.com/150'}" style="width:150px; height:180px; object-fit:cover; border-radius:8px; border:1px solid #cbd5e1;">
+                </div>
+                <div style="flex:1;">
+                    <h3>${r.first_name} ${r.middle_name || ''} ${r.last_name} ${r.suffix || ''}</h3>
+                    <p style="color:#64748b; margin-bottom:15px;">Resident ID: <strong>${r.resident_id}</strong></p>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:0.9rem;">
+                        <p><strong>Date of Birth:</strong> ${r.dob} (${calculateAge(r.dob)} yrs old)</p>
+                        <p><strong>Gender:</strong> ${r.gender}</p>
+                        <p><strong>Civil Status:</strong> ${r.civil_status}</p>
+                        <p><strong>Purok & Address:</strong> ${r.purok}, ${r.address}</p>
+                        <p><strong>Contact Number:</strong> ${r.contact_number}</p>
+                        <p><strong>Email:</strong> ${r.email}</p>
+                        <p><strong>Voter Status:</strong> ${r.voter_status}</p>
+                        <p><strong>PWD Status:</strong> ${r.pwd_status}</p>
+                    </div>
+                </div>
+                <div>
+                    <div class="id-card-ui">
+                        <div class="id-header">
+                            <img src="${r.photo || 'https://via.placeholder.com/35'}" alt="Photo">
+                            <div>
+                                <h4>Barangay San Jose</h4>
+                                <p>Digital Resident ID</p>
+                            </div>
+                        </div>
+                        <div class="id-body">
+                            <img src="${r.photo || 'https://via.placeholder.com/75'}" class="res-photo" alt="Photo">
+                            <div class="id-details">
+                                <p><strong>${r.resident_id}</strong></p>
+                                <p>${r.first_name} ${r.last_name}</p>
+                                <p>${r.purok}, ${r.address}</p>
+                                <p>DOB: ${r.dob}</p>
+                            </div>
+                        </div>
+                        <div class="id-footer">
+                            <p>Valid 2026</p>
+                            <img src="${qrDataUrl}" style="width:35px; height:35px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        `;
+        res.send(renderHTML('Resident Profile', body, req.session.userRole, req.session.userName));
+    });
+});
+
+// Edit Resident
+app.get('/staff/residents/edit/:id', (req, res) => {
+    db.get(`SELECT * FROM residents WHERE id = ?`, [req.params.id], (err, r) => {
+        db.all(`SELECT name FROM puroks`, (err2, puroks) => {
+            if (!r) return res.redirect('/staff/residents');
+            const body = `
+            <div class="card">
+                <div class="card-header"><h2>Edit Resident</h2></div>
+                <form action="/staff/residents/edit/${r.id}" method="POST" enctype="multipart/form-data">
+                    <div class="form-grid">
+                        <div class="form-group"><label>First Name</label><input type="text" name="first_name" value="${r.first_name}" class="form-control" required></div>
+                        <div class="form-group"><label>Middle Name</label><input type="text" name="middle_name" value="${r.middle_name || ''}" class="form-control"></div>
+                        <div class="form-group"><label>Last Name</label><input type="text" name="last_name" value="${r.last_name}" class="form-control" required></div>
+                        <div class="form-group"><label>Date of Birth</label><input type="date" name="dob" value="${r.dob}" class="form-control" required></div>
+                        <div class="form-group"><label>Gender</label><select name="gender" class="form-control"><option value="Male" ${r.gender==='Male'?'selected':''}>Male</option><option value="Female" ${r.gender==='Female'?'selected':''}>Female</option></select></div>
+                        <div class="form-group"><label>Purok</label><select name="purok" class="form-control">${puroks.map(p => `<option value="${p.name}" ${r.purok===p.name?'selected':''}>${p.name}</option>`).join('')}</select></div>
+                        <div class="form-group"><label>Address</label><input type="text" name="address" value="${r.address}" class="form-control" required></div>
+                        <div class="form-group"><label>Contact Number</label><input type="text" name="contact_number" value="${r.contact_number}" class="form-control" required></div>
+                        <div class="form-group"><label>Account Status</label><select name="account_status" class="form-control"><option value="Approved" ${r.account_status==='Approved'?'selected':''}>Approved</option><option value="Pending" ${r.account_status==='Pending'?'selected':''}>Pending</option></select></div>
+                        <div class="form-group"><label>New Photo (Optional)</label><input type="file" name="photo" class="form-control" accept="image/*"></div>
+                    </div>
+                    <button type="submit" class="btn">Update Resident</button>
+                </form>
+            </div>
+            `;
+            res.send(renderHTML('Edit Resident', body, req.session.userRole, req.session.userName));
+        });
+    });
+});
+
+app.post('/staff/residents/edit/:id', upload.single('photo'), (req, res) => {
+    const { first_name, middle_name, last_name, dob, gender, address, purok, contact_number, account_status } = req.body;
+    const photoUpdate = req.file ? `, photo = '/uploads/${req.file.filename}'` : '';
+    db.run(`UPDATE residents SET first_name = ?, middle_name = ?, last_name = ?, dob = ?, gender = ?, address = ?, purok = ?, contact_number = ?, account_status = ? ${photoUpdate} WHERE id = ?`,
+        [first_name, middle_name, last_name, dob, gender, address, purok, contact_number, account_status, req.params.id],
+        (err) => {
+            logActivity(req.session.userName, 'Edit Resident', `Updated resident ID ${req.params.id}`);
+            res.redirect('/staff/residents');
+        }
+    );
+});
+
+// Archive Resident
+app.get('/staff/residents/archive/:id', (req, res) => {
+    db.run(`UPDATE residents SET resident_status = 'Archived' WHERE id = ?`, [req.params.id], () => {
+        logActivity(req.session.userName, 'Archive Resident', `Archived resident ID ${req.params.id}`);
+        res.redirect('/staff/residents');
+    });
+});
+
+// Print IDs Page (8-up Bond Paper layout)
+app.get('/staff/print-ids', (req, res) => {
+    db.all(`SELECT * FROM residents WHERE resident_status = 'Active' LIMIT 8`, async (err, residents) => {
+        const body = `
+        <div class="card no-print">
+            <div class="card-header">
+                <h2>Print Physical IDs (8 IDs per Bond Paper)</h2>
+                <button onclick="window.print()" class="btn"><i class="fa-solid fa-print"></i> Print Now</button>
+            </div>
+            <p>This page automatically formats resident IDs to fit 8 standard ID cards on one 8.5 x 11 inch bond paper.</p>
+        </div>
+        <div class="print-grid">
+            ${residents.map(r => `
+                <div class="id-card-print">
+                    <div class="id-header" style="border-bottom:1px solid #1e3a8a; padding-bottom:4px; display:flex; gap:8px; align-items:center;">
+                        <img src="${r.photo || 'https://via.placeholder.com/30'}" style="width:30px; height:30px; border-radius:50%; object-fit:cover;">
+                        <div>
+                            <h4 style="font-size:8pt; color:#1e3a8a; margin:0;">Barangay San Jose</h4>
+                            <p style="font-size:6pt; color:#555; margin:0;">Official Barangay ID</p>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center; margin-top:4px;">
+                        <img src="${r.photo || 'https://via.placeholder.com/50'}" style="width:50px; height:60px; object-fit:cover; border:1px solid #ccc;">
+                        <div style="font-size:7pt; line-height:1.2;">
+                            <strong>${r.resident_id}</strong><br>
+                            ${r.first_name}${r.last_name}<br>
+                            ${r.purok},${r.address}<br>
+                            DOB: ${r.dob}
+                        </div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-end; border-top:1px solid #eee; padding-top:2px;">
+                        <span style="font-size:5pt; color:#777;">Valid 2026</span>
+                        <span style="font-size:5pt; font-weight:bold;">BRGY OFFICIAL</span>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+        `;
+        res.send(renderHTML('Print IDs', body, req.session.userRole, req.session.userName));
+    });
+});
+
+// Household Management
+app.get('/staff/households', (req, res) => {
+    db.all(`SELECT h.*, r.first_name, r.last_name FROM households h LEFT JOIN residents r ON h.household_head_id = r.id WHERE h.status = 'Active'`, (err, households) => {
+        db.all(`SELECT * FROM residents WHERE resident_status = 'Active'`, (err2, residents) => {
+            db.all(`SELECT name FROM puroks`, (err3, puroks) => {
+                const body = `
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Household Management</h2>
+                        <a href="#addModal" onclick="document.getElementById('addModal').style.display='flex'" class="btn"><i class="fa-solid fa-house-chimney-medical"></i> Add Household</a>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr><th>Household ID</th><th>Household Head</th><th>Purok / Address</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody>
+                            ${households.map(h => `
+                                <tr>
+                                    <td><strong>${h.household_id}</strong></td>
+                                    <td>${h.first_name ? `${h.first_name} ${h.last_name}` : 'Not Assigned'}</td>
+                                    <td>${h.purok} -${h.address}</td>
+                                    <td><a href="/staff/households/archive/${h.id}" class="btn btn-sm btn-danger" onclick="return confirm('Archive this household?')"><i class="fa-solid fa-box-archive"></i></a></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="addModal" class="modal">
+                    <div class="modal-content">
+                        <span class="close-modal" onclick="document.getElementById('addModal').style.display='none'">&times;</span>
+                        <h2>Add New Household</h2>
+                        <form action="/staff/households/add" method="POST" style="margin-top:15px;">
+                            <div class="form-group"><label>Household ID</label><input type="text" name="household_id" value="HH-${Math.floor(10000+Math.random()*90000)}" class="form-control" required></div>
+                            <div class="form-group"><label>Household Head</label><select name="household_head_id" class="form-control">${residents.map(r => `<option value="${r.id}">${r.first_name}${r.last_name}</option>`).join('')}</select></div>
+                            <div class="form-group"><label>Purok</label><select name="purok" class="form-control">${puroks.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}</select></div>
+                            <div class="form-group"><label>Address</label><input type="text" name="address" class="form-control" required></div>
+                            <button type="submit" class="btn" style="margin-top:15px;">Save Household</button>
+                        </form>
+                    </div>
+                </div>
+                `;
+                res.send(renderHTML('Household Management', body, req.session.userRole, req.session.userName));
+            });
+        });
+    });
+});
+
+app.post('/staff/households/add', (req, res) => {
+    const { household_id, household_head_id, address, purok } = req.body;
+    const dateReg = new Date().toISOString().split('T')[0];
+    db.run(`INSERT INTO households (household_id, household_head_id, address, purok, date_registered) VALUES (?, ?, ?, ?, ?)`,
+        [household_id, household_head_id, address, purok, dateReg], () => {
+            logActivity(req.session.userName, 'Add Household', `Added household ${household_id}`);
+            res.redirect('/staff/households');
+        }
+    );
+});
+
+app.get('/staff/households/archive/:id', (req, res) => {
+    db.run(`UPDATE households SET status = 'Archived' WHERE id = ?`, [req.params.id], () => {
+        res.redirect('/staff/households');
+    });
+});
+
+// Purok Management
+app.get('/staff/puroks', (req, res) => {
+    db.all(`SELECT * FROM puroks`, (err, puroks) => {
+        const body = `
+        <div class="card">
+            <div class="card-header">
+                <h2>Purok Management</h2>
+                <form action="/staff/puroks/add" method="POST" style="display:flex; gap:10px;">
+                    <input type="text" name="name" placeholder="Purok Name" class="form-control" required>
+                    <button type="submit" class="btn">Add Purok</button>
+                </form>
+            </div>
+            <table>
+                <thead><tr><th>Purok Name</th><th>Action</th></tr></thead>
+                <tbody>
+                    ${puroks.map(p => `<tr><td><strong>${p.name}</strong></td><td><a href="/staff/puroks/delete/${p.id}" class="btn btn-sm btn-danger" onclick="return confirm('Delete purok?')"><i class="fa-solid fa-trash"></i></a></td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        `;
+        res.send(renderHTML('Purok Management', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.post('/staff/puroks/add', (req, res) => {
+    db.run(`INSERT INTO puroks (name) VALUES (?)`, [req.body.name], () => { res.redirect('/staff/puroks'); });
+});
+
+app.get('/staff/puroks/delete/:id', (req, res) => {
+    db.run(`DELETE FROM puroks WHERE id = ?`, [req.params.id], () => { res.redirect('/staff/puroks'); });
+});
+
+// Certificate Management
+app.get('/staff/certificates', (req, res) => {
+    db.all(`SELECT c.*, r.first_name, r.last_name FROM certificates c JOIN residents r ON c.resident_id = r.resident_id`, (err, certs) => {
+        const body = `
+        <div class="card">
+            <div class="card-header"><h2>Certificate Requests & Issuance</h2></div>
+            <table>
+                <thead>
+                    <tr><th>Cert #</th><th>Resident</th><th>Type</th><th>Purpose</th><th>Status</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                    ${certs.map(c => `
+                        <tr>
+                            <td><strong>${c.cert_number}</strong></td>
+                            <td>${c.first_name}${c.last_name}</td>
+                            <td>${c.cert_type}</td>
+                            <td>${c.purpose}</td>
+                            <td><span class="badge badge-info">${c.status}</span></td>
+                            <td>
+                                <a href="/staff/certificates/approve/${c.id}" class="btn btn-sm btn-success" title="Approve"><i class="fa-solid fa-check"></i></a>
+                                <a href="/staff/certificates/print/${c.id}" target="_blank" class="btn btn-sm" title="Print"><i class="fa-solid fa-print"></i></a>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+        `;
+        res.send(renderHTML('Certificate Management', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.get('/staff/certificates/approve/:id', (req, res) => {
+    db.run(`UPDATE certificates SET status = 'Approved' WHERE id = ?`, [req.params.id], () => {
+        res.redirect('/staff/certificates');
+    });
+});
+
+app.get('/staff/certificates/print/:id', (req, res) => {
+    db.get(`SELECT c.*, r.first_name, r.last_name, r.address, r.purok FROM certificates c JOIN residents r ON c.resident_id = r.resident_id WHERE c.id = ?`, [req.params.id], async (err, cert) => {
+        db.all(`SELECT key, value FROM settings`, async (err2, rows) => {
+            const settings = {};
+            rows.forEach(r => settings[r.key] = r.value);
+            const qrDataUrl = await QRCode.toDataURL(`https://${req.get('host')}/verify/${cert.cert_number}`);
+
+            const html = `<!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>${cert.cert_type} - ${settings.brgy_name}</title>
+                <style>
+                    body { font-family: 'Times New Roman', serif; padding: 40px; line-height: 1.6; }
+                    .header { text-align: center; margin-bottom: 30px; }
+                    .header h2, .header h3, .header p { margin: 2px; }
+                    .content { margin: 40px 0; font-size: 1.1rem; text-align: justify; }
+                    .footer { display: flex; justify-content: space-between; margin-top: 80px; align-items: center; }
+                    .sig { text-align: center; border-top: 1px solid #000; width: 250px; padding-top: 5px; }
+                    @media print { .no-print { display: none; } }
+                </style>
+            </head>
+            <body>
+                <div class="no-print" style="margin-bottom:20px;"><button onclick="window.print()" style="padding:10px 20px; background:#1e3a8a; color:#fff; border:none; border-radius:5px; cursor:pointer;">Print Certificate</button></div>
+                <div class="header">
+                    <h3>Republic of the Philippines</h3>
+                    <h3>${settings.municipality}, ${settings.province}</h3>
+                    <h2>${settings.brgy_name}</h2>
+                    <h1 style="margin-top:30px; letter-spacing:2px; color:#1e3a8a;">${cert.cert_type.toUpperCase()}</h1>
+                </div>
+                <div class="content">
+                    <p><strong>TO WHOM IT MAY CONCERN:</strong></p>
+                    <p>This is to certify that <strong>${cert.first_name} ${cert.last_name}</strong>, of legal age, is a permanent resident of ${cert.purok}, ${cert.address}, ${settings.brgy_name}, ${settings.municipality}.</p>
+                    <p>This certification is issued upon the request of the above-named person for <strong>${cert.purpose}</strong> and for whatever legal purpose it may serve.</p>
+                    <p>Given this ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} at ${settings.brgy_name}, ${settings.municipality}.</p>
+                </div>
+                <div class="footer">
+                    <div><img src="${qrDataUrl}" style="width:90px; height:90px;"><br><small>Cert #: ${cert.cert_number}</small></div>
+                    <div class="sig">
+                        <strong>${settings.captain}</strong><br>
+                        Punong Barangay
+                    </div>
+                </div>
+            </body>
+            </html>`;
+            res.send(html);
+        });
+    });
+});
+
+// Appointment Management
+app.get('/staff/appointments', (req, res) => {
+    db.all(`SELECT a.*, r.first_name, r.last_name FROM appointments a JOIN residents r ON a.resident_id = r.resident_id`, (err, appts) => {
+        const body = `
+        <div class="card">
+            <div class="card-header"><h2>Appointments Management</h2></div>
+            <table>
+                <thead><tr><th>Resident</th><th>Service</th><th>Date & Time</th><th>Purpose</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
+                    ${appts.map(a => `
+                        <tr>
+                            <td>${a.first_name}${a.last_name}</td>
+                            <td>${a.service}</td>
+                            <td>${a.appointment_date}${a.appointment_time}</td>
+                            <td>${a.purpose}</td>
+                            <td><span class="badge badge-warning">${a.status}</span></td>
+                            <td><a href="/staff/appointments/approve/${a.id}" class="btn btn-sm btn-success"><i class="fa-solid fa-check"></i></a></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+        `;
+        res.send(renderHTML('Appointments', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.get('/staff/appointments/approve/:id', (req, res) => {
+    db.run(`UPDATE appointments SET status = 'Approved' WHERE id = ?`, [req.params.id], () => { res.redirect('/staff/appointments'); });
+});
+
+// Blotter Management
+app.get('/staff/blotter', (req, res) => {
+    db.all(`SELECT * FROM blotter`, (err, cases) => {
+        const body = `
+        <div class="card">
+            <div class="card-header">
+                <h2>Barangay Blotter Records</h2>
+                <a href="#blotterModal" onclick="document.getElementById('blotterModal').style.display='flex'" class="btn"><i class="fa-solid fa-plus"></i> File Case</a>
+            </div>
+            <table>
+                <thead><tr><th>Case #</th><th>Complainant</th><th>Respondent</th><th>Type</th><th>Status</th></tr></thead>
+                <tbody>
+                    ${cases.map(b => `<tr><td><strong>${b.case_number}</strong></td><td>${b.complainant}</td><td>${b.respondent}</td><td>${b.incident_type}</td><td><span class="badge badge-danger">${b.status}</span></td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div id="blotterModal" class="modal">
+            <div class="modal-content">
+                <span class="close-modal" onclick="document.getElementById('blotterModal').style.display='none'">&times;</span>
+                <h2>File Blotter Case</h2>
+                <form action="/staff/blotter/add" method="POST" style="margin-top:15px;">
+                    <div class="form-group"><label>Case Number</label><input type="text" name="case_number" value="CASE-${Math.floor(1000+Math.random()*9000)}" class="form-control" required></div>
+                    <div class="form-group"><label>Complainant</label><input type="text" name="complainant" class="form-control" required></div>
+                    <div class="form-group"><label>Respondent</label><input type="text" name="respondent" class="form-control" required></div>
+                    <div class="form-group"><label>Incident Type</label><input type="text" name="incident_type" class="form-control" required></div>
+                    <div class="form-group"><label>Description</label><textarea name="description" class="form-control" rows="3" required></textarea></div>
+                    <button type="submit" class="btn" style="margin-top:15px;">Save Case</button>
+                </form>
+            </div>
+        </div>
+        `;
+        res.send(renderHTML('Blotter Management', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.post('/staff/blotter/add', (req, res) => {
+    const { case_number, complainant, respondent, incident_type, description } = req.body;
+    db.run(`INSERT INTO blotter (case_number, complainant, respondent, incident_type, description) VALUES (?, ?, ?, ?, ?)`,
+        [case_number, complainant, respondent, incident_type, description], () => { res.redirect('/staff/blotter'); });
+});
+
+// Assistance Management
+app.get('/staff/assistance', (req, res) => {
+    db.all(`SELECT a.*, r.first_name, r.last_name FROM assistance a JOIN residents r ON a.resident_id = r.resident_id`, (err, items) => {
+        const body = `
+        <div class="card">
+            <div class="card-header"><h2>Assistance Requests</h2></div>
+            <table>
+                <thead><tr><th>Resident</th><th>Type</th><th>Details</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
+                    ${items.map(i => `<tr><td>${i.first_name}${i.last_name}</td><td>${i.assistance_type}</td><td>${i.details}</td><td><span class="badge badge-warning">${i.status}</span></td><td><a href="/staff/assistance/approve/${i.id}" class="btn btn-sm btn-success"><i class="fa-solid fa-check"></i></a></td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        `;
+        res.send(renderHTML('Assistance Management', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.get('/staff/assistance/approve/:id', (req, res) => {
+    db.run(`UPDATE assistance SET status = 'Approved' WHERE id = ?`, [req.params.id], () => { res.redirect('/staff/assistance'); });
+});
+
+// Business Management
+app.get('/staff/businesses', (req, res) => {
+    db.all(`SELECT * FROM businesses`, (err, businesses) => {
+        const body = `
+        <div class="card">
+            <div class="card-header">
+                <h2>Barangay Businesses</h2>
+                <a href="#bizModal" onclick="document.getElementById('bizModal').style.display='flex'" class="btn"><i class="fa-solid fa-store"></i> Register Business</a>
+            </div>
+            <table>
+                <thead><tr><th>Business Name</th><th>Owner</th><th>Type</th><th>Permit #</th><th>Status</th></tr></thead>
+                <tbody>
+                    ${businesses.map(b => `<tr><td><strong>${b.business_name}</strong></td><td>${b.owner_name}</td><td>${b.business_type}</td><td>${b.permit_number}</td><td><span class="badge badge-success">${b.status}</span></td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div id="bizModal" class="modal">
+            <div class="modal-content">
+                <span class="close-modal" onclick="document.getElementById('bizModal').style.display='none'">&times;</span>
+                <h2>Register Business</h2>
+                <form action="/staff/businesses/add" method="POST" style="margin-top:15px;">
+                    <div class="form-group"><label>Business Name</label><input type="text" name="business_name" class="form-control" required></div>
+                    <div class="form-group"><label>Owner Name</label><input type="text" name="owner_name" class="form-control" required></div>
+                    <div class="form-group"><label>Business Type</label><input type="text" name="business_type" class="form-control" required></div>
+                    <div class="form-group"><label>Permit Number</label><input type="text" name="permit_number" value="BP-${Math.floor(1000+Math.random()*9000)}" class="form-control" required></div>
+                    <button type="submit" class="btn" style="margin-top:15px;">Save Business</button>
+                </form>
+            </div>
+        </div>
+        `;
+        res.send(renderHTML('Business Management', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.post('/staff/businesses/add', (req, res) => {
+    const { business_name, owner_name, business_type, permit_number } = req.body;
+    db.run(`INSERT INTO businesses (business_name, owner_name, business_type, permit_number) VALUES (?, ?, ?, ?)`,
+        [business_name, owner_name, business_type, permit_number], () => { res.redirect('/staff/businesses'); });
+});
+
+// Announcement System
+app.get('/staff/announcements', (req, res) => {
+    db.all(`SELECT * FROM announcements ORDER BY id DESC`, (err, items) => {
+        const body = `
+        <div class="card">
+            <div class="card-header">
+                <h2>Barangay Announcements</h2>
+                <form action="/staff/announcements/add" method="POST" style="display:flex; gap:10px; width:100%; margin-top:15px;">
+                    <input type="text" name="title" placeholder="Announcement Title" class="form-control" required style="flex:1;">
+                    <input type="text" name="category" placeholder="Category" class="form-control" style="width:150px;" required>
+                    <input type="text" name="content" placeholder="Content details..." class="form-control" required style="flex:2;">
+                    <button type="submit" class="btn">Post</button>
+                </form>
+            </div>
+            <table>
+                <thead><tr><th>Title</th><th>Category</th><th>Content</th><th>Date</th></tr></thead>
+                <tbody>
+                    ${items.map(a => `<tr><td><strong>${a.title}</strong></td><td><span class="badge badge-info">${a.category}</span></td><td>${a.content}</td><td>${a.date_posted}</td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        `;
+        res.send(renderHTML('Announcements', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.post('/staff/announcements/add', (req, res) => {
+    const { title, category, content } = req.body;
+    db.run(`INSERT INTO announcements (title, category, content) VALUES (?, ?, ?)`, [title, category, content], () => {
+        db.all(`SELECT resident_id FROM residents`, (err, residents) => {
+            residents.forEach(r => sendNotification(r.resident_id, `New Announcement: ${title}`));
+            res.redirect('/staff/announcements');
+        });
+    });
+});
+
+// Reports
+app.get('/staff/reports', (req, res) => {
+    db.all(`SELECT * FROM residents WHERE resident_status = 'Active'`, (err, residents) => {
+        const body = `
+        <div class="card">
+            <div class="card-header">
+                <h2>Barangay Comprehensive Reports</h2>
+                <button onclick="window.print()" class="btn"><i class="fa-solid fa-print"></i> Print Report</button>
+            </div>
+            <p>Total Active Residents in Database: <strong>${residents.length}</strong></p>
+            <p>Male: <strong>${residents.filter(r=>r.gender==='Male').length}</strong> | Female: <strong>${residents.filter(r=>r.gender==='Female').length}</strong></p>
+            <p>Senior Citizens: <strong>${residents.filter(r=>calculateAge(r.dob)>=60).length}</strong> | Voters: <strong>${residents.filter(r=>r.voter_status==='Yes').length}</strong></p>
+        </div>
+        `;
+        res.send(renderHTML('Reports', body, req.session.userRole, req.session.userName));
+    });
+});
+
+// Archive System
+app.get('/staff/archives', (req, res) => {
+    db.all(`SELECT * FROM residents WHERE resident_status = 'Archived'`, (err, residents) => {
+        const body = `
+        <div class="card">
+            <div class="card-header"><h2>Archived Residents</h2></div>
+            <table>
+                <thead><tr><th>ID</th><th>Name</th><th>Action</th></tr></thead>
+                <tbody>
+                    ${residents.map(r => `<tr><td>${r.resident_id}</td><td>${r.first_name}${r.last_name}</td><td><a href="/staff/residents/restore/${r.id}" class="btn btn-sm btn-success">Restore</a></td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        `;
+        res.send(renderHTML('Archives', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.get('/staff/residents/restore/:id', (req, res) => {
+    db.run(`UPDATE residents SET resident_status = 'Active' WHERE id = ?`, [req.params.id], () => { res.redirect('/staff/archives'); });
+});
+
+// Staff Accounts (Admin only)
+app.get('/staff/accounts', (req, res) => {
+    if (req.session.userRole !== 'Administrator') return res.redirect('/staff/dashboard');
+    db.all(`SELECT * FROM staff`, (err, staffList) => {
+        const body = `
+        <div class="card">
+            <div class="card-header">
+                <h2>Staff Accounts Management</h2>
+                <a href="#staffModal" onclick="document.getElementById('staffModal').style.display='flex'" class="btn"><i class="fa-solid fa-user-shield"></i> Add Staff</a>
+            </div>
+            <table>
+                <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th></tr></thead>
+                <tbody>
+                    ${staffList.map(s => `<tr><td>${s.full_name}</td><td>${s.username}</td><td><span class="badge badge-info">${s.role}</span></td><td>${s.status}</td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div id="staffModal" class="modal">
+            <div class="modal-content">
+                <span class="close-modal" onclick="document.getElementById('staffModal').style.display='none'">&times;</span>
+                <h2>Add Staff Account</h2>
+                <form action="/staff/accounts/add" method="POST" style="margin-top:15px;">
+                    <div class="form-group"><label>Full Name</label><input type="text" name="full_name" class="form-control" required></div>
+                    <div class="form-group"><label>Username</label><input type="text" name="username" class="form-control" required></div>
+                    <div class="form-group"><label>Password</label><input type="password" name="password" class="form-control" required></div>
+                    <div class="form-group"><label>Role</label><select name="role" class="form-control"><option value="Staff">Staff</option><option value="Barangay Secretary">Barangay Secretary</option><option value="Administrator">Administrator</option></select></div>
+                    <button type="submit" class="btn" style="margin-top:15px;">Create Staff</button>
+                </form>
+            </div>
+        </div>
+        `;
+        res.send(renderHTML('Staff Accounts', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.post('/staff/accounts/add', async (req, res) => {
+    if (req.session.userRole !== 'Administrator') return res.redirect('/staff/dashboard');
+    const { full_name, username, password, role } = req.body;
+    const hashed = await bcrypt.hash(password, 10);
+    db.run(`INSERT INTO staff (full_name, username, password, role) VALUES (?, ?, ?, ?)`, [full_name, username, hashed, role], () => {
+        res.redirect('/staff/accounts');
+    });
+});
+
+// Barangay Settings (Admin only)
+app.get('/staff/settings', (req, res) => {
+    if (req.session.userRole !== 'Administrator') return res.redirect('/staff/dashboard');
+    db.all(`SELECT key, value FROM settings`, (err, rows) => {
+        const settings = {};
+        rows.forEach(r => settings[r.key] = r.value);
+
+        const body = `
+        <div class="card">
+            <div class="card-header"><h2>Barangay Settings & Customization</h2></div>
+            <form action="/staff/settings" method="POST" enctype="multipart/form-data">
+                <div class="form-grid">
+                    <div class="form-group"><label>Barangay Name</label><input type="text" name="brgy_name" value="${settings.brgy_name || ''}" class="form-control" required></div>
+                    <div class="form-group"><label>Municipality / City</label><input type="text" name="municipality" value="${settings.municipality || ''}" class="form-control" required></div>
+                    <div class="form-group"><label>Province</label><input type="text" name="province" value="${settings.province || ''}" class="form-control" required></div>
+                    <div class="form-group"><label>Address</label><input type="text" name="brgy_address" value="${settings.brgy_address || ''}" class="form-control" required></div>
+                    <div class="form-group"><label>Barangay Captain</label><input type="text" name="captain" value="${settings.captain || ''}" class="form-control" required></div>
+                    <div class="form-group"><label>Contact Number</label><input type="text" name="contact_number" value="${settings.contact_number || ''}" class="form-control" required></div>
+                    <div class="form-group"><label>Email</label><input type="email" name="email" value="${settings.email || ''}" class="form-control" required></div>
+                    <div class="form-group"><label>Barangay Logo</label><input type="file" name="logo" class="form-control" accept="image/*"></div>
+                </div>
+                <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button>
+            </form>
+        </div>
+        `;
+        res.send(renderHTML('Barangay Settings', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.post('/staff/settings', upload.single('logo'), (req, res) => {
+    if (req.session.userRole !== 'Administrator') return res.redirect('/staff/dashboard');
+    const fields = req.body;
+    if (req.file) {
+        fields.logo = '/uploads/' + req.file.filename;
+        // Also save as static logo.png for sidebar if needed
+        fs.copyFileSync(req.file.path, path.join(uploadDir, 'logo.png'));
+    }
+    Object.keys(fields).forEach(key => {
+        db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, [key, fields[key]]);
+    });
+    res.redirect('/staff/settings');
+});
+
+// Activity Logs
+app.get('/staff/logs', (req, res) => {
+    if (req.session.userRole !== 'Administrator') return res.redirect('/staff/dashboard');
+    db.all(`SELECT * FROM activity_logs ORDER BY id DESC`, (err, logs) => {
+        const body = `
+        <div class="card">
+            <div class="card-header"><h2>System Activity Logs</h2></div>
+            <table>
+                <thead><tr><th>User</th><th>Action</th><th>Details</th><th>Date & Time</th></tr></thead>
+                <tbody>
+                    ${logs.map(l => `<tr><td>${l.user_name}</td><td>${l.action}</td><td>${l.details}</td><td>${l.date_time}</td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        `;
+        res.send(renderHTML('Activity Logs', body, req.session.userRole, req.session.userName));
+    });
+});
+
+// ================= RESIDENT PORTAL ROUTES =================
+
+app.use('/resident', (req, res, next) => {
+    if (req.session.userRole === 'Resident') {
+        next();
+    } else {
+        res.redirect('/resident-login');
+    }
+});
+
+app.get('/resident/dashboard', (req, res) => {
+    db.get(`SELECT * FROM residents WHERE resident_id = ?`, [req.session.residentId], (err, r) => {
+        db.all(`SELECT * FROM certificates WHERE resident_id = ?`, [req.session.residentId], (err2, certs) => {
+            db.all(`SELECT * FROM appointments WHERE resident_id = ?`, [req.session.residentId], (err3, appts) => {
+                db.all(`SELECT * FROM notifications WHERE resident_id = ? ORDER BY id DESC`, [req.session.residentId], (err4, notifs) => {
+                    const body = `
+                    <div class="card">
+                        <h2>Welcome, ${r.first_name} ${r.last_name}!</h2>
+                        <p>Resident ID: <strong>${r.resident_id}</strong> | Purok: <strong>${r.purok}</strong></p>
+                    </div>
+
+                    <div class="card-grid">
+                        <div class="stat-card">
+                            <div class="stat-info"><h3>${certs.filter(c=>c.status==='Pending').length}</h3><p>Pending Requests</p></div>
+                        </div>
+                        <div class="stat-card green">
+                            <div class="stat-info"><h3>${certs.filter(c=>c.status==='Approved').length}</h3><p>Approved Certificates</p></div>
+                        </div>
+                        <div class="stat-card yellow">
+                            <div class="stat-info"><h3>${appts.length}</h3><p>Appointments</p></div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header"><h2>My Notifications</h2></div>
+                        <ul>
+                            ${notifs.map(n => `<li style="padding:8px 0; border-bottom:1px solid #cbd5e1;">${n.message} <small style="color:#64748b; float:right;">${n.date_created}</small></li>`).join('')}
+                        </ul>
+                    </div>
+                    `;
+                    res.send(renderHTML('Resident Dashboard', body, req.session.userRole, req.session.userName));
+                });
+            });
+        });
+    });
+});
+
+app.get('/resident/profile', (req, res) => {
+    db.get(`SELECT * FROM residents WHERE resident_id = ?`, [req.session.residentId], async (err, r) => {
+        const qrDataUrl = await QRCode.toDataURL(JSON.stringify({ resident_id: r.resident_id, name: `${r.first_name} ${r.last_name}`, barangay: 'San Jose' }));
+
+        const body = `
+        <div class="card" style="text-align:center;">
+            <div class="card-header"><h2>My Digital Resident ID</h2></div>
+            <div style="display:inline-block; margin:20px auto;">
+                <div class="id-card-ui" style="margin:0 auto;">
+                    <div class="id-header">
+                        <img src="${r.photo || 'https://via.placeholder.com/35'}" alt="Photo">
+                        <div>
+                            <h4>Barangay San Jose</h4>
+                            <p>Digital Resident ID</p>
+                        </div>
+                    </div>
+                    <div class="id-body">
+                        <img src="${r.photo || 'https://via.placeholder.com/75'}" class="res-photo" alt="Photo">
+                        <div class="id-details" style="text-align:left;">
+                            <p><strong>${r.resident_id}</strong></p>
+                            <p>${r.first_name} ${r.last_name}</p>
+                            <p>${r.purok}, ${r.address}</p>
+                            <p>DOB: ${r.dob}</p>
+                        </div>
+                    </div>
+                    <div class="id-footer">
+                        <p>Valid 2026</p>
+                        <img src="${qrDataUrl}" style="width:35px; height:35px;">
+                    </div>
+                </div>
+            </div>
+        </div>
+        `;
+        res.send(renderHTML('My Digital ID', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.get('/resident/certificates', (req, res) => {
+    db.all(`SELECT * FROM certificates WHERE resident_id = ?`, [req.session.residentId], (err, certs) => {
+        const body = `
+        <div class="card">
+            <div class="card-header">
+                <h2>My Certificate Requests</h2>
+                <a href="#certModal" onclick="document.getElementById('certModal').style.display='flex'" class="btn"><i class="fa-solid fa-file-circle-plus"></i> Request Certificate</a>
+            </div>
+            <table>
+                <thead><tr><th>Cert #</th><th>Type</th><th>Purpose</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
+                    ${certs.map(c => `<tr><td>${c.cert_number}</td><td>${c.cert_type}</td><td>${c.purpose}</td><td><span class="badge badge-info">${c.status}</span></td><td>${c.status==='Approved' ? `<a href="/staff/certificates/print/${c.id}" target="_blank" class="btn btn-sm"><i class="fa-solid fa-print"></i> Print</a>` : ''}</td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div id="certModal" class="modal">
+            <div class="modal-content">
+                <span class="close-modal" onclick="document.getElementById('certModal').style.display='none'">&times;</span>
+                <h2>Request Barangay Certificate</h2>
+                <form action="/resident/certificates/request" method="POST" style="margin-top:15px;">
+                    <div class="form-group"><label>Certificate Type</label><select name="cert_type" class="form-control"><option value="Barangay Clearance">Barangay Clearance</option><option value="Certificate of Residency">Certificate of Residency</option><option value="Certificate of Indigency">Certificate of Indigency</option></select></div>
+                    <div class="form-group"><label>Purpose</label><input type="text" name="purpose" class="form-control" required></div>
+                    <button type="submit" class="btn" style="margin-top:15px;">Submit Request</button>
+                </form>
+            </div>
+        </div>
+        `;
+        res.send(renderHTML('Certificates', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.post('/resident/certificates/request', (req, res) => {
+    const { cert_type, purpose } = req.body;
+    generateCertNumber((certNumber) => {
+        db.run(`INSERT INTO certificates (cert_number, resident_id, cert_type, purpose, date_issued) VALUES (?, ?, ?, ?, ?)`,
+            [certNumber, req.session.residentId, cert_type, purpose, new Date().toISOString().split('T')[0]], () => {
+                sendNotification(req.session.residentId, `Certificate request for ${cert_type} submitted successfully.`);
+                res.redirect('/resident/certificates');
+            }
+        );
+    });
+});
+
+app.get('/resident/appointments', (req, res) => {
+    db.all(`SELECT * FROM appointments WHERE resident_id = ?`, [req.session.residentId], (err, appts) => {
+        const body = `
+        <div class="card">
+            <div class="card-header">
+                <h2>My Appointments</h2>
+                <a href="#apptModal" onclick="document.getElementById('apptModal').style.display='flex'" class="btn"><i class="fa-solid fa-calendar-plus"></i> Book Appointment</a>
+            </div>
+            <table>
+                <thead><tr><th>Service</th><th>Date & Time</th><th>Purpose</th><th>Status</th></tr></thead>
+                <tbody>
+                    ${appts.map(a => `<tr><td>${a.service}</td><td>${a.appointment_date} ${a.appointment_time}</td><td>${a.purpose}</td><td><span class="badge badge-warning">${a.status}</span></td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div id="apptModal" class="modal">
+            <div class="modal-content">
+                <span class="close-modal" onclick="document.getElementById('apptModal').style.display='none'">&times;</span>
+                <h2>Book Appointment</h2>
+                <form action="/resident/appointments/book" method="POST" style="margin-top:15px;">
+                    <div class="form-group"><label>Service</label><input type="text" name="service" class="form-control" required></div>
+                    <div class="form-group"><label>Date</label><input type="date" name="appointment_date" class="form-control" required></div>
+                    <div class="form-group"><label>Time</label><input type="time" name="appointment_time" class="form-control" required></div>
+                    <div class="form-group"><label>Purpose</label><input type="text" name="purpose" class="form-control" required></div>
+                    <button type="submit" class="btn" style="margin-top:15px;">Book Appointment</button>
+                </form>
+            </div>
+        </div>
+        `;
+        res.send(renderHTML('Appointments', body, req.session.userRole, req.session.userName));
+    });
+});
+
+app.post('/resident/appointments/book', (req, res) => {
+    const { service, appointment_date, appointment_time, purpose } = req.body;
+    db.run(`INSERT INTO appointments (resident_id, service, appointment_date, appointment_time, purpose) VALUES (?, ?, ?, ?, ?)`,
+        [req.session.residentId, service, appointment_date, appointment_time, purpose], () => {
+            res.redirect('/resident/appointments');
+        }
+    );
+});
+
+app.get('/resident/complaints', (req, res) => {
+    const body = `
+    <div class="card">
+        <div class="card-header"><h2>File a Complaint / Blotter</h2></div>
+        <form action="/resident/complaints" method="POST">
+            <div class="form-group"><label>Respondent / Against Whom</label><input type="text" name="respondent" class="form-control" required></div>
+            <div class="form-group"><label>Incident Type</label><input type="text" name="incident_type" class="form-control" required></div>
+            <div class="form-group"><label>Description</label><textarea name="description" class="form-control" rows="4" required></textarea></div>
+            <button type="submit" class="btn" style="margin-top:15px;">Submit Complaint</button>
+        </form>
+    </div>
+    `;
+    res.send(renderHTML('Complaints', body, req.session.userRole, req.session.userName));
+});
+
+app.post('/resident/complaints', (req, res) => {
+    const { respondent, incident_type, description } = req.body;
+    db.get(`SELECT first_name, last_name FROM residents WHERE resident_id = ?`, [req.session.residentId], (err, r) => {
+        const caseNo = 'CASE-' + Math.floor(1000 + Math.random() * 9000);
+        db.run(`INSERT INTO blotter (case_number, complainant, respondent, incident_type, description) VALUES (?, ?, ?, ?, ?)`,
+            [caseNo, `${r.first_name} ${r.last_name}`, respondent, incident_type, description], () => {
+                res.redirect('/resident/dashboard');
+            }
+        );
+    });
+});
+
+app.get('/resident/assistance', (req, res) => {
+    const body = `
+    <div class="card">
+        <div class="card-header"><h2>Request Financial/Medical Assistance</h2></div>
+        <form action="/resident/assistance" method="POST">
+            <div class="form-group"><label>Assistance Type</label><select name="assistance_type" class="form-control"><option value="Financial">Financial Assistance</option><option value="Medical">Medical Assistance</option><option value="Educational">Educational Assistance</option><option value="Food">Food Assistance</option></select></div>
+            <div class="form-group"><label>Details / Reason</label><textarea name="details" class="form-control" rows="4" required></textarea></div>
+            <button type="submit" class="btn" style="margin-top:15px;">Submit Request</button>
+        </form>
+    </div>
+    `;
+    res.send(renderHTML('Assistance', body, req.session.userRole, req.session.userName));
+});
+
+app.post('/resident/assistance', (req, res) => {
+    const { assistance_type, details } = req.body;
+    db.run(`INSERT INTO assistance (resident_id, assistance_type, details) VALUES (?, ?, ?)`,
+        [req.session.residentId, assistance_type, details], () => {
+            res.redirect('/resident/dashboard');
+        }
+    );
+});
+
+app.get('/resident/announcements', (req, res) => {
+    db.all(`SELECT * FROM announcements ORDER BY id DESC`, (err, items) => {
+        const body = `
+        <div class="card">
+            <div class="card-header"><h2>Barangay Announcements & Events</h2></div>
+            ${items.map(a => `<div style="padding:15px 0; border-bottom:1px solid #cbd5e1;"><h3>${a.title} <span class="badge badge-info">${a.category}</span></h3><p style="margin:5px 0;">${a.content}</p><small style="color:#64748b;">Posted on: ${a.date_posted}</small></div>`).join('')}
+        </div>
+        `;
+        res.send(renderHTML('Announcements', body, req.session.userRole, req.session.userName));
+    });
+});
+
+// Root redirect
+app.get('/', (req, res) => {
+    res.redirect('/login');
+});
 
 // Start Server
 app.listen(PORT, () => {
