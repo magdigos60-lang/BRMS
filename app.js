@@ -408,6 +408,59 @@ app.post('/api/residents/:id/restore', authenticateToken, requireRole(['super_ad
     }
 });
 
+// RESIDENT SELF-UPDATE & PROFILE APIS
+app.put('/api/resident/profile', authenticateToken, async (req, res) => {
+    try {
+        const { contactNumber, email, address, civilStatus, occupation } = req.body;
+        const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+        if (!resData) return res.status(404).json({ error: 'Resident record not found.' });
+
+        const { data, error } = await supabase.from('residents').update({
+            contact_number: contactNumber,
+            email,
+            address,
+            civil_status: civilStatus,
+            occupation,
+            updated_at: new Date()
+        }).eq('id', resData.id).select();
+
+        if (error) throw error;
+        await logActivity(req.user.id, req.user.fullName, 'UPDATE_PROFILE', 'Updated resident profile information', req.ip);
+        res.json({ success: true, message: 'Profile updated successfully!', resident: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/resident/edit-request', authenticateToken, async (req, res) => {
+    try {
+        const { details } = req.body;
+        const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+        
+        await logActivity(req.user.id, req.user.fullName, 'PROFILE_EDIT_REQUEST', `Request details: ${details}`, req.ip);
+        res.json({ success: true, message: 'Profile update request submitted to Barangay Staff for verification.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/resident/security', authenticateToken, async (req, res) => {
+    try {
+        const { oldPassword, newPassword } = req.body;
+        const { data: user } = await supabase.from('users').select('*').eq('id', req.user.id).single();
+        
+        const validPass = await bcrypt.compare(oldPassword, user.password_hash);
+        if (!validPass) return res.status(400).json({ error: 'Incorrect current password.' });
+
+        const hashed = await bcrypt.hash(newPassword, 10);
+        await supabase.from('users').update({ password_hash: hashed }).eq('id', req.user.id);
+        
+        res.json({ success: true, message: 'Account password updated successfully!' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // 7. PUROKS & HOUSEHOLDS
 app.get('/api/puroks', async (req, res) => {
     try {
@@ -526,6 +579,18 @@ app.post('/api/certificates/approve', authenticateToken, requireRole(['super_adm
     }
 });
 
+// RESIDENT DOCUMENTS API
+app.get('/api/resident/documents', authenticateToken, async (req, res) => {
+    try {
+        const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+        if (!resData) return res.json([]);
+        const { data } = await supabase.from('certificates').select('*').eq('resident_id', resData.id);
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // 9. QR CLAIM SCANNING & RELEASE
 app.get('/api/qr/claim-info/:residentId', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), async (req, res) => {
     try {
@@ -562,7 +627,7 @@ app.post('/api/qr/release-claim', authenticateToken, requireRole(['super_admin',
     }
 });
 
-// 10. ANNOUNCEMENTS
+// 10. ANNOUNCEMENTS & FEEDBACK & ASSISTANCE
 app.get('/api/announcements', async (req, res) => {
     try {
         const { data, error } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
@@ -589,7 +654,27 @@ app.post('/api/announcements', authenticateToken, requireRole(['super_admin', 'c
     }
 });
 
-// 11. BLOTTER CASES
+app.post('/api/feedback', authenticateToken, async (req, res) => {
+    try {
+        const { rating, comments } = req.body;
+        await logActivity(req.user.id, req.user.fullName, 'SUBMIT_FEEDBACK', `Rating: ${rating}/5 - ${comments}`, req.ip);
+        res.json({ success: true, message: 'Thank you! Your feedback has been recorded.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/assistance', authenticateToken, async (req, res) => {
+    try {
+        const { assistanceType, reason } = req.body;
+        await logActivity(req.user.id, req.user.fullName, 'REQUEST_ASSISTANCE', `Type: ${assistanceType}`, req.ip);
+        res.json({ success: true, message: 'Assistance request submitted successfully.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 11. BLOTTER CASES & COMPLAINTS
 app.get('/api/blotter', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), async (req, res) => {
     try {
         const { data, error } = await supabase.from('blotter_cases').select('*').order('created_at', { ascending: false });
@@ -600,13 +685,13 @@ app.get('/api/blotter', authenticateToken, requireRole(['super_admin', 'captain'
     }
 });
 
-app.post('/api/blotter', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), async (req, res) => {
+app.post('/api/blotter', authenticateToken, async (req, res) => {
     try {
         const { complainantName, respondentName, witnessName, incidentDate, incidentTime, location, description } = req.body;
         const caseNum = 'BLOT-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
         const { data, error } = await supabase.from('blotter_cases').insert([{
             case_number: caseNum,
-            complainant_name: complainantName,
+            complainant_name: complainantName || req.user.fullName,
             respondent_name: respondentName,
             witness_name: witnessName,
             incident_date: incidentDate,
@@ -618,13 +703,13 @@ app.post('/api/blotter', authenticateToken, requireRole(['super_admin', 'captain
 
         if (error) throw error;
         await logActivity(req.user.id, req.user.fullName, 'CREATE_BLOTTER', `Case ${caseNum} logged`, req.ip);
-        res.json({ success: true, message: 'Blotter case recorded successfully.', data: data[0] });
+        res.json({ success: true, message: 'Complaint/Report submitted successfully.', data: data[0] });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// 12. APPOINTMENTS & ASSISTANCE
+// 12. APPOINTMENTS
 app.get('/api/appointments', authenticateToken, async (req, res) => {
     try {
         let query = supabase.from('appointments').select('*, residents(first_name, last_name, contact_number)');
@@ -765,6 +850,12 @@ app.get('*', (req, res) => {
             background-position: center;
         }
         
+        /* NATIONAL ID STYLE FLIP CARD STYLES */
+        .perspective { perspective: 1000px; }
+        .transform-style-3d { transform-style: preserve-3d; transition: transform 0.6s; }
+        .backface-hidden { backface-visibility: hidden; }
+        .rotate-y-180 { transform: rotateY(180deg); }
+
         /* PRINT STYLES - 8 ID CARDS PER LETTER-SIZE PAGE */
         @media print {
             body * { visibility: hidden; }
@@ -809,6 +900,8 @@ app.get('*', (req, res) => {
             settings: {},
             currentRoute: 'login',
             activeTab: 'dashboard',
+            residentTab: 'dashboard',
+            isCardFlipped: false,
             puroks: []
         };
 
@@ -940,7 +1033,7 @@ app.get('*', (req, res) => {
                             <div class="my-8 hidden md:block">
                                 <h3 class="text-lg font-bold">Resident Services & Information System</h3>
                                 <p class="text-xs text-emerald-100 mt-2 leading-relaxed">
-                                    Access online barangay clearances, digital ID, schedule appointments, and submit community concerns efficiently.
+                                    Access online barangay clearances, digital National ID-style card, schedule appointments, and submit community concerns efficiently.
                                 </p>
                             </div>
                             <div class="text-xs text-emerald-200 text-center md:text-left">
@@ -1978,71 +2071,600 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           9. RESIDENT PORTAL RENDER
+           9. COMPLETE RESIDENT PORTAL (WITH ALL HINILING NA FEATURES & NATIONAL ID)
            ========================================================================== */
         function renderResidentPortal() {
             const app = document.getElementById('app');
             const res = state.resident || {};
             const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
+            const logo = state.settings.barangay_logo || '';
 
             app.innerHTML = \`
                 <div class="min-h-screen bg-slate-100 flex flex-col">
-                    <header class="bg-gradient-to-r from-emerald-700 to-blue-700 text-white p-4 shadow-md flex justify-between items-center">
-                        <div>
-                            <h1 class="font-bold text-lg">\${brgyName}</h1>
-                            <p class="text-xs text-emerald-100">Resident Digital Portal</p>
+                    <!-- Top Navigation Bar -->
+                    <header class="bg-gradient-to-r from-emerald-800 to-blue-800 text-white shadow-lg sticky top-0 z-40">
+                        <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+                            <div class="flex items-center gap-3">
+                                \${logo ? \`<img src="\${logo}" class="w-10 h-10 rounded-full bg-white p-0.5">\` : \`<i class="fa-solid fa-building-columns text-emerald-300 fa-xl"></i>\`}
+                                <div>
+                                    <h1 class="font-extrabold text-sm md:text-base leading-tight tracking-wide">\${brgyName.toUpperCase()}</h1>
+                                    <p class="text-[10px] text-emerald-200">Resident Portal & Digital Services</p>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-4 text-xs font-semibold">
+                                <button type="button" onclick="setResidentNav('notifications')" class="relative p-2 hover:bg-white/10 rounded-full transition">
+                                    <i class="fa-solid fa-bell fa-lg"></i>
+                                    <span class="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full"></span>
+                                </button>
+                                <div class="hidden md:flex items-center gap-2 border-l border-white/20 pl-4">
+                                    <div class="w-7 h-7 rounded-full bg-emerald-500 text-white font-bold flex items-center justify-center text-xs">
+                                        \${res.first_name ? res.first_name.charAt(0) : 'U'}
+                                    </div>
+                                    <span class="font-medium">\${res.first_name || ''} \${res.last_name || ''}</span>
+                                </div>
+                                <button type="button" onclick="logout()" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition shadow">
+                                    Logout
+                                </button>
+                            </div>
                         </div>
-                        <button type="button" onclick="logout()" class="text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg font-bold">Logout</button>
                     </header>
 
-                    <main class="flex-1 max-w-4xl w-full mx-auto p-4 space-y-6">
-                        <!-- Resident Digital ID Card -->
-                        <div class="bg-gradient-to-br from-emerald-600 to-blue-600 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
-                            <div class="flex justify-between items-start mb-4">
-                                <div>
-                                    <span class="text-[10px] bg-white/20 px-2 py-0.5 rounded-full uppercase tracking-wider font-bold">OFFICIAL DIGITAL BARANGAY ID</span>
-                                    <h2 class="text-xl font-extrabold mt-1">\${res.first_name || ''} \${res.last_name || ''}</h2>
-                                    <p class="text-xs text-emerald-100 font-mono font-bold">\${res.resident_number || 'PENDING ASSIGNMENT'}</p>
-                                </div>
-                                \${res.qr_code_url ? \`<img src="\${res.qr_code_url}" class="w-16 h-16 bg-white p-1 rounded-lg">\` : ''}
-                            </div>
-                            <div class="text-xs grid grid-cols-2 gap-2 text-emerald-50 pt-2 border-t border-white/20">
-                                <div><span class="opacity-75">DOB:</span> \${res.date_of_birth || 'N/A'}</div>
-                                <div><span class="opacity-75">Gender:</span> \${res.gender || 'N/A'}</div>
-                                <div><span class="opacity-75">Civil Status:</span> \${res.civil_status || 'N/A'}</div>
-                                <div><span class="opacity-75">Voter Status:</span> \${res.voter_status || 'N/A'}</div>
-                            </div>
+                    <div class="flex-1 max-w-7xl w-full mx-auto grid grid-cols-1 md:grid-cols-4 gap-6 p-4 md:p-6">
+                        <!-- Sidebar Navigation Menu -->
+                        <aside class="md:col-span-1 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 h-fit space-y-1 text-xs font-medium">
+                            <button onclick="setResidentNav('dashboard')" id="resNav-dashboard" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition bg-emerald-50 text-emerald-700 font-bold">
+                                <i class="fa-solid fa-id-card w-4 text-center"></i> My ID & Dashboard
+                            </button>
+                            <button onclick="setResidentNav('profile')" id="resNav-profile" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-user w-4 text-center"></i> My Profile
+                            </button>
+                            <button onclick="setResidentNav('edit-profile')" id="resNav-edit-profile" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-user-pen w-4 text-center"></i> Edit Profile Request
+                            </button>
+                            <button onclick="setResidentNav('certificates')" id="resNav-certificates" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-file-contract w-4 text-center"></i> Certificate Request
+                            </button>
+                            <button onclick="setResidentNav('tracking')" id="resNav-tracking" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-bars-progress w-4 text-center"></i> Request Tracking
+                            </button>
+                            <button onclick="setResidentNav('appointments')" id="resNav-appointments" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-calendar-check w-4 text-center"></i> Appointment Booking
+                            </button>
+                            <button onclick="setResidentNav('documents')" id="resNav-documents" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-folder-open w-4 text-center"></i> My Documents
+                            </button>
+                            <button onclick="setResidentNav('complaints')" id="resNav-complaints" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-triangle-exclamation w-4 text-center"></i> Complaints & Reports
+                            </button>
+                            <button onclick="setResidentNav('assistance')" id="resNav-assistance" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-hand-holding-hand w-4 text-center"></i> Assistance Request
+                            </button>
+                            <button onclick="setResidentNav('announcements')" id="resNav-announcements" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-bullhorn w-4 text-center"></i> Announcements
+                            </button>
+                            <button onclick="setResidentNav('notifications')" id="resNav-notifications" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-bell w-4 text-center"></i> Notifications
+                            </button>
+                            <button onclick="setResidentNav('feedback')" id="resNav-feedback" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-comment-dots w-4 text-center"></i> Feedback
+                            </button>
+                            <button onclick="setResidentNav('emergency')" id="resNav-emergency" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700 text-rose-600 font-bold">
+                                <i class="fa-solid fa-phone-volume w-4 text-center"></i> Emergency Contacts
+                            </button>
+                            <button onclick="setResidentNav('security')" id="resNav-security" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700">
+                                <i class="fa-solid fa-shield-halved w-4 text-center"></i> Account Security
+                            </button>
+                        </aside>
+
+                        <!-- Main Display Panel -->
+                        <main id="residentMainPanel" class="md:col-span-3 space-y-6">
+                            <!-- Content is rendered dynamically -->
+                        </main>
+                    </div>
+                </div>
+            \`;
+
+            setResidentNav('dashboard');
+        }
+
+        async function setResidentNav(tab) {
+            state.residentTab = tab;
+            const res = state.resident || {};
+            const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
+            const panel = document.getElementById('residentMainPanel');
+            if (!panel) return;
+
+            // Highlight active navigation tab
+            document.querySelectorAll('[id^="resNav-"]').forEach(btn => {
+                btn.className = "w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition hover:bg-slate-50 text-slate-700";
+            });
+            const activeBtn = document.getElementById(\`resNav-\${tab}\`);
+            if (activeBtn) {
+                activeBtn.className = "w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition bg-emerald-50 text-emerald-700 font-bold shadow-sm";
+            }
+
+            if (tab === 'dashboard') {
+                panel.innerHTML = \`
+                    <!-- NATIONAL ID-STYLE FLIP CARD -->
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-id-card text-emerald-600"></i> Digital National ID-Style Resident Card
+                            </h2>
+                            <button type="button" onclick="flipNationalIDCard()" class="text-xs font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-lg transition">
+                                <i class="fa-solid fa-rotate mr-1"></i> Flip ID Card
+                            </button>
                         </div>
 
-                        <!-- Certificate Request Portal -->
-                        <div class="bg-white p-6 rounded-xl border shadow-sm">
-                            <h3 class="text-sm font-bold text-slate-800 mb-3"><i class="fa-solid fa-file-signature text-emerald-600 mr-2"></i> Request Official Barangay Certificate</h3>
-                            <form id="resCertReqForm" class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                                <select id="reqCertType" required class="p-2 border rounded">
+                        <div class="perspective w-full max-w-lg mx-auto h-64">
+                            <div id="nationalIdCardInner" class="transform-style-3d relative w-full h-full rounded-2xl shadow-2xl overflow-hidden border border-amber-300 bg-gradient-to-r from-amber-50 via-slate-50 to-emerald-50">
+                                
+                                <!-- FRONT SIDE -->
+                                <div class="backface-hidden absolute inset-0 p-4 flex flex-col justify-between border-2 border-slate-300 rounded-2xl">
+                                    <div class="flex items-center justify-between border-b border-slate-300 pb-2">
+                                        <div class="flex items-center gap-2">
+                                            <img src="\${state.settings.barangay_logo || 'https://via.placeholder.com/40'}" class="w-9 h-9 rounded-full border bg-white">
+                                            <div>
+                                                <span class="text-[7px] font-black tracking-widest text-slate-500 uppercase block">REPUBLIKA NG PILIPINAS</span>
+                                                <h3 class="text-xs font-extrabold text-slate-900 tracking-tight">\${brgyName.toUpperCase()}</h3>
+                                                <span class="text-[8px] text-emerald-700 font-bold block">PAMBANSANG PAGKAKAKILANLAN / RESIDENT ID</span>
+                                            </div>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-[8px] font-bold text-slate-400 block">PHILID / BRGY ID</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="flex gap-4 items-center my-auto">
+                                        <div class="relative">
+                                            <img src="\${res.photo_url || 'https://via.placeholder.com/100'}" class="w-24 h-24 object-cover rounded-xl border-2 border-emerald-600 shadow-md">
+                                        </div>
+                                        <div class="space-y-1 text-slate-800 text-xs">
+                                            <div>
+                                                <span class="text-[8px] text-slate-400 uppercase font-bold block">Resident ID Number / PCN</span>
+                                                <span class="font-mono font-black text-emerald-800 text-sm tracking-wide">\${res.resident_number || 'BRGY-2026-PENDING'}</span>
+                                            </div>
+                                            <div>
+                                                <span class="text-[8px] text-slate-400 uppercase font-bold block">Buong Pangalan / Full Name</span>
+                                                <span class="font-extrabold text-slate-900 text-sm block uppercase">\${res.last_name || ''}, \${res.first_name || ''} \${res.middle_name || ''}</span>
+                                            </div>
+                                            <div class="grid grid-cols-2 gap-2 text-[10px]">
+                                                <div><span class="text-slate-400 font-bold">Kapanganakan:</span> \${res.date_of_birth || 'N/A'}</div>
+                                                <div><span class="text-slate-400 font-bold">Kasarian:</span> \${res.gender || 'N/A'}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="flex justify-between items-end border-t border-slate-200 pt-2 text-[9px]">
+                                        <div>
+                                            <span class="text-slate-400 block text-[7px]">Tirahan / Address:</span>
+                                            <span class="font-bold text-slate-700 truncate block max-w-[280px]">\${res.address || 'Barangay Central'}</span>
+                                        </div>
+                                        \${res.qr_code_url ? \`<img src="\${res.qr_code_url}" class="w-10 h-10 border rounded bg-white p-0.5">\` : ''}
+                                    </div>
+                                </div>
+
+                                <!-- BACK SIDE -->
+                                <div class="backface-hidden rotate-y-180 absolute inset-0 p-4 flex flex-col justify-between border-2 border-slate-300 rounded-2xl bg-gradient-to-br from-slate-100 to-amber-50">
+                                    <div class="border-b pb-1 text-center">
+                                        <span class="text-[9px] font-extrabold text-slate-700 tracking-wider">OFFICIAL RESIDENT VERIFICATION & BACK DETAILS</span>
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-3 text-xs text-slate-800 my-auto">
+                                        <div class="bg-white/80 p-2 rounded-lg border">
+                                            <span class="text-[8px] text-slate-400 font-bold block">Civil Status</span>
+                                            <span class="font-bold text-slate-800">\${res.civil_status || 'Single'}</span>
+                                        </div>
+                                        <div class="bg-white/80 p-2 rounded-lg border">
+                                            <span class="text-[8px] text-slate-400 font-bold block">Voter Status</span>
+                                            <span class="font-bold text-slate-800">\${res.voter_status || 'No'}</span>
+                                        </div>
+                                        <div class="bg-white/80 p-2 rounded-lg border">
+                                            <span class="text-[8px] text-slate-400 font-bold block">Date Issued</span>
+                                            <span class="font-bold text-slate-800">\${new Date().toLocaleDateString()}</span>
+                                        </div>
+                                        <div class="bg-white/80 p-2 rounded-lg border">
+                                            <span class="text-[8px] text-slate-400 font-bold block">Emergency Contact</span>
+                                            <span class="font-bold text-slate-800">\${res.contact_number || 'Barangay Hotline'}</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="text-center border-t border-slate-300 pt-2">
+                                        <span class="text-[7px] text-slate-500 block">Property of Barangay Administration. Non-transferable.</span>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- QUICK OVERVIEW DASHBOARD GRID -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
+                        <div onclick="setResidentNav('certificates')" class="cursor-pointer bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-emerald-500 transition flex items-center gap-4">
+                            <div class="p-3 bg-emerald-100 text-emerald-600 rounded-xl"><i class="fa-solid fa-file-signature fa-xl"></i></div>
+                            <div>
+                                <h4 class="font-bold text-xs text-slate-800">Request Document</h4>
+                                <p class="text-[10px] text-slate-500">Apply for online clearances</p>
+                            </div>
+                        </div>
+                        <div onclick="setResidentNav('tracking')" class="cursor-pointer bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-blue-500 transition flex items-center gap-4">
+                            <div class="p-3 bg-blue-100 text-blue-600 rounded-xl"><i class="fa-solid fa-bars-progress fa-xl"></i></div>
+                            <div>
+                                <h4 class="font-bold text-xs text-slate-800">Track Applications</h4>
+                                <p class="text-[10px] text-slate-500">Check real-time status</p>
+                            </div>
+                        </div>
+                        <div onclick="setResidentNav('emergency')" class="cursor-pointer bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-rose-500 transition flex items-center gap-4">
+                            <div class="p-3 bg-rose-100 text-rose-600 rounded-xl"><i class="fa-solid fa-phone-volume fa-xl"></i></div>
+                            <div>
+                                <h4 class="font-bold text-xs text-slate-800">Emergency Call</h4>
+                                <p class="text-[10px] text-slate-500">Instant hotline numbers</p>
+                            </div>
+                        </div>
+                    </div>
+                \`;
+            } else if (tab === 'profile') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm space-y-4">
+                        <h3 class="text-sm font-bold text-slate-800 border-b pb-3"><i class="fa-solid fa-user text-emerald-600 mr-2"></i> Resident Personal Profile</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                            <div><span class="text-slate-400 font-bold block">Full Name:</span><span class="text-slate-800 font-extrabold">\${res.first_name} \${res.middle_name || ''} \${res.last_name}</span></div>
+                            <div><span class="text-slate-400 font-bold block">Barangay Resident ID:</span><span class="text-emerald-700 font-mono font-bold">\${res.resident_number || 'N/A'}</span></div>
+                            <div><span class="text-slate-400 font-bold block">Date of Birth:</span><span class="text-slate-800">\${res.date_of_birth}</span></div>
+                            <div><span class="text-slate-400 font-bold block">Gender / Civil Status:</span><span class="text-slate-800">\${res.gender} / \${res.civil_status}</span></div>
+                            <div><span class="text-slate-400 font-bold block">Contact Number:</span><span class="text-slate-800">\${res.contact_number || 'N/A'}</span></div>
+                            <div><span class="text-slate-400 font-bold block">Email Address:</span><span class="text-slate-800">\${res.email || 'N/A'}</span></div>
+                            <div class="md:col-span-2"><span class="text-slate-400 font-bold block">Street Address:</span><span class="text-slate-800 font-semibold">\${res.address}</span></div>
+                        </div>
+                    </div>
+                \`;
+            } else if (tab === 'edit-profile') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-user-pen text-emerald-600 mr-2"></i> Submit Profile Edit Request</h3>
+                        <form id="editProfileForm" class="space-y-4 text-xs">
+                            <div>
+                                <label class="font-bold">Contact Number</label>
+                                <input type="text" id="editContact" value="\${res.contact_number || ''}" class="w-full p-2.5 border rounded-lg mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold">Email Address</label>
+                                <input type="email" id="editEmail" value="\${res.email || ''}" class="w-full p-2.5 border rounded-lg mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold">Street Address</label>
+                                <input type="text" id="editAddress" value="\${res.address || ''}" class="w-full p-2.5 border rounded-lg mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold">Reason for Request / Additional Details</label>
+                                <textarea id="editDetails" required placeholder="State changes to be verified by Barangay Staff" class="w-full p-2.5 border rounded-lg mt-1" rows="3"></textarea>
+                            </div>
+                            <button type="submit" class="py-2.5 px-6 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition">Submit Request for Verification</button>
+                        </form>
+                    </div>
+                \`;
+
+                document.getElementById('editProfileForm').onsubmit = async (e) => {
+                    e.preventDefault();
+                    const res = await api('/resident/edit-request', {
+                        method: 'POST',
+                        body: JSON.stringify({ details: document.getElementById('editDetails').value })
+                    });
+                    alert(res.message);
+                };
+            } else if (tab === 'certificates') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-file-contract text-emerald-600 mr-2"></i> Request Official Barangay Clearance / Certificate</h3>
+                        <form id="resCertReqForm" class="space-y-4 text-xs">
+                            <div>
+                                <label class="font-bold">Select Certificate Type *</label>
+                                <select id="reqCertType" required class="w-full p-2.5 border rounded-lg mt-1">
                                     <option value="Barangay Clearance">Barangay Clearance</option>
                                     <option value="Certificate of Residency">Certificate of Residency</option>
                                     <option value="Certificate of Indigency">Certificate of Indigency</option>
                                     <option value="Certificate of Good Moral">Certificate of Good Moral</option>
+                                    <option value="First Time Job Seeker Certificate">First Time Job Seeker Certificate</option>
                                 </select>
-                                <input type="text" id="reqCertPurpose" placeholder="Purpose (e.g. Employment)" required class="p-2 border rounded">
-                                <button type="submit" class="py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Submit Request</button>
-                            </form>
-                        </div>
-                    </main>
-                </div>
-            \`;
+                            </div>
+                            <div>
+                                <label class="font-bold">Purpose of Request *</label>
+                                <input type="text" id="reqCertPurpose" placeholder="e.g. Employment, Scholarship, Local Travel" required class="w-full p-2.5 border rounded-lg mt-1">
+                            </div>
+                            <button type="submit" class="w-full py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition">Submit Online Application</button>
+                        </form>
+                    </div>
+                \`;
 
-            document.getElementById('resCertReqForm').onsubmit = async (e) => {
-                e.preventDefault();
-                const res = await api('/certificates/request', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        certificateType: document.getElementById('reqCertType').value,
-                        purpose: document.getElementById('reqCertPurpose').value
-                    })
-                });
-                alert(res.message);
-            };
+                document.getElementById('resCertReqForm').onsubmit = async (e) => {
+                    e.preventDefault();
+                    const res = await api('/certificates/request', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            certificateType: document.getElementById('reqCertType').value,
+                            purpose: document.getElementById('reqCertPurpose').value
+                        })
+                    });
+                    alert(res.message);
+                    setResidentNav('tracking');
+                };
+            } else if (tab === 'tracking') {
+                const requests = await api('/certificates/requests');
+                let rows = requests.map(c => \`
+                    <tr class="border-b text-xs">
+                        <td class="py-3 px-2 font-mono font-bold text-emerald-700">\${c.request_number}</td>
+                        <td class="py-3 px-2 font-bold">\${c.certificate_type}</td>
+                        <td class="py-3 px-2">\${c.purpose}</td>
+                        <td class="py-3 px-2"><span class="px-2 py-0.5 rounded-full font-bold text-[10px] bg-amber-100 text-amber-800">\${c.status}</span></td>
+                    </tr>
+                \`).join('');
+
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-bars-progress text-emerald-600 mr-2"></i> Request Status Tracker</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                        <th class="py-2">Req #</th>
+                                        <th class="py-2">Type</th>
+                                        <th class="py-2">Purpose</th>
+                                        <th class="py-2">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No requests filed.</td></tr>'}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                \`;
+            } else if (tab === 'appointments') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-calendar-check text-emerald-600 mr-2"></i> Schedule Barangay Appointment</h3>
+                        <form id="apptForm" class="space-y-4 text-xs">
+                            <div>
+                                <label class="font-bold">Service Type *</label>
+                                <select id="aptService" required class="w-full p-2.5 border rounded-lg mt-1">
+                                    <option value="Barangay Consultation">Barangay Consultation</option>
+                                    <option value="Lupon / Mediation">Lupon / Mediation Schedule</option>
+                                    <option value="Document Pick-up">Document Pick-up</option>
+                                </select>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div><label class="font-bold">Date *</label><input type="date" id="aptDate" required class="w-full p-2.5 border rounded-lg mt-1"></div>
+                                <div><label class="font-bold">Time *</label><input type="time" id="aptTime" required class="w-full p-2.5 border rounded-lg mt-1"></div>
+                            </div>
+                            <div>
+                                <label class="font-bold">Purpose Details</label>
+                                <textarea id="aptPurpose" class="w-full p-2.5 border rounded-lg mt-1" rows="2"></textarea>
+                            </div>
+                            <button type="submit" class="w-full py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition">Book Appointment</button>
+                        </form>
+                    </div>
+                \`;
+
+                document.getElementById('apptForm').onsubmit = async (e) => {
+                    e.preventDefault();
+                    const res = await api('/appointments', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            serviceType: document.getElementById('aptService').value,
+                            appointmentDate: document.getElementById('aptDate').value,
+                            appointmentTime: document.getElementById('aptTime').value,
+                            purpose: document.getElementById('aptPurpose').value
+                        })
+                    });
+                    alert(res.message);
+                };
+            } else if (tab === 'documents') {
+                const docs = await api('/resident/documents');
+                let list = docs.map(d => \`
+                    <div class="p-3 border rounded-xl flex justify-between items-center bg-slate-50">
+                        <div>
+                            <p class="font-bold text-xs text-slate-800">\${d.certificate_type}</p>
+                            <small class="text-slate-400 font-mono">\${d.certificate_number}</small>
+                        </div>
+                        <a href="\${d.file_url}" target="_blank" class="px-3 py-1.5 bg-emerald-600 text-white font-bold text-xs rounded-lg hover:bg-emerald-700">Download Document</a>
+                    </div>
+                \`).join('');
+
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-folder-open text-emerald-600 mr-2"></i> Digital Document Vault</h3>
+                        <div class="space-y-3">\${list || '<p class="text-xs text-slate-400 text-center py-4">No uploaded digital documents found.</p>'}</div>
+                    </div>
+                \`;
+            } else if (tab === 'complaints') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-triangle-exclamation text-rose-600 mr-2"></i> Submit Complaint or Community Incident Report</h3>
+                        <form id="resComplaintForm" class="space-y-3 text-xs">
+                            <div><label class="font-bold">Respondent / Concerned Person *</label><input type="text" id="cResp" required class="w-full p-2.5 border rounded-lg mt-1"></div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div><label class="font-bold">Date of Incident *</label><input type="date" id="cDate" required class="w-full p-2.5 border rounded-lg mt-1"></div>
+                                <div><label class="font-bold">Location *</label><input type="text" id="cLoc" required class="w-full p-2.5 border rounded-lg mt-1"></div>
+                            </div>
+                            <div><label class="font-bold">Detailed Description of Incident *</label><textarea id="cDesc" required class="w-full p-2.5 border rounded-lg mt-1" rows="4"></textarea></div>
+                            <button type="submit" class="w-full py-3 bg-rose-600 text-white font-bold rounded-lg hover:bg-rose-700 transition">File Official Report</button>
+                        </form>
+                    </div>
+                \`;
+
+                document.getElementById('resComplaintForm').onsubmit = async (e) => {
+                    e.preventDefault();
+                    const res = await api('/blotter', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            complainantName: state.user.fullName,
+                            respondentName: document.getElementById('cResp').value,
+                            incidentDate: document.getElementById('cDate').value,
+                            location: document.getElementById('cLoc').value,
+                            description: document.getElementById('cDesc').value
+                        })
+                    });
+                    alert(res.message);
+                };
+            } else if (tab === 'assistance') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-hand-holding-hand text-emerald-600 mr-2"></i> Apply for Barangay Assistance</h3>
+                        <form id="astForm" class="space-y-4 text-xs">
+                            <div>
+                                <label class="font-bold">Assistance Type *</label>
+                                <select id="astType" class="w-full p-2.5 border rounded-lg mt-1">
+                                    <option value="Financial Assistance">Financial Assistance</option>
+                                    <option value="Medical / Burial Subsidy">Medical / Burial Subsidy</option>
+                                    <option value="Senior / PWD Support">Senior / PWD Support</option>
+                                    <option value="Relief Goods">Emergency Relief Support</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="font-bold">Reason & Details</label>
+                                <textarea id="astReason" required class="w-full p-2.5 border rounded-lg mt-1" rows="3"></textarea>
+                            </div>
+                            <button type="submit" class="w-full py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition">Submit Application</button>
+                        </form>
+                    </div>
+                \`;
+
+                document.getElementById('astForm').onsubmit = async (e) => {
+                    e.preventDefault();
+                    const res = await api('/assistance', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            assistanceType: document.getElementById('astType').value,
+                            reason: document.getElementById('astReason').value
+                        })
+                    });
+                    alert(res.message);
+                };
+            } else if (tab === 'announcements') {
+                const list = await api('/announcements');
+                let cards = list.map(a => \`
+                    <div class="bg-white p-4 rounded-xl border shadow-sm space-y-2">
+                        <div class="flex justify-between items-center">
+                            <h4 class="font-bold text-sm text-slate-800">\${a.title}</h4>
+                            <span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800">\${a.priority}</span>
+                        </div>
+                        <p class="text-xs text-slate-600 leading-relaxed">\${a.content}</p>
+                        <small class="text-[10px] text-slate-400 block">\${new Date(a.created_at).toLocaleDateString()}</small>
+                    </div>
+                \`).join('');
+
+                panel.innerHTML = \`<div class="space-y-4">\${cards || '<p class="text-xs text-slate-400 text-center py-4">No active announcements.</p>'}</div>\`;
+            } else if (tab === 'notifications') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-bell text-emerald-600 mr-2"></i> System Notifications</h3>
+                        <div class="space-y-3 text-xs">
+                            <div class="p-3 bg-emerald-50 text-emerald-900 rounded-xl border border-emerald-200">
+                                <p class="font-bold">Welcome to Resident Portal!</p>
+                                <p class="text-[11px] mt-0.5">Your resident digital account is active. You can now request clearances online.</p>
+                            </div>
+                        </div>
+                    </div>
+                \`;
+            } else if (tab === 'feedback') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-comment-dots text-emerald-600 mr-2"></i> Portal Feedback & Rating</h3>
+                        <form id="fbForm" class="space-y-4 text-xs">
+                            <div>
+                                <label class="font-bold block mb-1">Service Satisfaction Rating</label>
+                                <select id="fbRating" class="w-full p-2.5 border rounded-lg">
+                                    <option value="5">⭐⭐⭐⭐⭐ 5 - Excellent</option>
+                                    <option value="4">⭐⭐⭐⭐ 4 - Good</option>
+                                    <option value="3">⭐⭐⭐ 3 - Average</option>
+                                    <option value="2">⭐⭐ 2 - Poor</option>
+                                    <option value="1">⭐ 1 - Very Dissatisfied</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="font-bold">Comments / Suggestions</label>
+                                <textarea id="fbComments" required class="w-full p-2.5 border rounded-lg mt-1" rows="3"></textarea>
+                            </div>
+                            <button type="submit" class="w-full py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition">Submit Feedback</button>
+                        </form>
+                    </div>
+                \`;
+
+                document.getElementById('fbForm').onsubmit = async (e) => {
+                    e.preventDefault();
+                    const res = await api('/feedback', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            rating: document.getElementById('fbRating').value,
+                            comments: document.getElementById('fbComments').value
+                        })
+                    });
+                    alert(res.message);
+                };
+            } else if (tab === 'emergency') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm space-y-4">
+                        <h3 class="text-sm font-bold text-rose-600 border-b pb-3"><i class="fa-solid fa-phone-volume mr-2"></i> Barangay & City Emergency Contacts</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                            <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl flex justify-between items-center">
+                                <div><p class="font-bold text-rose-900">Barangay Tanod Desk</p><small class="text-rose-700">0917-123-4567</small></div>
+                                <a href="tel:09171234567" class="px-3 py-1 bg-rose-600 text-white rounded-lg font-bold">CALL</a>
+                            </div>
+                            <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl flex justify-between items-center">
+                                <div><p class="font-bold text-rose-900">Police Hotline</p><small class="text-rose-700">911 / (02) 8888-1234</small></div>
+                                <a href="tel:911" class="px-3 py-1 bg-rose-600 text-white rounded-lg font-bold">CALL</a>
+                            </div>
+                            <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl flex justify-between items-center">
+                                <div><p class="font-bold text-rose-900">Bureau of Fire Protection (BFP)</p><small class="text-rose-700">(02) 8521-5000</small></div>
+                                <a href="tel:160" class="px-3 py-1 bg-rose-600 text-white rounded-lg font-bold">CALL</a>
+                            </div>
+                            <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl flex justify-between items-center">
+                                <div><p class="font-bold text-rose-900">Disaster Risk Reduction (DRRM)</p><small class="text-rose-700">0920-999-8888</small></div>
+                                <a href="tel:09209998888" class="px-3 py-1 bg-rose-600 text-white rounded-lg font-bold">CALL</a>
+                            </div>
+                        </div>
+                    </div>
+                \`;
+            } else if (tab === 'security') {
+                panel.innerHTML = \`
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-shield-halved text-emerald-600 mr-2"></i> Account Security Settings</h3>
+                        <form id="secForm" class="space-y-4 text-xs max-w-md">
+                            <div>
+                                <label class="font-bold">Current Password *</label>
+                                <input type="password" id="secOldPass" required class="w-full p-2.5 border rounded-lg mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold">New Password *</label>
+                                <input type="password" id="secNewPass" required class="w-full p-2.5 border rounded-lg mt-1">
+                            </div>
+                            <button type="submit" class="py-2.5 px-6 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition">Change Password</button>
+                        </form>
+                    </div>
+                \`;
+
+                document.getElementById('secForm').onsubmit = async (e) => {
+                    e.preventDefault();
+                    const res = await api('/resident/security', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            oldPassword: document.getElementById('secOldPass').value,
+                            newPassword: document.getElementById('secNewPass').value
+                        })
+                    });
+                    alert(res.message);
+                };
+            }
+        }
+
+        function flipNationalIDCard() {
+            const card = document.getElementById('nationalIdCardInner');
+            if (!card) return;
+            state.isCardFlipped = !state.isCardFlipped;
+            if (state.isCardFlipped) {
+                card.classList.add('rotate-y-180');
+            } else {
+                card.classList.remove('rotate-y-180');
+            }
         }
 
         function logout() {
