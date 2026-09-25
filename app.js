@@ -152,7 +152,7 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const user = users[0];
-        if (!user.is_active) {
+        if (user.is_active === false) {
             return res.status(403).json({ error: 'Account is deactivated. Contact Barangay Administration.' });
         }
 
@@ -161,7 +161,6 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid user or password credentials.' });
         }
 
-        // Validate portal type role matching
         if (portalType === 'staff' && user.role === 'resident') {
             return res.status(403).json({ error: 'Resident accounts cannot access Staff Portal.' });
         }
@@ -212,7 +211,6 @@ app.post('/api/public/register', upload.single('photo'), async (req, res) => {
             return res.status(400).json({ error: 'Please provide all required registration fields.' });
         }
 
-        // Check duplicate username/email
         const { data: existingUser } = await supabase.from('users').select('id')
             .or(`username.eq.${username},email.eq.${email}`).limit(1);
         if (existingUser && existingUser.length > 0) {
@@ -271,7 +269,7 @@ app.get('/api/settings', async (req, res) => {
         const { data, error } = await supabase.from('system_settings').select('*');
         if (error) throw error;
         const settings = {};
-        data.forEach(item => settings[item.setting_key] = item.setting_value);
+        if (data) data.forEach(item => settings[item.setting_key] = item.setting_value);
         res.json(settings);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -288,7 +286,7 @@ app.post('/api/settings', authenticateToken, requireRole(['super_admin']), uploa
             await supabase.from('system_settings').upsert({ setting_key: key, setting_value: val, updated_at: new Date() }, { onConflict: 'setting_key' });
         }
         await logActivity(req.user.id, req.user.fullName, 'UPDATE_SETTINGS', 'Updated system branding settings', req.ip);
-        res.json({ success: true, message: 'System settings updated.' });
+        res.json({ success: true, message: 'System settings updated successfully.' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -415,7 +413,7 @@ app.get('/api/puroks', async (req, res) => {
     try {
         const { data, error } = await supabase.from('puroks').select('*').order('name');
         if (error) throw error;
-        res.json(data);
+        res.json(data || []);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -426,7 +424,7 @@ app.post('/api/puroks', authenticateToken, requireRole(['super_admin', 'captain'
         const { name, description } = req.body;
         const { data, error } = await supabase.from('puroks').insert([{ name, description }]).select();
         if (error) throw error;
-        res.json({ success: true, data: data[0] });
+        res.json({ success: true, message: 'Purok added successfully.', data: data[0] });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -436,7 +434,7 @@ app.get('/api/households', authenticateToken, async (req, res) => {
     try {
         const { data, error } = await supabase.from('households').select('*, puroks(name), head:residents(first_name, last_name)').order('household_number');
         if (error) throw error;
-        res.json(data);
+        res.json(data || []);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -447,11 +445,11 @@ app.post('/api/households', authenticateToken, requireRole(['super_admin', 'capt
         const { householdNumber, purokId, streetAddress } = req.body;
         const { data, error } = await supabase.from('households').insert([{
             household_number: householdNumber,
-            purok_id: purokId,
+            purok_id: purokId || null,
             street_address: streetAddress
         }]).select();
         if (error) throw error;
-        res.json({ success: true, data: data[0] });
+        res.json({ success: true, message: 'Household added successfully.', data: data[0] });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -467,7 +465,7 @@ app.get('/api/certificates/requests', authenticateToken, async (req, res) => {
         }
         const { data, error } = await query.order('created_at', { ascending: false });
         if (error) throw error;
-        res.json(data);
+        res.json(data || []);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -569,7 +567,7 @@ app.get('/api/announcements', async (req, res) => {
     try {
         const { data, error } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
         if (error) throw error;
-        res.json(data);
+        res.json(data || []);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -596,7 +594,7 @@ app.get('/api/blotter', authenticateToken, requireRole(['super_admin', 'captain'
     try {
         const { data, error } = await supabase.from('blotter_cases').select('*').order('created_at', { ascending: false });
         if (error) throw error;
-        res.json(data);
+        res.json(data || []);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -620,7 +618,7 @@ app.post('/api/blotter', authenticateToken, requireRole(['super_admin', 'captain
 
         if (error) throw error;
         await logActivity(req.user.id, req.user.fullName, 'CREATE_BLOTTER', `Case ${caseNum} logged`, req.ip);
-        res.json({ success: true, message: 'Blotter case recorded.', data: data[0] });
+        res.json({ success: true, message: 'Blotter case recorded successfully.', data: data[0] });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -636,7 +634,7 @@ app.get('/api/appointments', authenticateToken, async (req, res) => {
         }
         const { data, error } = await query.order('appointment_date', { ascending: true });
         if (error) throw error;
-        res.json(data);
+        res.json(data || []);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -670,7 +668,7 @@ app.get('/api/logs', authenticateToken, requireRole(['super_admin']), async (req
     try {
         const { data, error } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(200);
         if (error) throw error;
-        res.json(data);
+        res.json(data || []);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -762,7 +760,7 @@ app.get('*', (req, res) => {
         }
         .bg-login-custom {
             background-image: linear-gradient(rgba(5, 150, 105, 0.85), rgba(37, 99, 235, 0.85)), 
-                              url('https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg?stp=dst-jpg_tt6&cstp=mx1857x2048&ctp=s1857x2048&_nc_cat=107&ccb=1-7&_nc_sid=cc71e4&_nc_eui2=AeH-CrVk3UW0Tqq0z_SDhKwemnbseM68ydCadux4zrzJ0I4R6gykVtH1GEMMnjk_E0vUUupJBZ3vwMdzuIfYXMgZ&_nc_ohc=fKl5LR1-2YwQ7kNvwH7PIf8&_nc_oc=AdqAy1CtUXak56hu0R2Ufzy_6npapuoitUaMuup0g9veAD0bOy9PFjySTvVXJasGWis&_nc_zt=23&_nc_ht=scontent.fcrk3-3.fna&_nc_gid=SU-DBALnvlE-vtQ4KjJx4g&_nc_ss=7b2a8&oh=00_AQK7MxJys6gqu1LJrVhDYZ2WNBpKcThfTEtIUXEWUeB_Qw&oe=6ABBAEB1');
+                              url('https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=1200&q=80');
             background-size: cover;
             background-position: center;
         }
@@ -773,7 +771,6 @@ app.get('*', (req, res) => {
             #printableArea, #printableArea * { visibility: visible; }
             #printableArea { position: absolute; left: 0; top: 0; width: 100%; }
             .no-print { display: none !important; }
-            .page-break { page-break-after: always; }
             
             .id-grid-container {
                 display: grid;
@@ -837,7 +834,7 @@ app.get('*', (req, res) => {
         async function initApp() {
             try {
                 const settings = await fetch('/api/settings').then(r => r.json());
-                state.settings = settings;
+                state.settings = settings || {};
 
                 const setupStatus = await fetch('/api/setup/status').then(r => r.json());
                 if (setupStatus.needsAdmin) {
@@ -853,6 +850,7 @@ app.get('*', (req, res) => {
                 }
             } catch (e) {
                 console.error("Initialization Error:", e);
+                renderLogin();
             }
         }
 
@@ -953,8 +951,8 @@ app.get('*', (req, res) => {
                         <!-- Right Login Form -->
                         <div class="p-8 flex flex-col justify-center">
                             <div class="flex border-b border-slate-200 mb-6">
-                                <button id="btnPortalStaff" onclick="switchLoginPortal('staff')" class="flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600">Staff Login</button>
-                                <button id="btnPortalResident" onclick="switchLoginPortal('resident')" class="flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent">Resident Portal</button>
+                                <button id="btnPortalStaff" type="button" onclick="switchLoginPortal('staff')" class="flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600">Staff Login</button>
+                                <button id="btnPortalResident" type="button" onclick="switchLoginPortal('resident')" class="flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent">Resident Portal</button>
                             </div>
 
                             <form id="loginForm" class="space-y-4">
@@ -974,7 +972,7 @@ app.get('*', (req, res) => {
 
                             <div id="registerPrompt" class="hidden mt-6 text-center border-t border-slate-100 pt-4">
                                 <p class="text-xs text-slate-500">Don't have an approved resident account?</p>
-                                <button onclick="renderRegisterModal()" class="mt-2 text-xs font-bold text-emerald-600 hover:underline">
+                                <button type="button" onclick="renderRegisterModal()" class="mt-2 text-xs font-bold text-emerald-600 hover:underline">
                                     Register as New Resident
                                 </button>
                             </div>
@@ -1025,15 +1023,16 @@ app.get('*', (req, res) => {
         }
 
         async function renderRegisterModal() {
-            const puroks = await fetch('/api/puroks').then(r => r.json());
-            let purokOptions = puroks.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('');
+            let puroks = [];
+            try { puroks = await fetch('/api/puroks').then(r => r.json()); } catch(e){}
+            let purokOptions = (puroks || []).map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('');
 
             const modalHtml = \`
                 <div id="regModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
                     <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl my-8">
                         <div class="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
                             <h3 class="text-lg font-bold text-slate-800">New Resident Registration</h3>
-                            <button onclick="document.getElementById('regModal').remove()" class="text-slate-400 hover:text-slate-600">&times;</button>
+                            <button type="button" onclick="document.getElementById('regModal').remove()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
                         </div>
                         <form id="publicRegForm" class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                             <div>
@@ -1075,6 +1074,7 @@ app.get('*', (req, res) => {
                             <div>
                                 <label class="font-semibold text-slate-600">Purok Zone</label>
                                 <select name="purokId" class="w-full p-2 border rounded mt-1">
+                                    <option value="">-- Select Purok --</option>
                                     \${purokOptions}
                                 </select>
                             </div>
@@ -1151,24 +1151,24 @@ app.get('*', (req, res) => {
                                 </div>
                             </div>
                             <nav class="p-3 space-y-1 text-xs">
-                                <a onclick="setStaffTab('dashboard')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-chart-pie w-4"></i> Dashboard</a>
-                                <a onclick="setStaffTab('residents')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-users w-4"></i> Residents</a>
-                                <a onclick="setStaffTab('households')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-house w-4"></i> Households</a>
-                                <a onclick="setStaffTab('puroks')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-map-location-dot w-4"></i> Puroks</a>
-                                <a onclick="setStaffTab('certificates')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-file-contract w-4"></i> Certificates</a>
-                                <a onclick="setStaffTab('qrscanner')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-qrcode w-4"></i> QR Claim Scanner</a>
-                                <a onclick="setStaffTab('blotter')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-gavel w-4"></i> Blotter Cases</a>
-                                <a onclick="setStaffTab('appointments')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-calendar-check w-4"></i> Appointments</a>
-                                <a onclick="setStaffTab('announcements')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-bullhorn w-4"></i> Announcements</a>
-                                <a onclick="setStaffTab('idprint')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-id-card w-4"></i> Batch Print IDs (8/Page)</a>
+                                <button type="button" onclick="setStaffTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-chart-pie w-4"></i> Dashboard</button>
+                                <button type="button" onclick="setStaffTab('residents')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-users w-4"></i> Residents</button>
+                                <button type="button" onclick="setStaffTab('households')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-house w-4"></i> Households</button>
+                                <button type="button" onclick="setStaffTab('puroks')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-map-location-dot w-4"></i> Puroks</button>
+                                <button type="button" onclick="setStaffTab('certificates')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-file-contract w-4"></i> Certificates</button>
+                                <button type="button" onclick="setStaffTab('qrscanner')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-qrcode w-4"></i> QR Claim Scanner</button>
+                                <button type="button" onclick="setStaffTab('blotter')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-gavel w-4"></i> Blotter Cases</button>
+                                <button type="button" onclick="setStaffTab('appointments')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-calendar-check w-4"></i> Appointments</button>
+                                <button type="button" onclick="setStaffTab('announcements')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-bullhorn w-4"></i> Announcements</button>
+                                <button type="button" onclick="setStaffTab('idprint')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-id-card w-4"></i> Batch Print IDs</button>
                                 \${state.user.role === 'super_admin' ? \`
-                                    <a onclick="setStaffTab('settings')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-sliders w-4"></i> System Settings</a>
-                                    <a onclick="setStaffTab('logs')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer font-medium"><i class="fa-solid fa-list-check w-4"></i> Activity Logs</a>
+                                    <button type="button" onclick="setStaffTab('settings')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-sliders w-4"></i> System Settings</button>
+                                    <button type="button" onclick="setStaffTab('logs')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 font-medium"><i class="fa-solid fa-list-check w-4"></i> Activity Logs</button>
                                 \` : ''}
                             </nav>
                         </div>
                         <div class="p-3 border-t border-slate-800">
-                            <button onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2.5 text-xs text-rose-400 hover:bg-slate-800 rounded-lg font-medium">
+                            <button type="button" onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2.5 text-xs text-rose-400 hover:bg-slate-800 rounded-lg font-medium">
                                 <i class="fa-solid fa-arrow-right-from-bracket w-4"></i> Logout
                             </button>
                         </div>
@@ -1266,23 +1266,41 @@ app.get('*', (req, res) => {
             } else if (tab === 'residents') {
                 title.innerText = 'Resident Records';
                 renderResidentManagement(content);
+            } else if (tab === 'households') {
+                title.innerText = 'Household Records';
+                renderHouseholdManagement(content);
+            } else if (tab === 'puroks') {
+                title.innerText = 'Purok Zones';
+                renderPurokManagement(content);
             } else if (tab === 'certificates') {
                 title.innerText = 'Certificate Requests & Issuance';
                 renderCertificateManagement(content);
             } else if (tab === 'qrscanner') {
                 title.innerText = 'QR Code Claim Verification Scanner';
                 renderQRScanner(content);
+            } else if (tab === 'blotter') {
+                title.innerText = 'Blotter Case Records';
+                renderBlotterManagement(content);
+            } else if (tab === 'appointments') {
+                title.innerText = 'Appointments & Services';
+                renderAppointmentManagement(content);
+            } else if (tab === 'announcements') {
+                title.innerText = 'Announcements Management';
+                renderAnnouncementManagement(content);
             } else if (tab === 'idprint') {
-                title.innerText = 'Physical ID Batch Printing (8 Cards / Bond Paper)';
+                title.innerText = 'Physical ID Batch Printing (8 Cards / Page)';
                 renderIDBatchPrint(content);
             } else if (tab === 'settings') {
                 title.innerText = 'Barangay System Settings';
                 renderSystemSettings(content);
+            } else if (tab === 'logs') {
+                title.innerText = 'System Activity Logs';
+                renderActivityLogs(content);
             }
         }
 
         /* ==========================================================================
-           4. RESIDENT MANAGEMENT (STAFF SIDE)
+           4. RESIDENT MANAGEMENT
            ========================================================================== */
         async function renderResidentManagement(container) {
             const residents = await api('/residents?status=ACTIVE');
@@ -1292,9 +1310,9 @@ app.get('*', (req, res) => {
             container.innerHTML = \`
                 <div class="bg-white rounded-xl shadow-sm border border-slate-200">
                     <div class="border-b border-slate-200 px-6 py-4 flex gap-6 text-sm font-bold">
-                        <button onclick="switchResSubTab('active')" id="tabResActive" class="text-emerald-600 border-b-2 border-emerald-600 pb-2">Active (\${residents.length})</button>
-                        <button onclick="switchResSubTab('pending')" id="tabResPending" class="text-slate-400 border-b-2 border-transparent pb-2">Pending (\${pendings.length})</button>
-                        <button onclick="switchResSubTab('archived')" id="tabResArchived" class="text-slate-400 border-b-2 border-transparent pb-2">Archived (\${archived.length})</button>
+                        <button type="button" onclick="switchResSubTab('active')" id="tabResActive" class="text-emerald-600 border-b-2 border-emerald-600 pb-2">Active (\${residents.length})</button>
+                        <button type="button" onclick="switchResSubTab('pending')" id="tabResPending" class="text-slate-400 border-b-2 border-transparent pb-2">Pending (\${pendings.length})</button>
+                        <button type="button" onclick="switchResSubTab('archived')" id="tabResArchived" class="text-slate-400 border-b-2 border-transparent pb-2">Archived (\${archived.length})</button>
                     </div>
 
                     <div id="resTableContainer" class="p-6"></div>
@@ -1336,14 +1354,14 @@ app.get('*', (req, res) => {
                     <td class="py-3 px-2 font-bold">\${r.status}</td>
                     <td class="py-3 px-2 text-right space-x-1">
                         \${type === 'pending' ? \`
-                            <button onclick="approveResident('\${r.id}')" class="px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">Approve</button>
-                            <button onclick="rejectResident('\${r.id}')" class="px-2 py-1 bg-rose-600 text-white rounded hover:bg-rose-700">Reject</button>
+                            <button type="button" onclick="approveResident('\${r.id}')" class="px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">Approve</button>
+                            <button type="button" onclick="rejectResident('\${r.id}')" class="px-2 py-1 bg-rose-600 text-white rounded hover:bg-rose-700">Reject</button>
                         \` : ''}
                         \${type === 'active' ? \`
-                            <button onclick="archiveResident('\${r.id}')" class="px-2 py-1 bg-slate-600 text-white rounded hover:bg-slate-700">Archive</button>
+                            <button type="button" onclick="archiveResident('\${r.id}')" class="px-2 py-1 bg-slate-600 text-white rounded hover:bg-slate-700">Archive</button>
                         \` : ''}
                         \${type === 'archived' ? \`
-                            <button onclick="restoreResident('\${r.id}')" class="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Restore</button>
+                            <button type="button" onclick="restoreResident('\${r.id}')" class="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Restore</button>
                         \` : ''}
                     </td>
                 </tr>
@@ -1401,7 +1419,138 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           5. CERTIFICATE MANAGEMENT & FILE UPLOAD
+           5. HOUSEHOLDS & PUROKS MANAGEMENT
+           ========================================================================== */
+        async function renderHouseholdManagement(container) {
+            const households = await api('/households');
+            const puroks = await api('/puroks');
+
+            let purokOpts = puroks.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('');
+
+            let rows = households.map(h => \`
+                <tr class="border-b border-slate-100 text-xs">
+                    <td class="py-3 px-2 font-bold text-emerald-700">\${h.household_number}</td>
+                    <td class="py-3 px-2">\${h.puroks ? h.puroks.name : 'N/A'}</td>
+                    <td class="py-3 px-2">\${h.head ? h.head.first_name + ' ' + h.head.last_name : 'N/A'}</td>
+                    <td class="py-3 px-2">\${h.street_address || 'N/A'}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Add New Household</h3>
+                        <form id="addHouseholdForm" class="space-y-3 text-xs">
+                            <div>
+                                <label class="font-bold">Household Number *</label>
+                                <input type="text" id="hhNumber" required placeholder="HH-2026-001" class="w-full p-2 border rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold">Purok Zone</label>
+                                <select id="hhPurok" class="w-full p-2 border rounded mt-1">
+                                    <option value="">-- Select --</option>
+                                    \${purokOpts}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="font-bold">Street Address</label>
+                                <input type="text" id="hhAddress" class="w-full p-2 border rounded mt-1">
+                            </div>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Save Household</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl border shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Household Records</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                        <th class="py-2">HH #</th>
+                                        <th class="py-2">Purok</th>
+                                        <th class="py-2">Head of Family</th>
+                                        <th class="py-2">Street Address</th>
+                                    </tr>
+                                </thead>
+                                <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No households recorded yet.</td></tr>'}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            \`;
+
+            document.getElementById('addHouseholdForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const res = await api('/households', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        householdNumber: document.getElementById('hhNumber').value,
+                        purokId: document.getElementById('hhPurok').value,
+                        streetAddress: document.getElementById('hhAddress').value
+                    })
+                });
+                alert(res.message);
+                setStaffTab('households');
+            };
+        }
+
+        async function renderPurokManagement(container) {
+            const puroks = await api('/puroks');
+            let rows = puroks.map(p => \`
+                <tr class="border-b border-slate-100 text-xs">
+                    <td class="py-3 px-2 font-bold text-slate-800">\${p.name}</td>
+                    <td class="py-3 px-2 text-slate-600">\${p.description || 'N/A'}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Add New Purok Zone</h3>
+                        <form id="addPurokForm" class="space-y-3 text-xs">
+                            <div>
+                                <label class="font-bold">Purok Name *</label>
+                                <input type="text" id="purokName" required placeholder="Purok 1" class="w-full p-2 border rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold">Description</label>
+                                <textarea id="purokDesc" class="w-full p-2 border rounded mt-1" rows="3"></textarea>
+                            </div>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Add Purok</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl border shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Purok List</h3>
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Purok Name</th>
+                                    <th class="py-2">Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="2" class="text-center py-4 text-xs text-slate-400">No puroks defined.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            \`;
+
+            document.getElementById('addPurokForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const res = await api('/puroks', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        name: document.getElementById('purokName').value,
+                        description: document.getElementById('purokDesc').value
+                    })
+                });
+                alert(res.message);
+                setStaffTab('puroks');
+            };
+        }
+
+        /* ==========================================================================
+           6. CERTIFICATES, QR SCANNER, BLOTTER, APPOINTMENTS, ANNOUNCEMENTS
            ========================================================================== */
         async function renderCertificateManagement(container) {
             const requests = await api('/certificates/requests');
@@ -1415,7 +1564,7 @@ app.get('*', (req, res) => {
                     <td class="py-3 px-2 font-semibold">\${c.status}</td>
                     <td class="py-3 px-2 text-right">
                         \${c.status === 'PENDING' ? \`
-                            <button onclick="openCertUploadModal('\${c.id}')" class="px-3 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 font-bold">Approve & Upload File</button>
+                            <button type="button" onclick="openCertUploadModal('\${c.id}')" class="px-3 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 font-bold">Approve & Upload File</button>
                         \` : \`<span class="text-slate-400 font-medium">Processed</span>\`}
                     </td>
                 </tr>
@@ -1436,7 +1585,7 @@ app.get('*', (req, res) => {
                                     <th class="py-2 text-right">Action</th>
                                 </tr>
                             </thead>
-                            <tbody>\${rows}</tbody>
+                            <tbody>\${rows || '<tr><td colspan="6" class="text-center py-4 text-xs text-slate-400">No certificate requests found.</td></tr>'}</tbody>
                         </table>
                     </div>
                 </div>
@@ -1474,9 +1623,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* ==========================================================================
-           6. QR SCANNER & CLAIM RELEASE
-           ========================================================================== */
         function renderQRScanner(container) {
             container.innerHTML = \`
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1493,17 +1639,19 @@ app.get('*', (req, res) => {
                 </div>
             \`;
 
-            const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-            html5QrcodeScanner.render(async (decodedText) => {
-                const parts = decodedText.split('/verify/resident/');
-                if (parts.length > 1) {
-                    const residentId = parts[1];
-                    const data = await api(\`/qr/claim-info/\${residentId}\`);
-                    renderClaimResult(data);
-                } else {
-                    alert("Invalid QR format scanned.");
-                }
-            });
+            try {
+                const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+                html5QrcodeScanner.render(async (decodedText) => {
+                    const parts = decodedText.split('/verify/resident/');
+                    if (parts.length > 1) {
+                        const residentId = parts[1];
+                        const data = await api(\`/qr/claim-info/\${residentId}\`);
+                        renderClaimResult(data);
+                    } else {
+                        alert("Invalid QR format scanned.");
+                    }
+                });
+            } catch(e) {}
         }
 
         function renderClaimResult(data) {
@@ -1526,7 +1674,7 @@ app.get('*', (req, res) => {
                         <p class="font-bold text-slate-800">\${c.certificate_type}</p>
                         <small class="text-slate-500">Req #: \${c.request_number}</small>
                     </div>
-                    <button onclick="releaseClaim('\${c.id}')" class="px-3 py-1 bg-blue-600 text-white rounded font-bold hover:bg-blue-700">Mark Released</button>
+                    <button type="button" onclick="releaseClaim('\${c.id}')" class="px-3 py-1 bg-blue-600 text-white rounded font-bold hover:bg-blue-700">Mark Released</button>
                 </div>
             \`).join('');
 
@@ -1547,6 +1695,193 @@ app.get('*', (req, res) => {
             });
             alert(res.message);
             setStaffTab('qrscanner');
+        }
+
+        async function renderBlotterManagement(container) {
+            const cases = await api('/blotter');
+            let rows = cases.map(c => \`
+                <tr class="border-b text-xs">
+                    <td class="py-3 px-2 font-bold font-mono text-rose-600">\${c.case_number}</td>
+                    <td class="py-3 px-2 font-bold">\${c.complainant_name}</td>
+                    <td class="py-3 px-2">\${c.respondent_name}</td>
+                    <td class="py-3 px-2">\${c.incident_date} \${c.incident_time || ''}</td>
+                    <td class="py-3 px-2">\${c.location || 'N/A'}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Record Incident / Blotter</h3>
+                        <form id="addBlotterForm" class="space-y-3 text-xs">
+                            <div><label class="font-bold">Complainant Name *</label><input type="text" id="blComplainant" required class="w-full p-2 border rounded mt-1"></div>
+                            <div><label class="font-bold">Respondent Name *</label><input type="text" id="blRespondent" required class="w-full p-2 border rounded mt-1"></div>
+                            <div><label class="font-bold">Witness Name</label><input type="text" id="blWitness" class="w-full p-2 border rounded mt-1"></div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div><label class="font-bold">Date *</label><input type="date" id="blDate" required class="w-full p-2 border rounded mt-1"></div>
+                                <div><label class="font-bold">Time</label><input type="time" id="blTime" class="w-full p-2 border rounded mt-1"></div>
+                            </div>
+                            <div><label class="font-bold">Location *</label><input type="text" id="blLocation" required class="w-full p-2 border rounded mt-1"></div>
+                            <div><label class="font-bold">Incident Description *</label><textarea id="blDesc" required class="w-full p-2 border rounded mt-1" rows="3"></textarea></div>
+                            <button type="submit" class="w-full py-2 bg-rose-600 text-white font-bold rounded hover:bg-rose-700">Save Blotter Record</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl border shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Recorded Incidents</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                        <th class="py-2">Case #</th>
+                                        <th class="py-2">Complainant</th>
+                                        <th class="py-2">Respondent</th>
+                                        <th class="py-2">Date & Time</th>
+                                        <th class="py-2">Location</th>
+                                    </tr>
+                                </thead>
+                                <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No blotter cases recorded.</td></tr>'}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            \`;
+
+            document.getElementById('addBlotterForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const res = await api('/blotter', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        complainantName: document.getElementById('blComplainant').value,
+                        respondentName: document.getElementById('blRespondent').value,
+                        witnessName: document.getElementById('blWitness').value,
+                        incidentDate: document.getElementById('blDate').value,
+                        incidentTime: document.getElementById('blTime').value,
+                        location: document.getElementById('blLocation').value,
+                        description: document.getElementById('blDesc').value
+                    })
+                });
+                alert(res.message);
+                setStaffTab('blotter');
+            };
+        }
+
+        async function renderAppointmentManagement(container) {
+            const appts = await api('/appointments');
+            let rows = appts.map(a => \`
+                <tr class="border-b text-xs">
+                    <td class="py-3 px-2 font-mono font-bold text-blue-600">\${a.appointment_number}</td>
+                    <td class="py-3 px-2 font-bold">\${a.residents ? a.residents.first_name + ' ' + a.residents.last_name : 'N/A'}</td>
+                    <td class="py-3 px-2">\${a.service_type}</td>
+                    <td class="py-3 px-2">\${a.appointment_date} \${a.appointment_time || ''}</td>
+                    <td class="py-3 px-2 font-bold">\${a.status}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border shadow-sm">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Scheduled Resident Appointments</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Appt #</th>
+                                    <th class="py-2">Resident</th>
+                                    <th class="py-2">Service Requested</th>
+                                    <th class="py-2">Date & Time</th>
+                                    <th class="py-2">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No appointments scheduled.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            \`;
+        }
+
+        async function renderAnnouncementManagement(container) {
+            const list = await api('/announcements');
+            let rows = list.map(a => \`
+                <tr class="border-b text-xs">
+                    <td class="py-3 px-2 font-bold text-slate-800">\${a.title}</td>
+                    <td class="py-3 px-2">\${a.priority}</td>
+                    <td class="py-3 px-2">\${new Date(a.created_at).toLocaleDateString()}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-xl border shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Post Announcement</h3>
+                        <form id="addAnnounceForm" class="space-y-3 text-xs">
+                            <div><label class="font-bold">Title *</label><input type="text" name="title" required class="w-full p-2 border rounded mt-1"></div>
+                            <div><label class="font-bold">Priority</label>
+                                <select name="priority" class="w-full p-2 border rounded mt-1">
+                                    <option value="Normal">Normal</option>
+                                    <option value="Important">Important</option>
+                                    <option value="Urgent">Urgent</option>
+                                </select>
+                            </div>
+                            <div><label class="font-bold">Banner Image</label><input type="file" name="image" accept="image/*" class="w-full p-2 border rounded mt-1"></div>
+                            <div><label class="font-bold">Content Details *</label><textarea name="content" required class="w-full p-2 border rounded mt-1" rows="4"></textarea></div>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Publish Announcement</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl border shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Published Bulletins</h3>
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Title</th>
+                                    <th class="py-2">Priority</th>
+                                    <th class="py-2">Date Published</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="3" class="text-center py-4 text-xs text-slate-400">No announcements published.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            \`;
+
+            document.getElementById('addAnnounceForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const res = await api('/announcements', { method: 'POST', body: formData });
+                alert(res.message);
+                setStaffTab('announcements');
+            };
+        }
+
+        async function renderActivityLogs(container) {
+            const logs = await api('/logs');
+            let rows = logs.map(l => \`
+                <tr class="border-b text-xs">
+                    <td class="py-2 px-2 text-slate-500">\${new Date(l.created_at).toLocaleString()}</td>
+                    <td class="py-2 px-2 font-bold text-slate-800">\${l.user_name || 'System'}</td>
+                    <td class="py-2 px-2 font-mono font-semibold text-blue-600">\${l.action}</td>
+                    <td class="py-2 px-2 text-slate-600">\${l.details || ''}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border shadow-sm">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">System Activity Audit Trail</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Timestamp</th>
+                                    <th class="py-2">User</th>
+                                    <th class="py-2">Action</th>
+                                    <th class="py-2">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No activity logs found.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            \`;
         }
 
         /* ==========================================================================
@@ -1584,20 +1919,20 @@ app.get('*', (req, res) => {
 
             container.innerHTML = \`
                 <div class="mb-4 no-print">
-                    <button onclick="window.print()" class="px-4 py-2 bg-emerald-600 text-white font-bold rounded shadow hover:bg-emerald-700">
+                    <button type="button" onclick="window.print()" class="px-4 py-2 bg-emerald-600 text-white font-bold rounded shadow hover:bg-emerald-700">
                         <i class="fa-solid fa-print mr-2"></i> Print Layout (8 Cards / Page)
                     </button>
                 </div>
                 <div id="printableArea">
                     <div class="id-grid-container">
-                        \${cards}
+                        \${cards || '<p class="text-slate-400 text-xs">No active residents to print IDs for.</p>'}
                     </div>
                 </div>
             \`;
         }
 
         /* ==========================================================================
-           8. SYSTEM SETTINGS (ADMIN ONLY)
+           8. SYSTEM SETTINGS
            ========================================================================== */
         function renderSystemSettings(container) {
             const s = state.settings;
@@ -1647,7 +1982,7 @@ app.get('*', (req, res) => {
            ========================================================================== */
         function renderResidentPortal() {
             const app = document.getElementById('app');
-            const res = state.resident;
+            const res = state.resident || {};
             const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
 
             app.innerHTML = \`
@@ -1657,7 +1992,7 @@ app.get('*', (req, res) => {
                             <h1 class="font-bold text-lg">\${brgyName}</h1>
                             <p class="text-xs text-emerald-100">Resident Digital Portal</p>
                         </div>
-                        <button onclick="logout()" class="text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg font-bold">Logout</button>
+                        <button type="button" onclick="logout()" class="text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg font-bold">Logout</button>
                     </header>
 
                     <main class="flex-1 max-w-4xl w-full mx-auto p-4 space-y-6">
@@ -1666,16 +2001,16 @@ app.get('*', (req, res) => {
                             <div class="flex justify-between items-start mb-4">
                                 <div>
                                     <span class="text-[10px] bg-white/20 px-2 py-0.5 rounded-full uppercase tracking-wider font-bold">OFFICIAL DIGITAL BARANGAY ID</span>
-                                    <h2 class="text-xl font-extrabold mt-1">\${res.first_name} \${res.last_name}</h2>
-                                    <p class="text-xs text-emerald-100 font-mono font-bold">\${res.resident_number}</p>
+                                    <h2 class="text-xl font-extrabold mt-1">\${res.first_name || ''} \${res.last_name || ''}</h2>
+                                    <p class="text-xs text-emerald-100 font-mono font-bold">\${res.resident_number || 'PENDING ASSIGNMENT'}</p>
                                 </div>
                                 \${res.qr_code_url ? \`<img src="\${res.qr_code_url}" class="w-16 h-16 bg-white p-1 rounded-lg">\` : ''}
                             </div>
                             <div class="text-xs grid grid-cols-2 gap-2 text-emerald-50 pt-2 border-t border-white/20">
-                                <div><span class="opacity-75">DOB:</span> \${res.date_of_birth}</div>
-                                <div><span class="opacity-75">Gender:</span> \${res.gender}</div>
-                                <div><span class="opacity-75">Civil Status:</span> \${res.civil_status}</div>
-                                <div><span class="opacity-75">Voter Status:</span> \${res.voter_status}</div>
+                                <div><span class="opacity-75">DOB:</span> \${res.date_of_birth || 'N/A'}</div>
+                                <div><span class="opacity-75">Gender:</span> \${res.gender || 'N/A'}</div>
+                                <div><span class="opacity-75">Civil Status:</span> \${res.civil_status || 'N/A'}</div>
+                                <div><span class="opacity-75">Voter Status:</span> \${res.voter_status || 'N/A'}</div>
                             </div>
                         </div>
 
