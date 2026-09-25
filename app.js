@@ -352,7 +352,8 @@ app.get('/api/residents', requireStaff, async (req, res) => {
     const { data, error } = await query.order('created_at', { ascending: false });
     if (error) return res.status(400).json({ error: error.message });
 
-    let results = data ||;
+ 
+let results = data || [];
     if (search) {
       const s = search.toLowerCase();
       results = results.filter(r =>
