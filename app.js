@@ -1,1861 +1,2093 @@
 /**
- * ============================================================================
+ * =============================================================================
  * BARANGAY RESIDENT MANAGEMENT SYSTEM (BRMS)
- * Single-File Node.js / Express / Supabase Web Application
- * ============================================================================
+ * Monolithic JavaScript Application
+ * 
+ * Tech Stack: Node.js, Express.js, Supabase, Native CSS/HTML Generation
+ * Deployment: Render Compatible
+ * =============================================================================
  */
 
+require('dotenv').config();
 const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
+const cookieParser = require('cookie-parser');
+const fileUpload = require('express-fileupload');
+const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const cookieParser = require('cookie-parser');
-const cors = require('cors');
 const QRCode = require('qrcode');
-const multer = require('multer');
+const { createClient } = require('@supabase/supabase-js');
 
-// ============================================================================
-// 3. SUPABASE & SERVER CONFIGURATION
-// ============================================================================
-// PLEASE PASTE YOUR SUPABASE CREDENTIALS HERE:
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://your-supabase-project-id.supabase.co";
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "your-supabase-anon-key";
-const JWT_SECRET = process.env.JWT_SECRET || "barangay_super_secret_jwt_key_2026";
+// -----------------------------------------------------------------------------
+// 1. SYSTEM CONFIGURATION & INITIALIZATION
+// -----------------------------------------------------------------------------
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'barangay_secure_jwt_secret_key_2026_prod';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://your-supabase-project.supabase.co';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'your-supabase-anon-key';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = express();
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB Upload limit
 
-// Initialize Supabase Client
-let supabase = null;
-if (SUPABASE_URL && !SUPABASE_URL.includes("your-supabase-project-id") && SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.includes("your-supabase-anon-key")) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-}
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(cookieParser());
+app.use(fileUpload({ limits: { fileSize: 10 * 1024 * 1024 } }));
 
-// Check Supabase readiness middleware
-const checkDbConfig = (req, res, next) => {
-  if (!supabase) {
-    if (req.path.startsWith('/api/')) {
-      return res.status(500).json({ error: "DATABASE NOT CONFIGURED. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in app.js." });
+const DEFAULT_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg?stp=dst-jpg_tt6&cstp=mx1857x2048&ctp=s1857x2048&_nc_cat=107&ccb=1-7&_nc_sid=cc71e4&_nc_eui2=AeH-CrVk3UW0Tqq0z_SDhKwemnbseM68ydCadux4zrzJ0I4R6gykVtH1GEMMnjk_E0vUUupJBZ3vwMdzuIfYXMgZ&_nc_ohc=fKl5LR1-2YwQ7kNvwH7PIf8&_nc_oc=AdqAy1CtUXak56hu0R2Ufzy_6npapuoitUaMuup0g9veAD0bOy9PFjySTvVXJasGWis&_nc_zt=23&_nc_ht=scontent.fcrk3-3.fna&_nc_gid=SU-DBALnvlE-vtQ4KjJx4g&_nc_ss=7b2a8&oh=00_AQK7MxJys6gqu1LJrVhDYZ2WNBpKcThfTEtIUXEWUeB_Qw&oe=6ABBAEB1';
+
+// -----------------------------------------------------------------------------
+// 2. MIDDLEWARE & AUTHENTICATION
+// -----------------------------------------------------------------------------
+const authMiddleware = async (req, res, next) => {
+    const token = req.cookies.auth_token;
+    if (!token) {
+        return res.redirect('/login');
     }
-    return res.send(renderDbConfigErrorPage());
-  }
-  next();
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        
+        // Retrieve fresh user profile
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('*, barangays(*)')
+            .eq('id', decoded.id)
+            .eq('is_active', true)
+            .single();
+
+        if (error || !user) {
+            res.clearCookie('auth_token');
+            return res.redirect('/login');
+        }
+
+        req.user = user;
+        req.barangay = user.barangays;
+        next();
+    } catch (err) {
+        res.clearCookie('auth_token');
+        return res.redirect('/login');
+    }
 };
 
-// Log activity helper
-async function logActivity(userName, userRole, action, description) {
-  if (!supabase) return;
-  try {
-    await supabase.from('activity_logs').insert([{
-      user_name: userName || 'System',
-      user_role: userRole || 'System',
-      action,
-      description,
-      created_at: new Date().toISOString()
-    }]);
-  } catch (err) {
-    console.error('Activity Log Error:', err.message);
-  }
-}
-
-// Authentication Middleware
-const authenticateToken = async (req, res, next) => {
-  const token = req.cookies.auth_token;
-  if (!token) return res.status(401).json({ error: "Unauthorized access. Please login." });
-
-  try {
-    const verified = jwt.verify(token, JWT_SECRET);
-    req.user = verified;
-    next();
-  } catch (err) {
-    res.clearCookie('auth_token');
-    return res.status(403).json({ error: "Session expired. Please login again." });
-  }
+const roleGuard = (allowedRoles) => {
+    return (req, res, next) => {
+        if (!req.user || !allowedRoles.includes(req.user.role)) {
+            return res.status(403).send(generateErrorPage('403 Forbidden', 'You do not have administrative privilege to access this page.'));
+        }
+        next();
+    };
 };
 
-const authorizeRoles = (...roles) => {
-  return (req, res, next) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ error: "Access denied. Insufficient permissions." });
+const logActivity = async (barangayId, userId, action, description, ip) => {
+    try {
+        await supabase.from('activity_logs').insert([{
+            barangay_id: barangayId,
+            user_id: userId,
+            action: action,
+            description: description,
+            ip_address: ip || '127.0.0.1'
+        }]);
+    } catch (e) {
+        console.error('Activity Logging Error:', e.message);
     }
-    next();
-  };
 };
 
-// Helper: Fetch Barangay Settings
-async function getSettings() {
-  if (!supabase) return null;
-  const { data } = await supabase.from('barangay_settings').select('*').single();
-  return data || {
-    barangay_name: 'Barangay San Jose',
-    municipality: 'San Fernando',
-    province: 'Pampanga',
-    address: 'Main Street, San Fernando',
-    contact_number: '+63 917 123 4567',
-    email: 'info@barangay.gov.ph',
-    barangay_captain: 'Hon. Juan Dela Cruz',
-    barangay_secretary: 'Maria Santos',
-    id_prefix: 'BRGY-2026',
-    certificate_prefix: 'CERT-2026'
-  };
-}
-
-// ============================================================================
-// API ROUTES - SYSTEM SETUP & AUTH
-// ============================================================================
-
-app.get('/api/check-setup', checkDbConfig, async (req, res) => {
-  try {
-    const { count, error } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    if (error) throw error;
-    res.json({ hasAdmin: count > 0 });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/setup-admin', checkDbConfig, async (req, res) => {
-  const { fullName, username, email, password, confirmPassword } = req.body;
-  if (!fullName || !username || !email || !password) {
-    return res.status(400).json({ error: "All fields are required." });
-  }
-  if (password !== confirmPassword) {
-    return res.status(400).json({ error: "Passwords do not match." });
-  }
-
-  try {
-    const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    if (count > 0) {
-      return res.status(400).json({ error: "Admin account already exists. Setup is locked." });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const password_hash = await bcrypt.hash(password, salt);
-
-    const { data, error } = await supabase.from('users').insert([{
-      full_name: fullName,
-      username,
-      email,
-      password_hash,
-      role: 'SUPER ADMIN',
-      is_active: true
-    }]).select();
-
-    if (error) throw error;
-
-    await logActivity(fullName, 'SUPER ADMIN', 'System Initialized', 'First-time super admin account created.');
-    res.json({ success: true, message: "Super Admin account created successfully!" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/login', checkDbConfig, async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: "Username/Email and Password required." });
-
-  try {
-    const { data: users, error } = await supabase.from('users')
-      .select('*')
-      .or(`username.eq.${username},email.eq.${username}`);
-
-    if (error || !users || users.length === 0) {
-      return res.status(400).json({ error: "Invalid username/email or password." });
-    }
-
-    const user = users[0];
-    if (!user.is_active) {
-      return res.status(403).json({ error: "Account is disabled. Contact Barangay Administrator." });
-    }
-
-    const validPass = await bcrypt.compare(password, user.password_hash);
-    if (!validPass) return res.status(400).json({ error: "Invalid username/email or password." });
-
-    let residentData = null;
-    if (user.role === 'RESIDENT') {
-      const { data: resData } = await supabase.from('residents').select('*').eq('user_id', user.id).single();
-      residentData = resData;
-    }
-
-    const token = jwt.sign({
-      id: user.id,
-      username: user.username,
-      fullName: user.full_name,
-      role: user.role,
-      residentId: residentData ? residentData.id : null
-    }, JWT_SECRET, { expiresIn: '12h' });
-
-    res.cookie('auth_token', token, { httpOnly: true, maxAge: 12 * 3600 * 1000 });
-    await logActivity(user.full_name, user.role, 'Login', 'User logged into system.');
-
-    res.json({
-      success: true,
-      role: user.role,
-      user: { id: user.id, name: user.full_name, role: user.role }
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/logout', (req, res) => {
-  res.clearCookie('auth_token');
-  res.json({ success: true });
-});
-
-// ============================================================================
-// API ROUTES - PUBLIC RESIDENT REGISTRATION
-// ============================================================================
-
-app.post('/api/register-resident', checkDbConfig, async (req, res) => {
-  const {
-    firstName, middleName, lastName, suffix, dateOfBirth, gender, civilStatus,
-    nationality, contactNumber, email, address, purok, occupation, educationalAttainment,
-    isVoter, isPwd, isSeniorCitizen, isSoloParent, is4ps, emergencyContact, emergencyContactNumber,
-    password, confirmPassword, profilePhotoUrl, validIdUrl
-  } = req.body;
-
-  if (!firstName || !lastName || !dateOfBirth || !gender || !civilStatus || !contactNumber || !email || !address || !purok || !password) {
-    return res.status(400).json({ error: "Missing required registration fields." });
-  }
-  if (password !== confirmPassword) return res.status(400).json({ error: "Passwords do not match." });
-
-  try {
-    // Check existing email
-    const { data: existingUser } = await supabase.from('users').select('id').eq('email', email);
-    if (existingUser && existingUser.length > 0) {
-      return res.status(400).json({ error: "Email address is already registered." });
-    }
-
-    // Hash Password
-    const salt = await bcrypt.genSalt(10);
-    const password_hash = await bcrypt.hash(password, salt);
-
-    // Create User Account
-    const username = email.split('@')[0] + Math.floor(1000 + Math.random() * 9000);
-    const fullName = `${firstName} ${middleName ? middleName + ' ' : ''}${lastName} ${suffix || ''}`.trim();
-
-    const { data: userData, error: userError } = await supabase.from('users').insert([{
-      full_name: fullName,
-      username,
-      email,
-      password_hash,
-      role: 'RESIDENT',
-      is_active: true
-    }]).select().single();
-
-    if (userError) throw userError;
-
-    // Generate Temporary Resident Number
-    const settings = await getSettings();
-    const tempResNum = `${settings.id_prefix || 'BRGY'}-PENDING-${Date.now().toString().slice(-6)}`;
-
-    // Create Resident Record
-    const { data: residentData, error: resError } = await supabase.from('residents').insert([{
-      user_id: userData.id,
-      resident_number: tempResNum,
-      first_name: firstName,
-      middle_name: middleName || '',
-      last_name: lastName,
-      suffix: suffix || '',
-      date_of_birth: dateOfBirth,
-      gender,
-      civil_status: civilStatus,
-      nationality: nationality || 'Filipino',
-      contact_number: contactNumber,
-      email,
-      address,
-      purok,
-      occupation: occupation || 'Unemployed',
-      educational_attainment: educationalAttainment || 'N/A',
-      is_voter: !!isVoter,
-      is_pwd: !!isPwd,
-      is_senior_citizen: !!isSeniorCitizen,
-      is_solo_parent: !!isSoloParent,
-      is_4ps: !!is4ps,
-      emergency_contact: emergencyContact,
-      emergency_contact_number: emergencyContactNumber,
-      profile_photo_url: profilePhotoUrl || '',
-      valid_id_url: validIdUrl || '',
-      status: 'PENDING'
-    }]).select().single();
-
-    if (resError) throw resError;
-
-    await logActivity('Public User', 'RESIDENT', 'Registration Submitted', `New resident registration submitted for ${fullName}.`);
-
-    res.json({
-      success: true,
-      message: "Application submitted successfully! Please wait for staff approval.",
-      residentNumber: tempResNum
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================================
-// API ROUTES - DASHBOARD & STATS (REAL SUPABASE DATA)
-// ============================================================================
-
-app.get('/api/staff/dashboard-stats', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  try {
-    const [
-      resTotal, resPending, resApproved, resRejected,
-      households, maleCount, femaleCount, seniorCount, pwdCount, soloParentCount, voterCount,
-      pendingCerts, pendingApps, pendingComplaints, activeBiz, purokList
-    ] = await Promise.all([
-      supabase.from('residents').select('id', { count: 'exact', head: true }),
-      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('status', 'PENDING'),
-      supabase.from('residents').select('id', { count: 'exact', head: true }).in('status', ['APPROVED', 'ACTIVE']),
-      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('status', 'REJECTED'),
-      supabase.from('households').select('id', { count: 'exact', head: true }),
-      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('gender', 'Male'),
-      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('gender', 'Female'),
-      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('is_senior_citizen', true),
-      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('is_pwd', true),
-      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('is_solo_parent', true),
-      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('is_voter', true),
-      supabase.from('certificate_requests').select('id', { count: 'exact', head: true }).eq('status', 'PENDING'),
-      supabase.from('appointments').select('id', { count: 'exact', head: true }).eq('status', 'PENDING'),
-      supabase.from('complaints').select('id', { count: 'exact', head: true }).eq('status', 'SUBMITTED'),
-      supabase.from('businesses').select('id', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
-      supabase.from('puroks').select('name')
-    ]);
-
-    // Aggregate Purok Demographics
-    const { data: purokResidents } = await supabase.from('residents').select('purok');
-    const purokCounts = {};
-    if (purokResidents) {
-      purokResidents.forEach(r => {
-        purokCounts[r.purok] = (purokCounts[r.purok] || 0) + 1;
-      });
-    }
-
-    res.json({
-      totalResidents: resTotal.count || 0,
-      pendingResidents: resPending.count || 0,
-      approvedResidents: resApproved.count || 0,
-      rejectedResidents: resRejected.count || 0,
-      totalHouseholds: households.count || 0,
-      maleResidents: maleCount.count || 0,
-      femaleResidents: femaleCount.count || 0,
-      seniorCitizens: seniorCount.count || 0,
-      pwd: pwdCount.count || 0,
-      soloParents: soloParentCount.count || 0,
-      voters: voterCount.count || 0,
-      pendingCertificates: pendingCerts.count || 0,
-      pendingAppointments: pendingApps.count || 0,
-      pendingComplaints: pendingComplaints.count || 0,
-      activeBusinesses: activeBiz.count || 0,
-      purokDemographics: purokCounts
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================================
-// API ROUTES - RESIDENT APPROVAL & MANAGEMENT
-// ============================================================================
-
-app.get('/api/residents', checkDbConfig, authenticateToken, async (req, res) => {
-  try {
-    const { status, search, purok, gender, filterType } = req.query;
-    let query = supabase.from('residents').select('*').order('created_at', { ascending: false });
-
-    if (status) query = query.eq('status', status);
-    if (purok) query = query.eq('purok', purok);
-    if (gender) query = query.eq('gender', gender);
-    if (filterType === 'senior') query = query.eq('is_senior_citizen', true);
-    if (filterType === 'pwd') query = query.eq('is_pwd', true);
-    if (filterType === 'voter') query = query.eq('is_voter', true);
-
-    if (search) {
-      query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,resident_number.ilike.%${search}%`);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/residents/approve/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  try {
-    const residentId = req.params.id;
-    const settings = await getSettings();
-
-    // Fetch total active/approved count to generate sequence number
-    const { count } = await supabase.from('residents').select('id', { count: 'exact', head: true }).in('status', ['APPROVED', 'ACTIVE']);
-    const seqNum = String((count || 0) + 1).padStart(6, '0');
-    const uniqueResidentNumber = `${settings.id_prefix || 'BRGY-2026'}-${seqNum}`;
-
-    const { data, error } = await supabase.from('residents').update({
-      status: 'APPROVED',
-      resident_number: uniqueResidentNumber,
-      updated_at: new Date().toISOString()
-    }).eq('id', residentId).select().single();
-
-    if (error) throw error;
-
-    // Send Notification to Resident User Account
-    if (data.user_id) {
-      await supabase.from('notifications').insert([{
-        user_id: data.user_id,
-        title: 'Registration Approved',
-        message: `Congratulations! Your Barangay registration has been APPROVED. Your Official Resident ID is ${uniqueResidentNumber}.`,
-        link: '/resident'
-      }]);
-    }
-
-    await logActivity(req.user.fullName, req.user.role, 'Approve Resident', `Approved resident ${data.first_name} ${data.last_name} with ID ${uniqueResidentNumber}.`);
-    res.json({ success: true, message: 'Resident approved successfully!', resident: data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/residents/reject/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  const { rejectionReason } = req.body;
-  if (!rejectionReason) return res.status(400).json({ error: "Rejection reason is required." });
-
-  try {
-    const residentId = req.params.id;
-    const { data, error } = await supabase.from('residents').update({
-      status: 'REJECTED',
-      rejection_reason: rejectionReason,
-      updated_at: new Date().toISOString()
-    }).eq('id', residentId).select().single();
-
-    if (error) throw error;
-
-    if (data.user_id) {
-      await supabase.from('notifications').insert([{
-        user_id: data.user_id,
-        title: 'Registration Rejected',
-        message: `Your registration application was rejected. Reason: ${rejectionReason}`,
-        link: '/resident'
-      }]);
-    }
-
-    await logActivity(req.user.fullName, req.user.role, 'Reject Resident', `Rejected resident ${data.first_name} ${data.last_name}.`);
-    res.json({ success: true, message: 'Resident application rejected.', resident: data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/residents/archive/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  const { statusReason } = req.body; // ARCHIVED, MOVED OUT, DECEASED, INACTIVE
-  const targetStatus = statusReason || 'ARCHIVED';
-
-  try {
-    const { data, error } = await supabase.from('residents').update({
-      status: targetStatus,
-      updated_at: new Date().toISOString()
-    }).eq('id', req.params.id).select().single();
-
-    if (error) throw error;
-
-    await logActivity(req.user.fullName, req.user.role, 'Archive Resident', `Archived resident ${data.first_name} ${data.last_name} (Status: ${targetStatus}).`);
-    res.json({ success: true, message: `Resident status changed to ${targetStatus}.` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/residents/restore/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('residents').update({
-      status: 'APPROVED',
-      updated_at: new Date().toISOString()
-    }).eq('id', req.params.id).select().single();
-
-    if (error) throw error;
-
-    await logActivity(req.user.fullName, req.user.role, 'Restore Resident', `Restored archived resident ${data.first_name} ${data.last_name}.`);
-    res.json({ success: true, message: "Resident record restored to APPROVED." });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================================
-// API ROUTES - HOUSEHOLDS & PUROKS
-// ============================================================================
-
-app.get('/api/households', checkDbConfig, authenticateToken, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('households').select('*').order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/households', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  const { householdNumber, householdHeadName, address, purok, householdType } = req.body;
-  try {
-    const { data, error } = await supabase.from('households').insert([{
-      household_number: householdNumber,
-      household_head_name: householdHeadName,
-      address,
-      purok,
-      household_type: householdType || 'Single Family'
-    }]).select().single();
-
-    if (error) throw error;
-    await logActivity(req.user.fullName, req.user.role, 'Create Household', `Created Household #${householdNumber}`);
-    res.json({ success: true, household: data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/puroks', checkDbConfig, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('puroks').select('*').order('name');
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/puroks', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY'), async (req, res) => {
-  const { name, description } = req.body;
-  try {
-    const { data, error } = await supabase.from('puroks').insert([{ name, description }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, purok: data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================================
-// API ROUTES - CERTIFICATES & CLAIMING BY QR
-// ============================================================================
-
-app.get('/api/certificates', checkDbConfig, authenticateToken, async (req, res) => {
-  try {
-    let query = supabase.from('certificate_requests').select('*, residents(first_name, last_name, resident_number)').order('created_at', { ascending: false });
-    if (req.user.role === 'RESIDENT') {
-      query = query.eq('resident_id', req.user.residentId);
-    }
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/certificates/request', checkDbConfig, authenticateToken, authorizeRoles('RESIDENT'), async (req, res) => {
-  const { certificateType, purpose } = req.body;
-  if (!certificateType || !purpose) return res.status(400).json({ error: "Certificate type and purpose required." });
-
-  try {
-    const settings = await getSettings();
-    const reqNum = `${settings.certificate_prefix || 'REQ'}-${Date.now().toString().slice(-6)}`;
-
-    const { data, error } = await supabase.from('certificate_requests').insert([{
-      request_number: reqNum,
-      resident_id: req.user.residentId,
-      certificate_type: certificateType,
-      purpose,
-      status: 'PENDING'
-    }]).select().single();
-
-    if (error) throw error;
-
-    await logActivity(req.user.fullName, 'RESIDENT', 'Certificate Request', `Requested ${certificateType} (${reqNum})`);
-    res.json({ success: true, request: data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/certificates/update-status/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  const { status, remarks, documentUrl } = req.body;
-  try {
-    const updateData = { status, updated_at: new Date().toISOString() };
-    if (remarks) updateData.remarks = remarks;
-    if (documentUrl) updateData.document_url = documentUrl;
-    if (status === 'RELEASED') {
-      updateData.released_by = req.user.fullName;
-      updateData.released_at = new Date().toISOString();
-    }
-
-    const { data, error } = await supabase.from('certificate_requests').update(updateData).eq('id', req.params.id).select('*, residents(user_id)').single();
-    if (error) throw error;
-
-    if (data.residents && data.residents.user_id) {
-      await supabase.from('notifications').insert([{
-        user_id: data.residents.user_id,
-        title: `Certificate Status: ${status}`,
-        message: `Your request for ${data.certificate_type} is now ${status}.`,
-        link: '/resident'
-      }]);
-    }
-
-    await logActivity(req.user.fullName, req.user.role, 'Certificate Status Change', `Updated Request ${data.request_number} to ${status}`);
-    res.json({ success: true, request: data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Scan Claim QR Code Route for Staff
-app.get('/api/certificates/claim-scan/:token', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('certificate_requests')
-      .select('*, residents(first_name, last_name, resident_number, address, purok)')
-      .eq('claim_qr_token', req.params.token)
-      .single();
-
-    if (error || !data) return res.status(404).json({ error: "Certificate request QR token not found or invalid." });
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================================
-// API ROUTES - ANNOUNCEMENTS & NOTIFICATIONS
-// ============================================================================
-
-app.get('/api/announcements', checkDbConfig, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('announcements').select('*').eq('is_published', true).order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/announcements', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  const { title, content, category, priority } = req.body;
-  try {
-    const { data, error } = await supabase.from('announcements').insert([{
-      title,
-      content,
-      category: category || 'General',
-      priority: priority || 'Normal',
-      is_published: true,
-      created_by: req.user.fullName
-    }]).select().single();
-
-    if (error) throw error;
-    await logActivity(req.user.fullName, req.user.role, 'Published Announcement', `Announcement: ${title}`);
-    res.json({ success: true, announcement: data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/notifications', checkDbConfig, authenticateToken, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('notifications').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================================
-// API ROUTES - APPOINTMENTS, COMPLAINTS, BLOTTER, ASSISTANCE, BUSINESSES
-// ============================================================================
-
-// APPOINTMENTS
-app.get('/api/appointments', checkDbConfig, authenticateToken, async (req, res) => {
-  try {
-    let query = supabase.from('appointments').select('*, residents(first_name, last_name)').order('created_at', { ascending: false });
-    if (req.user.role === 'RESIDENT') query = query.eq('resident_id', req.user.residentId);
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/appointments', checkDbConfig, authenticateToken, authorizeRoles('RESIDENT'), async (req, res) => {
-  const { serviceType, appointmentDate, appointmentTime, purpose } = req.body;
-  try {
-    const appNum = `APT-${Date.now().toString().slice(-6)}`;
-    const { data, error } = await supabase.from('appointments').insert([{
-      appointment_number: appNum,
-      resident_id: req.user.residentId,
-      service_type: serviceType,
-      appointment_date: appointmentDate,
-      appointment_time: appointmentTime,
-      purpose,
-      status: 'PENDING'
-    }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, appointment: data });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// COMPLAINTS
-app.get('/api/complaints', checkDbConfig, authenticateToken, async (req, res) => {
-  try {
-    let query = supabase.from('complaints').select('*').order('created_at', { ascending: false });
-    if (req.user.role === 'RESIDENT') query = query.eq('complainant_id', req.user.residentId);
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/complaints', checkDbConfig, authenticateToken, async (req, res) => {
-  const { category, subject, details, location } = req.body;
-  try {
-    const cmpNum = `CMP-${Date.now().toString().slice(-6)}`;
-    const { data, error } = await supabase.from('complaints').insert([{
-      complaint_number: cmpNum,
-      complainant_id: req.user.role === 'RESIDENT' ? req.user.residentId : null,
-      complainant_name: req.user.fullName,
-      category,
-      subject,
-      details,
-      location: location || '',
-      status: 'SUBMITTED'
-    }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, complaint: data });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// BLOTTER RECORDS
-app.get('/api/blotter', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('blotter_records').select('*').order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/blotter', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  const { complainantName, respondentName, witnessName, incidentDate, incidentTime, location, description, actionTaken } = req.body;
-  try {
-    const caseNum = `BLT-${Date.now().toString().slice(-6)}`;
-    const { data, error } = await supabase.from('blotter_records').insert([{
-      case_number: caseNum,
-      complainant_name: complainantName,
-      respondent_name: respondentName,
-      witness_name: witnessName || '',
-      incident_date: incidentDate,
-      incident_time: incidentTime,
-      location,
-      description,
-      action_taken: actionTaken || '',
-      status: 'ACTIVE'
-    }]).select().single();
-    if (error) throw error;
-    await logActivity(req.user.fullName, req.user.role, 'Created Blotter Record', `Case #${caseNum}`);
-    res.json({ success: true, blotter: data });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ASSISTANCE REQUESTS
-app.get('/api/assistance', checkDbConfig, authenticateToken, async (req, res) => {
-  try {
-    let query = supabase.from('assistance_requests').select('*, residents(first_name, last_name)').order('created_at', { ascending: false });
-    if (req.user.role === 'RESIDENT') query = query.eq('resident_id', req.user.residentId);
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/assistance', checkDbConfig, authenticateToken, authorizeRoles('RESIDENT'), async (req, res) => {
-  const { assistanceType, reason, amountRequested } = req.body;
-  try {
-    const reqNum = `AST-${Date.now().toString().slice(-6)}`;
-    const { data, error } = await supabase.from('assistance_requests').insert([{
-      request_number: reqNum,
-      resident_id: req.user.residentId,
-      assistance_type: assistanceType,
-      reason,
-      amount_requested: parseFloat(amountRequested) || 0,
-      status: 'PENDING'
-    }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, assistance: data });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// BUSINESS MANAGEMENT
-app.get('/api/businesses', checkDbConfig, authenticateToken, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('businesses').select('*').order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/businesses', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  const { businessName, ownerName, address, businessType, contactNumber, permitNumber, dateIssued, expirationDate } = req.body;
-  try {
-    const { data, error } = await supabase.from('businesses').insert([{
-      business_name: businessName,
-      owner_name: ownerName,
-      address,
-      business_type: businessType,
-      contact_number: contactNumber,
-      permit_number: permitNumber,
-      date_issued: dateIssued,
-      expiration_date: expirationDate,
-      status: 'ACTIVE'
-    }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, business: data });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ACTIVITY LOGS & USERS MANAGEMENT
-app.get('/api/activity-logs', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN'), async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(200);
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/users', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN'), async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('users').select('id, full_name, username, email, role, is_active, created_at').order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/users/create-staff', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN'), async (req, res) => {
-  const { fullName, username, email, password, role } = req.body;
-  try {
-    const salt = await bcrypt.genSalt(10);
-    const password_hash = await bcrypt.hash(password, salt);
-
-    const { data, error } = await supabase.from('users').insert([{
-      full_name: fullName,
-      username,
-      email,
-      password_hash,
-      role: role || 'STAFF',
-      is_active: true
-    }]).select().single();
-
-    if (error) throw error;
-    await logActivity(req.user.fullName, req.user.role, 'Create Staff User', `Created staff account for ${fullName}`);
-    res.json({ success: true, user: data });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// SETTINGS MANAGEMENT
-app.get('/api/settings', checkDbConfig, async (req, res) => {
-  try {
-    const settings = await getSettings();
-    res.json(settings);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/settings', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN'), async (req, res) => {
-  const { barangay_name, municipality, province, address, contact_number, email, barangay_captain, barangay_secretary, id_prefix, certificate_prefix, logo_url } = req.body;
-  try {
-    const { data, error } = await supabase.from('barangay_settings').upsert({
-      id: 1,
-      barangay_name,
-      municipality,
-      province,
-      address,
-      contact_number,
-      email,
-      barangay_captain,
-      barangay_secretary,
-      id_prefix,
-      certificate_prefix,
-      logo_url,
-      updated_at: new Date().toISOString()
-    }).select().single();
-
-    if (error) throw error;
-    await logActivity(req.user.fullName, req.user.role, 'Update Barangay Settings', 'System configuration updated');
-    res.json({ success: true, settings: data });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ============================================================================
-// PUBLIC QR CODE VERIFICATION API & PAGE
-// ============================================================================
-
-app.get('/verify/:token', checkDbConfig, async (req, res) => {
-  const token = req.params.token;
-  try {
-    const settings = await getSettings();
-    const { data: resident, error } = await supabase.from('residents').select('*').eq('qr_token', token).single();
-
-    if (error || !resident) {
-      return res.send(renderVerificationResultPage(settings, null, false));
-    }
-
-    res.send(renderVerificationResultPage(settings, resident, true));
-  } catch (err) {
-    res.status(500).send("Verification error occurred.");
-  }
-});
-
-// Batch 8-ID Print Route
-app.post('/api/print-batch-ids', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
-  const { residentIds, paperSize } = req.body; // Array of IDs
-  if (!residentIds || !Array.isArray(residentIds) || residentIds.length === 0) {
-    return res.status(400).json({ error: "Select at least 1 resident ID to print." });
-  }
-
-  try {
-    const settings = await getSettings();
-    const { data: residents, error } = await supabase.from('residents').select('*').in('id', residentIds);
-    if (error) throw error;
-
-    const cardsHtml = await Promise.all(residents.map(async (resData) => {
-      const qrDataUrl = await QRCode.toDataURL(`${req.protocol}://${req.get('host')}/verify/${resData.qr_token}`);
-      return renderSingleIdCardHtml(settings, resData, qrDataUrl);
-    }));
-
-    res.json({ success: true, html: render8IdPrintSheetHtml(cardsHtml, paperSize || 'A4') });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Single Digital ID Route
-app.get('/api/resident-id-card/:id', checkDbConfig, authenticateToken, async (req, res) => {
-  try {
-    const settings = await getSettings();
-    const { data: resData, error } = await supabase.from('residents').select('*').eq('id', req.params.id).single();
-    if (error || !resData) return res.status(404).json({ error: "Resident not found" });
-
-    const qrDataUrl = await QRCode.toDataURL(`${req.protocol}://${req.get('host')}/verify/${resData.qr_token}`);
-    const cardHtml = renderSingleIdCardHtml(settings, resData, qrDataUrl);
-
-    res.json({ success: true, html: cardHtml, qrUrl: qrDataUrl, resident: resData, settings });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================================
-// SINGLE PAGE FRONTEND GENERATOR (EXPRESS HTML/CSS/JS DELIVERABLE)
-// ============================================================================
-
-function renderMainAppPage() {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Barangay Resident Management System</title>
-    <!-- FontAwesome & Google Fonts -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+// -----------------------------------------------------------------------------
+// 3. GLOBAL UI CSS THEME GENERATOR
+// -----------------------------------------------------------------------------
+function getGlobalStyles(primaryColor = '#1b5e20', secondaryColor = '#0d47a1') {
+    return `
     <style>
         :root {
-            --primary-green: #0d7a40;
-            --primary-green-dark: #08522a;
-            --secondary-blue: #1e40af;
-            --secondary-blue-light: #3b82f6;
-            --bg-light: #f3f4f6;
-            --text-dark: #1f2937;
-            --text-muted: #6b7280;
+            --primary: ${primaryColor};
+            --primary-dark: #0f3d13;
+            --secondary: ${secondaryColor};
+            --secondary-dark: #082a63;
+            --bg-light: #f4f6f9;
+            --text-dark: #2c3e50;
+            --text-muted: #6c757d;
             --white: #ffffff;
-            --border-color: #e5e7eb;
-            --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --border: #e2e8f0;
+            --success: #2e7d32;
+            --warning: #ed6c02;
+            --danger: #d32f2f;
+            --shadow: 0 4px 12px rgba(0,0,0,0.08);
+            --radius: 8px;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
-        body { background-color: var(--bg-light); color: var(--text-dark); min-height: 100vh; display: flex; flex-direction: column; }
-        
-        /* Layout Structure */
-        #app { display: flex; width: 100vw; min-height: 100vh; }
-        .sidebar { width: 260px; background: linear-gradient(180deg, var(--primary-green-dark) 0%, var(--primary-green) 100%); color: var(--white); display: flex; flex-direction: column; flex-shrink: 0; transition: all 0.3s; }
-        .sidebar-header { padding: 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); }
-        .sidebar-header img { width: 42px; height: 42px; border-radius: 50%; background: #fff; object-fit: cover; }
-        .sidebar-header h2 { font-size: 16px; font-weight: 700; line-height: 1.2; }
-        .sidebar-menu { list-style: none; padding: 15px 10px; flex-grow: 1; overflow-y: auto; }
-        .sidebar-menu li a { display: flex; align-items: center; gap: 12px; padding: 12px 15px; color: rgba(255,255,255,0.85); text-decoration: none; border-radius: 8px; font-size: 14px; font-weight: 500; margin-bottom: 4px; transition: 0.2s; }
-        .sidebar-menu li a:hover, .sidebar-menu li a.active { background: rgba(255,255,255,0.2); color: #fff; font-weight: 600; }
-        
-        .main-content { flex-grow: 1; display: flex; flex-direction: column; overflow-x: hidden; }
-        .top-navbar { height: 65px; background: var(--white); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; padding: 0 30px; }
-        .top-navbar .user-profile { display: flex; align-items: center; gap: 15px; }
-        .page-container { padding: 30px; flex-grow: 1; overflow-y: auto; }
-        
-        /* Components */
-        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .stat-card { background: var(--white); padding: 20px; border-radius: 12px; box-shadow: var(--card-shadow); border-left: 5px solid var(--secondary-blue); display: flex; justify-content: space-between; align-items: center; }
-        .stat-card.green { border-left-color: var(--primary-green); }
-        .stat-card.yellow { border-left-color: #f59e0b; }
-        .stat-card.red { border-left-color: #ef4444; }
-        .stat-card .val { font-size: 26px; font-weight: 700; color: var(--text-dark); margin-top: 5px; }
-        .stat-card .title { font-size: 13px; color: var(--text-muted); font-weight: 500; }
-        .stat-card i { font-size: 28px; opacity: 0.3; }
 
-        .content-card { background: var(--white); border-radius: 12px; padding: 25px; box-shadow: var(--card-shadow); margin-bottom: 25px; }
-        .content-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; }
-        .content-header h3 { font-size: 18px; color: var(--secondary-blue); display: flex; align-items: center; gap: 10px; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: var(--bg-light); color: var(--text-dark); display: flex; min-height: 100vh; flex-direction: column; }
         
-        /* Tables & Buttons */
+        a { color: var(--secondary); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* Layout Structure */
+        .app-container { display: flex; flex: 1; }
+        .sidebar { width: 260px; background: var(--primary-dark); color: var(--white); display: flex; flex-direction: column; transition: all 0.3s; }
+        .sidebar-header { padding: 20px; background: rgba(0,0,0,0.2); text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .sidebar-header img { width: 60px; height: 60px; border-radius: 50%; object-fit: cover; margin-bottom: 10px; border: 2px solid var(--white); }
+        .sidebar-header h3 { font-size: 16px; font-weight: 600; }
+        .sidebar-menu { list-style: none; padding: 15px 0; flex: 1; overflow-y: auto; }
+        .sidebar-menu li a { display: flex; align-items: center; padding: 12px 20px; color: rgba(255,255,255,0.8); font-size: 14px; gap: 12px; transition: 0.2s; }
+        .sidebar-menu li a:hover, .sidebar-menu li.active a { background: var(--secondary); color: var(--white); border-left: 4px solid #fff; }
+
+        .main-wrapper { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; }
+        .top-navbar { height: 60px; background: var(--white); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 25px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        .navbar-user { display: flex; align-items: center; gap: 15px; }
+        .user-badge { background: #e8f5e9; color: var(--primary); padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+
+        .content-body { padding: 25px; flex: 1; }
+
+        /* Dashboard UI Elements */
+        .page-header { margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
+        .page-title { font-size: 24px; color: var(--text-dark); font-weight: 700; }
+        
+        .grid-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 25px; }
+        .card-stat { background: var(--white); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); border-left: 4px solid var(--primary); }
+        .card-stat.blue { border-left-color: var(--secondary); }
+        .card-stat.orange { border-left-color: var(--warning); }
+        .card-stat.red { border-left-color: var(--danger); }
+        .card-stat .title { font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: bold; }
+        .card-stat .value { font-size: 28px; font-weight: bold; margin-top: 5px; color: var(--text-dark); }
+
+        .panel { background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 25px; border: 1px solid var(--border); overflow: hidden; }
+        .panel-header { padding: 15px 20px; background: #fafafa; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .panel-title { font-size: 16px; font-weight: 600; color: var(--text-dark); }
+        .panel-body { padding: 20px; }
+
+        /* Tables & Inputs */
         .table-responsive { overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
-        th, td { padding: 12px 15px; border-bottom: 1px solid var(--border-color); }
-        th { background: #f9fafb; font-weight: 600; color: var(--text-dark); }
-        tr:hover { background: #f8fafc; }
-
-        .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; transition: 0.2s; }
-        .btn-primary { background: var(--primary-green); color: #fff; }
-        .btn-primary:hover { background: var(--primary-green-dark); }
-        .btn-secondary { background: var(--secondary-blue); color: #fff; }
-        .btn-secondary:hover { background: #1d4ed8; }
-        .btn-danger { background: #ef4444; color: #fff; }
-        .btn-warning { background: #f59e0b; color: #fff; }
-        .btn-sm { padding: 5px 10px; font-size: 12px; }
-
-        .badge { padding: 4px 10px; border-radius: 50px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-        .badge-pending { background: #fef3c7; color: #d97706; }
-        .badge-approved, .badge-active { background: #d1fae5; color: #059669; }
-        .badge-rejected, .badge-inactive { background: #fee2e2; color: #dc2626; }
-
-        /* Auth Pages Layout */
-        .auth-container { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0d7a40 0%, #1e40af 100%); padding: 20px; }
-        .auth-box { background: #fff; border-radius: 16px; width: 100%; max-width: 480px; padding: 40px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2); }
-        .auth-header { text-align: center; margin-bottom: 30px; }
-        .auth-header img { width: 80px; margin-bottom: 15px; }
-        .auth-header h2 { font-size: 22px; color: var(--text-dark); }
-        .form-group { margin-bottom: 18px; }
-        .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-dark); }
-        .form-control { width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; outline: none; }
-        .form-control:focus { border-color: var(--secondary-blue); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
-
-        /* Modal Dialogs */
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 999; }
-        .modal-overlay.active { display: flex; }
-        .modal-box { background: #fff; width: 90%; max-width: 650px; border-radius: 12px; max-height: 90vh; overflow-y: auto; padding: 25px; }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 20px; }
-
-        /* Responsiveness */
-        @media (max-width: 768px) {
-            #app { flex-direction: column; }
-            .sidebar { width: 100%; }
-            .top-navbar { padding: 0 15px; }
-            .page-container { padding: 15px; }
-        }
-    </style>
-</head>
-<body>
-    <div id="app"></div>
-
-    <!-- Modal Container -->
-    <div id="modalOverlay" class="modal-overlay">
-        <div class="modal-box" id="modalContent"></div>
-    </div>
-
-    <script>
-        // Global Application State
-        let currentUser = null;
-        let currentSettings = null;
-
-        // Initialize Application
-        async function initApp() {
-            try {
-                // Fetch Settings
-                const setRes = await fetch('/api/settings');
-                currentSettings = await setRes.json();
-
-                // Check First Time Setup
-                const setupRes = await fetch('/api/check-setup');
-                const setupData = await setupRes.json();
-
-                if (!setupData.hasAdmin) {
-                    renderSetupAdminView();
-                    return;
-                }
-
-                // Render Login View by default if unauthenticated
-                renderLoginView();
-            } catch (err) {
-                console.error("Init Error:", err);
-            }
-        }
-
-        // ============================================================================
-        // VIEWS: SETUP ADMIN & AUTHENTICATION
-        // ============================================================================
-
-        function renderSetupAdminView() {
-            const app = document.getElementById('app');
-            app.innerHTML = \`
-                <div class="auth-container" style="width:100%;">
-                    <div class="auth-box">
-                        <div class="auth-header">
-                            <i class="fa-solid fa-shield-halved" style="font-size: 50px; color: var(--primary-green);"></i>
-                            <h2 style="margin-top:15px;">FIRST-TIME ADMIN SETUP</h2>
-                            <p style="font-size:13px; color:var(--text-muted); margin-top:5px;">No administrator account was detected. Please create the primary Super Admin account to initialize the system.</p>
-                        </div>
-                        <form id="setupForm" onsubmit="handleAdminSetup(event)">
-                            <div class="form-group">
-                                <label>Full Name</label>
-                                <input type="text" id="setupFullName" class="form-control" required placeholder="e.g. Juan Dela Cruz">
-                            </div>
-                            <div class="form-group">
-                                <label>Username</label>
-                                <input type="text" id="setupUsername" class="form-control" required placeholder="admin">
-                            </div>
-                            <div class="form-group">
-                                <label>Email Address</label>
-                                <input type="email" id="setupEmail" class="form-control" required placeholder="admin@barangay.gov.ph">
-                            </div>
-                            <div class="form-group">
-                                <label>Password</label>
-                                <input type="password" id="setupPassword" class="form-control" required>
-                            </div>
-                            <div class="form-group">
-                                <label>Confirm Password</label>
-                                <input type="password" id="setupConfirmPassword" class="form-control" required>
-                            </div>
-                            <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px;">
-                                <i class="fa-solid fa-user-plus"></i> CREATE ADMINISTRATOR ACCOUNT
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            \`;
-        }
-
-        async function handleAdminSetup(e) {
-            e.preventDefault();
-            const fullName = document.getElementById('setupFullName').value;
-            const username = document.getElementById('setupUsername').value;
-            const email = document.getElementById('setupEmail').value;
-            const password = document.getElementById('setupPassword').value;
-            const confirmPassword = document.getElementById('setupConfirmPassword').value;
-
-            try {
-                const res = await fetch('/api/setup-admin', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fullName, username, email, password, confirmPassword })
-                });
-                const data = await res.json();
-                if (data.error) return alert(data.error);
-
-                alert(data.message);
-                renderLoginView();
-            } catch (err) {
-                alert("Setup failed: " + err.message);
-            }
-        }
-
-        function renderLoginView() {
-            const app = document.getElementById('app');
-            app.innerHTML = \`
-                <div class="auth-container" style="width:100%;">
-                    <div class="auth-box">
-                        <div class="auth-header">
-                            <h2 style="color:var(--primary-green); font-weight:800;">\${currentSettings ? currentSettings.barangay_name.toUpperCase() : 'BARANGAY'}</h2>
-                            <p style="font-size:12px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-top:2px;">Resident Management System</p>
-                        </div>
-                        <form id="loginForm" onsubmit="handleLogin(event)">
-                            <div class="form-group">
-                                <label>Username or Email</label>
-                                <input type="text" id="loginUsername" class="form-control" required placeholder="Enter username or email">
-                            </div>
-                            <div class="form-group">
-                                <label>Password</label>
-                                <input type="password" id="loginPassword" class="form-control" required placeholder="Enter password">
-                            </div>
-                            <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px; margin-top:10px;">
-                                <i class="fa-solid fa-right-to-bracket"></i> LOGIN
-                            </button>
-                        </form>
-                        <div style="margin-top:25px; text-align:center; border-top:1px solid var(--border-color); padding-top:20px;">
-                            <p style="font-size:13px; color:var(--text-muted);">Don't have a resident account yet?</p>
-                            <button onclick="renderRegisterView()" class="btn btn-secondary" style="width:100%; justify-content:center; margin-top:10px;">
-                                <i class="fa-solid fa-user-plus"></i> REGISTER AS RESIDENT
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            \`;
-        }
-
-        async function handleLogin(e) {
-            e.preventDefault();
-            const username = document.getElementById('loginUsername').value;
-            const password = document.getElementById('loginPassword').value;
-
-            try {
-                const res = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-                const data = await res.json();
-                if (data.error) return alert(data.error);
-
-                currentUser = data.user;
-                if (data.role === 'RESIDENT') {
-                    renderResidentPortal();
-                } else {
-                    renderStaffPortal();
-                }
-            } catch (err) {
-                alert("Login Error: " + err.message);
-            }
-        }
-
-        function renderRegisterView() {
-            const app = document.getElementById('app');
-            app.innerHTML = \`
-                <div class="auth-container" style="width:100%; padding: 40px 20px;">
-                    <div class="auth-box" style="max-width: 800px;">
-                        <div class="auth-header">
-                            <h2>BARANGAY RESIDENT REGISTRATION</h2>
-                            <p style="font-size:13px; color:var(--text-muted);">Fill out the official registration form accurately.</p>
-                        </div>
-                        <form onsubmit="handleResidentRegistration(event)">
-                            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:15px;">
-                                <div class="form-group"><label>First Name *</label><input type="text" id="regFirstName" class="form-control" required></div>
-                                <div class="form-group"><label>Middle Name</label><input type="text" id="regMiddleName" class="form-control"></div>
-                                <div class="form-group"><label>Last Name *</label><input type="text" id="regLastName" class="form-control" required></div>
-                                <div class="form-group"><label>Suffix</label><input type="text" id="regSuffix" class="form-control" placeholder="e.g. Jr., Sr."></div>
-                                <div class="form-group"><label>Date of Birth *</label><input type="date" id="regDob" class="form-control" required></div>
-                                <div class="form-group">
-                                    <label>Gender *</label>
-                                    <select id="regGender" class="form-control" required>
-                                        <option value="">Select Gender</option>
-                                        <option value="Male">Male</option>
-                                        <option value="Female">Female</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>Civil Status *</label>
-                                    <select id="regCivilStatus" class="form-control" required>
-                                        <option value="Single">Single</option>
-                                        <option value="Married">Married</option>
-                                        <option value="Widowed">Widowed</option>
-                                        <option value="Separated">Separated</option>
-                                    </select>
-                                </div>
-                                <div class="form-group"><label>Contact Number *</label><input type="text" id="regContact" class="form-control" required></div>
-                                <div class="form-group"><label>Email Address *</label><input type="email" id="regEmail" class="form-control" required></div>
-                                <div class="form-group"><label>Purok *</label><input type="text" id="regPurok" class="form-control" placeholder="e.g. Purok 1" required></div>
-                                <div class="form-group" style="grid-column: span 2;"><label>Full Address *</label><input type="text" id="regAddress" class="form-control" required></div>
-                                <div class="form-group"><label>Emergency Contact Name *</label><input type="text" id="regEmerName" class="form-control" required></div>
-                                <div class="form-group"><label>Emergency Contact Number *</label><input type="text" id="regEmerNum" class="form-control" required></div>
-                                <div class="form-group"><label>Account Password *</label><input type="password" id="regPass" class="form-control" required></div>
-                                <div class="form-group"><label>Confirm Password *</label><input type="password" id="regConfPass" class="form-control" required></div>
-                            </div>
-                            <div style="margin-top:20px; display:flex; gap:15px;">
-                                <button type="button" onclick="renderLoginView()" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back to Login</button>
-                                <button type="submit" class="btn btn-primary" style="flex-grow:1; justify-content:center;"><i class="fa-solid fa-paper-plane"></i> SUBMIT APPLICATION</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            \`;
-        }
-
-        async function handleResidentRegistration(e) {
-            e.preventDefault();
-            const payload = {
-                firstName: document.getElementById('regFirstName').value,
-                middleName: document.getElementById('regMiddleName').value,
-                lastName: document.getElementById('regLastName').value,
-                suffix: document.getElementById('regSuffix').value,
-                dateOfBirth: document.getElementById('regDob').value,
-                gender: document.getElementById('regGender').value,
-                civilStatus: document.getElementById('regCivilStatus').value,
-                contactNumber: document.getElementById('regContact').value,
-                email: document.getElementById('regEmail').value,
-                address: document.getElementById('regAddress').value,
-                purok: document.getElementById('regPurok').value,
-                emergencyContact: document.getElementById('regEmerName').value,
-                emergencyContactNumber: document.getElementById('regEmerNum').value,
-                password: document.getElementById('regPass').value,
-                confirmPassword: document.getElementById('regConfPass').value
-            };
-
-            try {
-                const res = await fetch('/api/register-resident', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (data.error) return alert(data.error);
-
-                alert("REGISTRATION SUCCESSFUL! Application Number: " + data.residentNumber + ". Please await staff approval.");
-                renderLoginView();
-            } catch (err) { alert("Registration Failed: " + err.message); }
-        }
-
-        // ============================================================================
-        // STAFF PORTAL VIEWS & NAVIGATION
-        // ============================================================================
-
-        function renderStaffPortal() {
-            const app = document.getElementById('app');
-            app.innerHTML = \`
-                <div class="sidebar">
-                    <div class="sidebar-header">
-                        <i class="fa-solid fa-building-columns" style="font-size: 24px;"></i>
-                        <div>
-                            <h2>\${currentSettings ? currentSettings.barangay_name : 'Barangay Admin'}</h2>
-                            <span style="font-size:10px; opacity:0.8;">STAFF PORTAL</span>
-                        </div>
-                    </div>
-                    <ul class="sidebar-menu">
-                        <li><a href="#" onclick="loadDashboard()" class="active"><i class="fa-solid fa-chart-line"></i> Dashboard</a></li>
-                        <li><a href="#" onclick="loadResidentApprovals()"><i class="fa-solid fa-user-check"></i> Resident Approvals</a></li>
-                        <li><a href="#" onclick="loadResidents()"><i class="fa-solid fa-users"></i> Resident Management</a></li>
-                        <li><a href="#" onclick="loadHouseholds()"><i class="fa-solid fa-house"></i> Households</a></li>
-                        <li><a href="#" onclick="loadCertificates()"><i class="fa-solid fa-file-contract"></i> Certificate Requests</a></li>
-                        <li><a href="#" onclick="loadScanClaimQr()"><i class="fa-solid fa-qrcode"></i> QR Certificate Claim</a></li>
-                        <li><a href="#" onclick="loadBlotter()"><i class="fa-solid fa-book"></i> Blotter Records</a></li>
-                        <li><a href="#" onclick="loadComplaints()"><i class="fa-solid fa-triangle-exclamation"></i> Complaints</a></li>
-                        <li><a href="#" onclick="loadAnnouncements()"><i class="fa-solid fa-bullhorn"></i> Announcements</a></li>
-                        <li><a href="#" onclick="loadSettings()"><i class="fa-solid fa-gear"></i> Settings</a></li>
-                        <li><a href="#" onclick="handleLogout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></li>
-                    </ul>
-                </div>
-                <div class="main-content">
-                    <div class="top-navbar">
-                        <h4 id="pageTitle">Dashboard Overview</h4>
-                        <div class="user-profile">
-                            <span style="font-size:13px; font-weight:600;"><i class="fa-solid fa-user"></i> \${currentUser ? currentUser.name : 'Staff'} (\${currentUser ? currentUser.role : ''})</span>
-                        </div>
-                    </div>
-                    <div class="page-container" id="mainContainer"></div>
-                </div>
-            \`;
-            loadDashboard();
-        }
-
-        async function loadDashboard() {
-            document.getElementById('pageTitle').innerText = "Dashboard Overview";
-            const container = document.getElementById('mainContainer');
-            container.innerHTML = '<p>Loading statistics from database...</p>';
-
-            try {
-                const res = await fetch('/api/staff/dashboard-stats');
-                const stats = await res.json();
-
-                container.innerHTML = \`
-                    <div class="card-grid">
-                        <div class="stat-card green"><div class="info"><div class="title">TOTAL RESIDENTS</div><div class="val">\${stats.totalResidents}</div></div><i class="fa-solid fa-users"></i></div>
-                        <div class="stat-card yellow"><div class="info"><div class="title">PENDING APPROVALS</div><div class="val">\${stats.pendingResidents}</div></div><i class="fa-solid fa-clock"></i></div>
-                        <div class="stat-card"><div class="info"><div class="title">TOTAL HOUSEHOLDS</div><div class="val">\${stats.totalHouseholds}</div></div><i class="fa-solid fa-house"></i></div>
-                        <div class="stat-card green"><div class="info"><div class="title">PENDING CERTS</div><div class="val">\${stats.pendingCertificates}</div></div><i class="fa-solid fa-file-contract"></i></div>
-                    </div>
-
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
-                        <div class="content-card">
-                            <div class="content-header"><h3><i class="fa-solid fa-chart-pie"></i> Gender Demographics</h3></div>
-                            <canvas id="genderChart" style="max-height:250px;"></canvas>
-                        </div>
-                        <div class="content-card">
-                            <div class="content-header"><h3><i class="fa-solid fa-layer-group"></i> Special Population</h3></div>
-                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:20px;">
-                                <div style="padding:15px; background:#f8fafc; border-radius:8px;"><strong>Senior Citizens:</strong> \${stats.seniorCitizens}</div>
-                                <div style="padding:15px; background:#f8fafc; border-radius:8px;"><strong>PWD:</strong> \${stats.pwd}</div>
-                                <div style="padding:15px; background:#f8fafc; border-radius:8px;"><strong>Solo Parents:</strong> \${stats.soloParents}</div>
-                                <div style="padding:15px; background:#f8fafc; border-radius:8px;"><strong>Registered Voters:</strong> \${stats.voters}</div>
-                            </div>
-                        </div>
-                    </div>
-                \`;
-
-                // Render Chart.js
-                const ctx = document.getElementById('genderChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: ['Male', 'Female'],
-                        datasets: [{ data: [stats.maleResidents, stats.femaleResidents], backgroundColor: ['#1e40af', '#0d7a40'] }]
-                    }
-                });
-            } catch (err) { container.innerHTML = '<p style="color:red;">Failed to load statistics.</p>'; }
-        }
-
-        async function loadResidentApprovals() {
-            document.getElementById('pageTitle').innerText = "Pending Resident Registration Approvals";
-            const container = document.getElementById('mainContainer');
-            container.innerHTML = '<p>Loading pending applications...</p>';
-
-            try {
-                const res = await fetch('/api/residents?status=PENDING');
-                const residents = await res.json();
-
-                let html = \`
-                    <div class="content-card">
-                        <div class="table-responsive">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Applicant Name</th>
-                                        <th>Registration Date</th>
-                                        <th>Contact</th>
-                                        <th>Purok</th>
-                                        <th>Address</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                \`;
-
-                if (residents.length === 0) {
-                    html += \`<tr><td colspan="6" style="text-align:center;">No pending resident applications found.</td></tr>\`;
-                } else {
-                    residents.forEach(r => {
-                        html += \`
-                            <tr>
-                                <td><strong>\${r.first_name} \${r.last_name}</strong></td>
-                                <td>\${new Date(r.created_at).toLocaleDateString()}</td>
-                                <td>\${r.contact_number}</td>
-                                <td>\${r.purok}</td>
-                                <td>\${r.address}</td>
-                                <td>
-                                    <button onclick="approveResident('\${r.id}')" class="btn btn-primary btn-sm"><i class="fa-solid fa-check"></i> Approve</button>
-                                    <button onclick="promptRejectResident('\${r.id}')" class="btn btn-danger btn-sm"><i class="fa-solid fa-xmark"></i> Reject</button>
-                                </td>
-                            </tr>
-                        \`;
-                    });
-                }
-
-                html += \`</tbody></table></div></div>\`;
-                container.innerHTML = html;
-            } catch (err) { container.innerHTML = '<p style="color:red;">Error loading resident approvals.</p>'; }
-        }
-
-        async function approveResident(id) {
-            if (!confirm("Are you sure you want to approve this resident application?")) return;
-            try {
-                const res = await fetch(\`/api/residents/approve/\${id}\`, { method: 'POST' });
-                const data = await res.json();
-                if (data.error) return alert(data.error);
-                alert(data.message);
-                loadResidentApprovals();
-            } catch (err) { alert(err.message); }
-        }
-
-        function promptRejectResident(id) {
-            const reason = prompt("Enter Rejection Reason:");
-            if (!reason) return;
-            rejectResident(id, reason);
-        }
-
-        async function rejectResident(id, rejectionReason) {
-            try {
-                const res = await fetch(\`/api/residents/reject/\${id}\`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rejectionReason })
-                });
-                const data = await res.json();
-                if (data.error) return alert(data.error);
-                alert(data.message);
-                loadResidentApprovals();
-            } catch (err) { alert(err.message); }
-        }
-
-        async function loadResidents() {
-            document.getElementById('pageTitle').innerText = "Approved Resident Database";
-            const container = document.getElementById('mainContainer');
-
-            try {
-                const res = await fetch('/api/residents?status=APPROVED');
-                const residents = await res.json();
-
-                let html = \`
-                    <div class="content-card">
-                        <div style="margin-bottom:15px; display:flex; justify-content:space-between;">
-                            <input type="text" id="resSearch" class="form-control" style="max-width:300px;" placeholder="Search by name or Resident ID..." onkeyup="filterResidentTable()">
-                            <button onclick="printSelected8Ids()" class="btn btn-secondary"><i class="fa-solid fa-print"></i> Batch Print Selected 8-IDs Sheet</button>
-                        </div>
-                        <div class="table-responsive">
-                            <table id="resTable">
-                                <thead>
-                                    <tr>
-                                        <th><input type="checkbox" onclick="toggleSelectAllIds(this)"></th>
-                                        <th>Resident ID</th>
-                                        <th>Name</th>
-                                        <th>Gender</th>
-                                        <th>Purok</th>
-                                        <th>Contact</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                \`;
-
-                residents.forEach(r => {
-                    html += \`
-                        <tr>
-                            <td><input type="checkbox" class="id-select-cb" value="\${r.id}"></td>
-                            <td><strong>\${r.resident_number}</strong></td>
-                            <td>\${r.first_name} \${r.last_name}</td>
-                            <td>\${r.gender}</td>
-                            <td>\${r.purok}</td>
-                            <td>\${r.contact_number}</td>
-                            <td><span class="badge badge-approved">\${r.status}</span></td>
-                            <td>
-                                <button onclick="viewDigitalId('\${r.id}')" class="btn btn-primary btn-sm"><i class="fa-solid fa-id-card"></i> View Digital ID</button>
-                                <button onclick="archiveResident('\${r.id}')" class="btn btn-danger btn-sm"><i class="fa-solid fa-box-archive"></i> Archive</button>
-                            </td>
-                        </tr>
-                    \`;
-                });
-
-                html += \`</tbody></table></div></div>\`;
-                container.innerHTML = html;
-            } catch (err) { container.innerHTML = '<p>Error loading residents.</p>'; }
-        }
-
-        async function archiveResident(id) {
-            if (!confirm("Are you sure you want to archive this resident record?")) return;
-            try {
-                const res = await fetch(\`/api/residents/archive/\${id}\`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ statusReason: 'ARCHIVED' })
-                });
-                const data = await res.json();
-                if (data.error) return alert(data.error);
-                alert(data.message);
-                loadResidents();
-            } catch (err) { alert(err.message); }
-        }
-
-        async function viewDigitalId(id) {
-            try {
-                const res = await fetch(\`/api/resident-id-card/\${id}\`);
-                const data = await res.json();
-                if (data.error) return alert(data.error);
-
-                openModal("BARANGAY RESIDENT IDENTIFICATION CARD", \`
-                    <div style="display:flex; flex-direction:column; align-items:center; gap:20px;">
-                        \${data.html}
-                        <button onclick="window.print()" class="btn btn-primary"><i class="fa-solid fa-print"></i> Print ID Card</button>
-                    </div>
-                \`);
-            } catch (err) { alert(err.message); }
-        }
-
-        function toggleSelectAllIds(master) {
-            document.querySelectorAll('.id-select-cb').forEach(cb => cb.checked = master.checked);
-        }
-
-        async function printSelected8Ids() {
-            const selected = Array.from(document.querySelectorAll('.id-select-cb:checked')).map(cb => cb.value);
-            if (selected.length === 0) return alert("Please select at least 1 resident to generate the batch print sheet.");
-
-            try {
-                const res = await fetch('/api/print-batch-ids', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ residentIds: selected, paperSize: 'A4' })
-                });
-                const data = await res.json();
-                if (data.error) return alert(data.error);
-
-                const win = window.open('', '_blank');
-                win.document.write(data.html);
-                win.document.close();
-            } catch (err) { alert(err.message); }
-        }
-
-        function loadScanClaimQr() {
-            document.getElementById('pageTitle').innerText = "QR Code Certificate Claim Lookup";
-            const container = document.getElementById('mainContainer');
-            container.innerHTML = \`
-                <div class="content-card" style="max-width:600px; margin:0 auto;">
-                    <h3><i class="fa-solid fa-qrcode"></i> Scan/Paste Request Claim QR Token</h3>
-                    <p style="font-size:13px; color:var(--text-muted); margin-bottom:15px;">Scan the resident's claim QR code token to quickly verify and mark documents as RELEASED.</p>
-                    <div class="form-group">
-                        <label>Claim Token</label>
-                        <input type="text" id="claimTokenInput" class="form-control" placeholder="Paste Token UUID here...">
-                    </div>
-                    <button onclick="handleScanClaimLookup()" class="btn btn-primary" style="width:100%; justify-content:center;"><i class="fa-solid fa-search"></i> FETCH CLAIM DETAILS</button>
-                    <div id="claimResultContainer" style="margin-top:20px;"></div>
-                </div>
-            \`;
-        }
-
-        async function handleScanClaimLookup() {
-            const token = document.getElementById('claimTokenInput').value;
-            const resContainer = document.getElementById('claimResultContainer');
-            if (!token) return alert("Enter a token.");
-
-            try {
-                const res = await fetch(\`/api/certificates/claim-scan/\${token}\`);
-                const data = await res.json();
-                if (data.error) {
-                    resContainer.innerHTML = \`<div style="color:red; padding:15px; background:#fee2e2; border-radius:8px;">\${data.error}</div>\`;
-                    return;
-                }
-
-                resContainer.innerHTML = \`
-                    <div style="border:2px solid var(--primary-green); padding:20px; border-radius:8px; background:#f0fdf4;">
-                        <h4 style="color:var(--primary-green); margin-bottom:10px;"><i class="fa-solid fa-circle-check"></i> REQUEST FOUND</h4>
-                        <p><strong>Resident:</strong> \${data.residents.first_name} \${data.residents.last_name} (\${data.residents.resident_number})</p>
-                        <p><strong>Document:</strong> \${data.certificate_type}</p>
-                        <p><strong>Purpose:</strong> \${data.purpose}</p>
-                        <p><strong>Request Number:</strong> \${data.request_number}</p>
-                        <p><strong>Current Status:</strong> <span class="badge badge-pending">\${data.status}</span></p>
-                        <button onclick="markCertificateReleased('\${data.id}')" class="btn btn-primary" style="margin-top:15px; width:100%; justify-content:center;"><i class="fa-solid fa-box-archive"></i> MARK AS RELEASED</button>
-                    </div>
-                \`;
-            } catch (err) { alert(err.message); }
-        }
-
-        async function markCertificateReleased(id) {
-            try {
-                const res = await fetch(\`/api/certificates/update-status/\${id}\`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'RELEASED' })
-                });
-                const data = await res.json();
-                if (data.error) return alert(data.error);
-                alert("Certificate successfully marked as RELEASED!");
-                loadScanClaimQr();
-            } catch (err) { alert(err.message); }
-        }
-
-        // ============================================================================
-        // RESIDENT PORTAL VIEWS
-        // ============================================================================
-
-        function renderResidentPortal() {
-            const app = document.getElementById('app');
-            app.innerHTML = \`
-                <div class="sidebar">
-                    <div class="sidebar-header">
-                        <i class="fa-solid fa-user-gear" style="font-size:24px;"></i>
-                        <div>
-                            <h2>Resident Portal</h2>
-                            <span style="font-size:10px; opacity:0.8;">\${currentSettings ? currentSettings.barangay_name : ''}</span>
-                        </div>
-                    </div>
-                    <ul class="sidebar-menu">
-                        <li><a href="#" onclick="loadResidentDashboard()" class="active"><i class="fa-solid fa-house-user"></i> My Dashboard</a></li>
-                        <li><a href="#" onclick="loadMyDigitalId()"><i class="fa-solid fa-id-card"></i> My Digital ID</a></li>
-                        <li><a href="#" onclick="loadMyCertificates()"><i class="fa-solid fa-file-contract"></i> Request Certificate</a></li>
-                        <li><a href="#" onclick="handleLogout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></li>
-                    </ul>
-                </div>
-                <div class="main-content">
-                    <div class="top-navbar">
-                        <h4 id="pageTitle">Resident Dashboard</h4>
-                        <div><span>Welcome, \${currentUser ? currentUser.name : 'Resident'}</span></div>
-                    </div>
-                    <div class="page-container" id="mainContainer"></div>
-                </div>
-            \`;
-            loadResidentDashboard();
-        }
-
-        async function loadResidentDashboard() {
-            document.getElementById('pageTitle').innerText = "Resident Portal Overview";
-            const container = document.getElementById('mainContainer');
-            container.innerHTML = \`
-                <div class="content-card">
-                    <h3>Welcome to the Barangay E-Services Portal</h3>
-                    <p style="margin-top:10px; color:var(--text-muted);">Access barangay services, view your digital ID card, and request official documents directly online.</p>
-                </div>
-            \`;
-        }
-
-        async function loadMyDigitalId() {
-            document.getElementById('pageTitle').innerText = "Official Digital Resident ID";
-            const container = document.getElementById('mainContainer');
-            if (!currentUser || !currentUser.residentId) {
-                container.innerHTML = '<p style="color:red;">No resident ID linked to this account.</p>';
-                return;
-            }
-
-            try {
-                const res = await fetch(\`/api/resident-id-card/\${currentUser.residentId}\`);
-                const data = await res.json();
-                if (data.error) return container.innerHTML = \`<p style="color:red;">\${data.error}</p>\`;
-
-                container.innerHTML = \`
-                    <div class="content-card" style="display:flex; flex-direction:column; align-items:center; gap:20px;">
-                        \${data.html}
-                        <button onclick="window.print()" class="btn btn-primary"><i class="fa-solid fa-print"></i> Print ID Card</button>
-                    </div>
-                \`;
-            } catch (err) { container.innerHTML = '<p style="color:red;">Error loading ID Card.</p>'; }
-        }
-
-        // Helpers & Modal Operations
-        function openModal(title, bodyHtml) {
-            document.getElementById('modalContent').innerHTML = \`
-                <div class="modal-header">
-                    <h3>\${title}</h3>
-                    <button onclick="closeModal()" style="border:none; background:none; font-size:20px; cursor:pointer;">&times;</button>
-                </div>
-                <div>\${bodyHtml}</div>
-            \`;
-            document.getElementById('modalOverlay').classList.add('active');
-        }
-
-        function closeModal() {
-            document.getElementById('modalOverlay').classList.remove('active');
-        }
-
-        async function handleLogout() {
-            await fetch('/api/logout', { method: 'POST' });
-            currentUser = null;
-            renderLoginView();
-        }
-
-        // Start Application
-        window.onload = initApp;
-    </script>
-</body>
-</html>`;
-}
-
-// Layout Helper Generators for Dynamic Cards & Batch Sheets
-function renderSingleIdCardHtml(settings, resData, qrDataUrl) {
-  return `
-    <div style="width: 330px; height: 210px; border: 2px solid #0d7a40; border-radius: 10px; background: #fff; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; font-family: sans-serif; position: relative; box-sizing: border-box;">
-        <div style="display: flex; align-items: center; gap: 8px; border-bottom: 2px solid #0d7a40; padding-bottom: 5px;">
-            <div style="width: 32px; height: 32px; background: #0d7a40; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: bold; font-size: 14px;">B</div>
-            <div>
-                <div style="font-size: 10px; font-weight: bold; color: #0d7a40; text-transform: uppercase;">${settings.barangay_name || 'BARANGAY'}</div>
-                <div style="font-size: 8px; color: #555;">${settings.municipality}, ${settings.province}</div>
-            </div>
-        </div>
-        <div style="display: flex; gap: 10px; align-items: center; margin: 5px 0;">
-            <div style="width: 70px; height: 70px; background: #e5e7eb; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 24px; border: 1px solid #ccc;">
-                <i class="fa-solid fa-user"></i>
-            </div>
-            <div style="flex-grow: 1; font-size: 10px; color: #111;">
-                <div style="font-size: 12px; font-weight: bold; color: #1e40af; border-bottom: 1px solid #ddd; padding-bottom: 2px;">${resData.first_name} ${resData.last_name}</div>
-                <div style="margin-top: 3px;"><strong>ID:</strong> ${resData.resident_number}</div>
-                <div><strong>DOB:</strong> ${resData.date_of_birth}</div>
-                <div><strong>Sex:</strong> ${resData.gender}</div>
-                <div><strong>Purok:</strong> ${resData.purok}</div>
-            </div>
-            <img src="${qrDataUrl}" style="width: 55px; height: 55px;" alt="QR" />
-        </div>
-        <div style="background: #0d7a40; color: #fff; text-align: center; font-size: 8px; padding: 3px; border-radius: 4px; font-weight: bold; letter-spacing: 0.5px;">
-            BARANGAY RESIDENT IDENTIFICATION CARD
-        </div>
-    </div>
-  `;
-}
-
-function render8IdPrintSheetHtml(cardsHtmlArray, paperSize) {
-  return `<!DOCTYPE html>
-<html>
-<head>
-    <title>8-ID Print Sheet</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        @page { size: ${paperSize || 'A4'}; margin: 10mm; }
-        body { font-family: sans-serif; background: #fff; margin: 0; padding: 0; }
-        .grid-sheet { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15mm 10mm; justify-items: center; align-items: center; padding: 10mm 0; }
+        th { background: #f8fafc; padding: 12px 15px; color: var(--text-muted); font-weight: 600; border-bottom: 2px solid var(--border); }
+        td { padding: 12px 15px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        tr:hover { background-color: #f1f5f9; }
+
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-warning { background: #fff3cd; color: #856404; }
+        .badge-danger { background: #f8d7da; color: #721c24; }
+        .badge-info { background: #d1ecf1; color: #0c5460; }
+
+        .btn { padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; transition: 0.2s; }
+        .btn-primary { background: var(--primary); color: var(--white); }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-secondary { background: var(--secondary); color: var(--white); }
+        .btn-secondary:hover { background: var(--secondary-dark); }
+        .btn-danger { background: var(--danger); color: var(--white); }
+        .btn-sm { padding: 4px 8px; font-size: 12px; }
+
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-dark); }
+        .form-control { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px; outline: none; }
+        .form-control:focus { border-color: var(--secondary); box-shadow: 0 0 0 2px rgba(13, 71, 161, 0.1); }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+
+        /* Login Layout */
+        .login-body { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: url('${DEFAULT_BG}') no-repeat center center/cover; position: relative; }
+        .login-overlay { position: absolute; inset: 0; background: linear-gradient(135deg, rgba(27, 94, 32, 0.85), rgba(13, 71, 161, 0.85)); }
+        .login-card { position: relative; z-index: 10; background: rgba(255,255,255,0.95); width: 100%; max-width: 440px; padding: 35px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); backdrop-filter: blur(5px); }
+        .login-header { text-align: center; margin-bottom: 25px; }
+        .login-header img { width: 80px; height: 80px; border-radius: 50%; margin-bottom: 10px; object-fit: cover; }
+
+        /* Printable ID Card CSS Layout */
         @media print {
-            .no-print { display: none; }
+            body * { visibility: hidden; }
+            .print-area, .print-area * { visibility: visible; }
+            .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+            .no-print { display: none !important; }
+        }
+
+        /* 8 IDs Per Sheet Layout Grid */
+        .id-sheet-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 3.375in);
+            gap: 0.2in 0.2in;
+            justify-content: center;
+            padding: 0.2in;
+            background: white;
+        }
+
+        .id-card-frame {
+            width: 3.375in;
+            height: 2.125in;
+            border: 1px dashed #999;
+            border-radius: 8px;
+            position: relative;
+            background: #fff;
+            box-sizing: border-box;
+            overflow: hidden;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .id-card-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border-bottom: 2px solid var(--primary);
+            padding-bottom: 4px;
+        }
+
+        .id-card-header img { width: 32px; height: 32px; border-radius: 50%; }
+        .id-card-title { font-size: 8px; font-weight: bold; color: var(--primary-dark); text-transform: uppercase; line-height: 1; }
+        .id-card-body { display: flex; gap: 8px; margin-top: 4px; }
+        .id-card-photo { width: 65px; height: 65px; border-radius: 4px; object-fit: cover; border: 1px solid #ccc; }
+        .id-card-details { font-size: 7.5px; flex: 1; line-height: 1.2; }
+        .id-card-details strong { font-weight: bold; color: #000; }
+        .id-card-footer { display: flex; justify-content: space-between; align-items: flex-end; font-size: 6px; border-top: 1px solid #ddd; padding-top: 2px; }
+
+        @media (max-width: 768px) {
+            .app-container { flex-direction: column; }
+            .sidebar { width: 100%; }
+            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
         }
     </style>
-</head>
-<body>
-    <div class="no-print" style="padding: 15px; background: #f3f4f6; text-align: center; border-bottom: 1px solid #ccc;">
-        <button onclick="window.print()" style="padding: 10px 20px; background: #0d7a40; color: #fff; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">PRINT 8-ID SHEET</button>
-    </div>
-    <div class="grid-sheet">
-        ${cardsHtmlArray.join('')}
-    </div>
-</body>
-</html>`;
+    `;
 }
 
-function renderVerificationResultPage(settings, resident, isValid) {
-  return `<!DOCTYPE html>
-<html>
-<head>
-    <title>Barangay ID Verification</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body { font-family: sans-serif; background: #f3f4f6; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { background: #fff; border-radius: 12px; padding: 30px; width: 90%; max-width: 400px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); text-align: center; }
-        .badge { display: inline-block; padding: 6px 16px; border-radius: 50px; font-weight: bold; font-size: 14px; margin-bottom: 20px; }
-        .valid { background: #d1fae5; color: #059669; }
-        .invalid { background: #fee2e2; color: #dc2626; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h2>${settings ? settings.barangay_name : 'Barangay Verification'}</h2>
-        <p style="font-size: 12px; color: #6b7280; margin-bottom: 20px;">Official Identification Verification</p>
-        ${isValid ? `
-            <div class="badge valid"><i class="fa-solid fa-circle-check"></i> VALID RESIDENT ID</div>
-            <p style="text-align:left; margin-bottom:8px;"><strong>Name:</strong> ${resident.first_name}${resident.last_name}</p>
-            <p style="text-align:left; margin-bottom:8px;"><strong>ID Number:</strong> ${resident.resident_number}</p>
-            <p style="text-align:left; margin-bottom:8px;"><strong>Purok:</strong> ${resident.purok}</p>
-            <p style="text-align:left; margin-bottom:8px;"><strong>Status:</strong> ${resident.status}</p>
-        ` : `
-            <div class="badge invalid"><i class="fa-solid fa-triangle-exclamation"></i> INVALID / UNVERIFIED ID</div>
-            <p style="color:#6b7280; font-size:14px;">The scanned identification token does not correspond to an active record in our database.</p>
-        `}
-    </div>
-</body>
-</html>`;
+// -----------------------------------------------------------------------------
+// 4. HTML LAYOUT TEMPLATE WRAPPER
+// -----------------------------------------------------------------------------
+function renderShell(title, content, user, activePath, barangay) {
+    const primary = barangay?.official_colors?.primary || '#1b5e20';
+    const secondary = barangay?.official_colors?.secondary || '#0d47a1';
+    const logo = barangay?.logo_url || 'https://via.placeholder.com/80?text=BRGY';
+    const barangayName = barangay?.name ? `Brgy. ${barangay.name}` : 'Barangay System';
+
+    const isStaff = ['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF'].includes(user?.role);
+
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title} - ${barangayName}</title>
+        ${getGlobalStyles(primary, secondary)}
+    </head>
+    <body>
+        <div class="app-container">
+            <aside class="sidebar no-print">
+                <div class="sidebar-header">
+                    <img src="${logo}" alt="Logo">
+                    <h3>${barangayName}</h3>
+                    <small>${barangay?.municipality || 'Government System'}</small>
+                </div>
+                <ul class="sidebar-menu">
+                    ${isStaff ? `
+                        <li class="${activePath === '/dashboard' ? 'active' : ''}"><a href="/dashboard">📊 Staff Dashboard</a></li>
+                        <li class="${activePath === '/residents' ? 'active' : ''}"><a href="/residents">👥 Residents Management</a></li>
+                        <li class="${activePath === '/households' ? 'active' : ''}"><a href="/households">🏠 Household Directory</a></li>
+                        <li class="${activePath === '/puroks' ? 'active' : ''}"><a href="/puroks">📍 Purok System</a></li>
+                        <li class="${activePath === '/certificates' ? 'active' : ''}"><a href="/certificates">📜 Certificates System</a></li>
+                        <li class="${activePath === '/appointments' ? 'active' : ''}"><a href="/appointments">📅 Appointments</a></li>
+                        <li class="${activePath === '/blotter' ? 'active' : ''}"><a href="/blotter">⚖️ Blotter Cases</a></li>
+                        <li class="${activePath === '/assistance' ? 'active' : ''}"><a href="/assistance">🤝 Assistance Records</a></li>
+                        <li class="${activePath === '/businesses' ? 'active' : ''}"><a href="/businesses">💼 Business Registry</a></li>
+                        <li class="${activePath === '/announcements' ? 'active' : ''}"><a href="/announcements">📢 Announcements</a></li>
+                        <li class="${activePath === '/print-ids' ? 'active' : ''}"><a href="/print-ids">🪪 ID Print Center (8/Sheet)</a></li>
+                        <li class="${activePath === '/reports' ? 'active' : ''}"><a href="/reports">📈 System Reports</a></li>
+                        ${['SUPER_ADMIN', 'BARANGAY_ADMIN'].includes(user.role) ? `<li class="${activePath === '/settings' ? 'active' : ''}"><a href="/settings">⚙️ Barangay Settings</a></li>` : ''}
+                    ` : `
+                        <li class="${activePath === '/resident/portal' ? 'active' : ''}"><a href="/resident/portal">🏠 My Portal</a></li>
+                        <li class="${activePath === '/resident/digital-id' ? 'active' : ''}"><a href="/resident/digital-id">🪪 My Digital ID</a></li>
+                        <li class="${activePath === '/resident/certificates' ? 'active' : ''}"><a href="/resident/certificates">📜 Request Certificate</a></li>
+                        <li class="${activePath === '/resident/appointments' ? 'active' : ''}"><a href="/resident/appointments">📅 Book Appointment</a></li>
+                        <li class="${activePath === '/resident/assistance' ? 'active' : ''}"><a href="/resident/assistance">🤝 Assistance Program</a></li>
+                    `}
+                    <li><a href="/logout">🚪 Sign Out</a></li>
+                </ul>
+            </aside>
+            <div class="main-wrapper">
+                <header class="top-navbar no-print">
+                    <div><strong>${title}</strong></div>
+                    <div class="navbar-user">
+                        <span class="user-badge">${user?.role?.replace('_', ' ')}</span>
+                        <span>👋 ${user?.full_name}</span>
+                    </div>
+                </header>
+                <main class="content-body">
+                    ${content}
+                </main>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
 }
 
-function renderDbConfigErrorPage() {
-  return `<!DOCTYPE html>
-<html>
-<head><title>Database Configuration Required</title></head>
-<body style="font-family:sans-serif; background:#f3f4f6; display:flex; justify-content:center; align-items:center; height:100vh;">
-    <div style="background:#fff; padding:40px; border-radius:12px; box-shadow:0 10px 15px rgba(0,0,0,0.1); max-width:500px; text-align:center;">
-        <h2 style="color:#dc2626;">DATABASE NOT CONFIGURED</h2>
-        <p style="color:#4b5563; margin-top:10px; line-height:1.5;">Please configure <strong>SUPABASE_URL</strong> and <strong>SUPABASE_ANON_KEY</strong> inside <code>app.js</code> or as environment variables in Render to connect the database.</p>
-    </div>
-</body>
-</html>`;
+function generateErrorPage(title, message) {
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head><title>${title}</title>${getGlobalStyles()}</head>
+    <body class="login-body">
+        <div class="login-card" style="text-align:center;">
+            <h1 style="color:var(--danger); font-size:48px;">⚠️</h1>
+            <h2>${title}</h2>
+            <p style="margin:15px 0; color:var(--text-muted);">${message}</p>
+            <a href="/dashboard" class="btn btn-primary">Return to Safety</a>
+        </div>
+    </body>
+    </html>
+    `;
 }
 
-// Single Entry-Point Route
-app.get('*', (req, res) => {
-  res.send(renderMainAppPage());
+// -----------------------------------------------------------------------------
+// 5. PUBLIC SYSTEM ROUTES (SETUP & LOGIN)
+// -----------------------------------------------------------------------------
+
+// System Setup Check Middleware
+app.use(async (req, res, next) => {
+    if (req.path === '/setup' || req.path.startsWith('/public')) return next();
+    
+    // Check if any barangay exists
+    const { count, error } = await supabase.from('barangays').select('*', { count: 'exact', head: true });
+    if (!error && count === 0 && req.path !== '/setup') {
+        return res.redirect('/setup');
+    }
+    next();
 });
 
-// ============================================================================
-// SERVER INITIALIZATION
-// ============================================================================
-const PORT = process.env.PORT || 3000;
+// Setup Initial First Admin Page
+app.get('/setup', async (req, res) => {
+    const { count } = await supabase.from('barangays').select('*', { count: 'exact', head: true });
+    if (count > 0) return res.redirect('/login');
+
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><title>First-Time Administrator Setup</title>${getGlobalStyles()}</head>
+    <body class="login-body">
+        <div class="login-overlay"></div>
+        <div class="login-card" style="max-width: 600px;">
+            <div class="login-header">
+                <h2>🏛️ System Setup</h2>
+                <p>Initialize First Barangay & Administrator Account</p>
+            </div>
+            <form action="/setup" method="POST" enctype="multipart/form-data">
+                <h4 style="margin-bottom:10px; color:var(--primary);">1. Barangay Information</h4>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Barangay Name</label>
+                        <input type="text" name="barangay_name" class="form-control" placeholder="e.g. San Jose" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Municipality/City</label>
+                        <input type="text" name="municipality" class="form-control" placeholder="e.g. Angeles City" required>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Province</label>
+                        <input type="text" name="province" class="form-control" placeholder="e.g. Pampanga" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Barangay Logo (Image)</label>
+                        <input type="file" name="logo" class="form-control" accept="image/*">
+                    </div>
+                </div>
+
+                <h4 style="margin:15px 0 10px; color:var(--primary);">2. Super Admin Credentials</h4>
+                <div class="form-group">
+                    <label>Full Administrator Name</label>
+                    <input type="text" name="full_name" class="form-control" placeholder="e.g. Chief Admin" required>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" name="username" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Email Address</label>
+                        <input type="email" name="email" class="form-control" required>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Confirm Password</label>
+                        <input type="password" name="confirm_password" class="form-control" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; margin-top:15px;">Complete System Initialization</button>
+            </form>
+        </div>
+    </body>
+    </html>
+    `;
+    res.send(html);
+});
+
+app.post('/setup', async (req, res) => {
+    try {
+        const { barangay_name, municipality, province, full_name, username, email, password, confirm_password } = req.body;
+
+        if (password !== confirm_password) {
+            return res.send('<script>alert("Passwords do not match"); history.back();</script>');
+        }
+
+        let logo_url = 'https://via.placeholder.com/150?text=Barangay+Logo';
+
+        if (req.files && req.files.logo) {
+            const logoFile = req.files.logo;
+            const fileName = `logo-${Date.now()}-${logoFile.name}`;
+            const { data, error } = await supabase.storage.from('barangay-assets').upload(fileName, logoFile.data, {
+                contentType: logoFile.mimetype
+            });
+            if (!error) {
+                const { data: publicUrl } = supabase.storage.from('barangay-assets').getPublicUrl(fileName);
+                logo_url = publicUrl.publicUrl;
+            }
+        }
+
+        // Create Barangay
+        const { data: barangay, error: bErr } = await supabase.from('barangays').insert([{
+            name: barangay_name,
+            municipality: municipality,
+            province: province,
+            logo_url: logo_url
+        }]).select().single();
+
+        if (bErr) throw bErr;
+
+        // Hash password
+        const password_hash = await bcrypt.hash(password, 10);
+
+        // Create Admin User
+        const { error: uErr } = await supabase.from('users').insert([{
+            barangay_id: barangay.id,
+            email: email,
+            username: username,
+            password_hash: password_hash,
+            full_name: full_name,
+            role: 'SUPER_ADMIN'
+        }]);
+
+        if (uErr) throw uErr;
+
+        res.send('<script>alert("System Setup Complete! Please login."); window.location.href="/login";</script>');
+    } catch (e) {
+        res.status(500).send(generateErrorPage('Setup Error', e.message));
+    }
+});
+
+// Login Page
+app.get('/login', async (req, res) => {
+    // Retrieve list of Barangays for drop down selection
+    const { data: barangays } = await supabase.from('barangays').select('id, name, municipality, logo_url');
+
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><title>System Login - Barangay Resident Management System</title>${getGlobalStyles()}</head>
+    <body class="login-body">
+        <div class="login-overlay"></div>
+        <div class="login-card">
+            <div class="login-header">
+                <img src="${barangays && barangays[0]?.logo_url ? barangays[0].logo_url : 'https://via.placeholder.com/80'}" alt="Barangay Logo">
+                <h2>Barangay Portal</h2>
+                <p>Resident & Administrative Management System</p>
+            </div>
+            <form action="/login" method="POST">
+                <div class="form-group">
+                    <label>Select Barangay</label>
+                    <select name="barangay_id" class="form-control" required>
+                        ${barangays?.map(b => `<option value="${b.id}">${b.name}, ${b.municipality}</option>`).join('') || '<option value="">No Barangays Found</option>'}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Username or Email</label>
+                    <input type="text" name="login_id" class="form-control" required placeholder="Enter your credential">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" class="form-control" required placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Sign In to Portal</button>
+            </form>
+            <hr style="margin:20px 0; border:0; border-top:1px solid var(--border);">
+            <div style="text-align:center; font-size:13px;">
+                <p>Are you a local resident?</p>
+                <a href="/register" style="font-weight:bold; color:var(--secondary);">Register for New Resident Account</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+    res.send(html);
+});
+
+app.post('/login', async (req, res) => {
+    const { barangay_id, login_id, password } = req.body;
+
+    const { data: user } = await supabase
+        .from('users')
+        .select('*')
+        .eq('barangay_id', barangay_id)
+        .or(`username.eq.${login_id},email.eq.${login_id}`)
+        .single();
+
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+        return res.send('<script>alert("Invalid Username, Password, or Barangay Selection!"); history.back();</script>');
+    }
+
+    const token = jwt.sign({ id: user.id, role: user.role, barangay_id: user.barangay_id }, JWT_SECRET, { expiresIn: '1d' });
+    res.cookie('auth_token', token, { httpOnly: true });
+
+    await logActivity(user.barangay_id, user.id, 'LOGIN', `User ${user.username} logged in`, req.ip);
+
+    if (user.role === 'RESIDENT') {
+        res.redirect('/resident/portal');
+    } else {
+        res.redirect('/dashboard');
+    }
+});
+
+app.get('/logout', (req, res) => {
+    res.clearCookie('auth_token');
+    res.redirect('/login');
+});
+
+// Resident Public Registration
+app.get('/register', async (req, res) => {
+    const { data: barangays } = await supabase.from('barangays').select('id, name, municipality');
+    
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><title>Resident Registration</title>${getGlobalStyles()}</head>
+    <body class="login-body">
+        <div class="login-overlay"></div>
+        <div class="login-card" style="max-width:700px;">
+            <div class="login-header">
+                <h2>📝 Resident Online Registration</h2>
+                <p>Submit application for Barangay Verification & Digital ID</p>
+            </div>
+            <form action="/register" method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label>Select Barangay Jurisdiction</label>
+                    <select name="barangay_id" class="form-control" required>
+                        ${barangays?.map(b => `<option value="${b.id}">${b.name}, ${b.municipality}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="grid-3">
+                    <div class="form-group">
+                        <label>First Name</label>
+                        <input type="text" name="first_name" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Middle Name</label>
+                        <input type="text" name="middle_name" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Last Name</label>
+                        <input type="text" name="last_name" class="form-control" required>
+                    </div>
+                </div>
+                <div class="grid-3">
+                    <div class="form-group">
+                        <label>Date of Birth</label>
+                        <input type="date" name="date_of_birth" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Gender</label>
+                        <select name="gender" class="form-control" required>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Civil Status</label>
+                        <select name="civil_status" class="form-control" required>
+                            <option value="Single">Single</option>
+                            <option value="Married">Married</option>
+                            <option value="Widowed">Widowed</option>
+                            <option value="Separated">Separated</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Contact Number</label>
+                        <input type="text" name="contact_number" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Email Address</label>
+                        <input type="email" name="email" class="form-control" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Home Street Address</label>
+                    <input type="text" name="address" class="form-control" required placeholder="House No., Street Name">
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Upload Profile Photo (1x1 or 2x2)</label>
+                        <input type="file" name="photo" class="form-control" accept="image/*" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Account Password</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Submit Registration Application</button>
+            </form>
+            <div style="text-align:center; margin-top:15px;">
+                <a href="/login">Already registered? Log in here</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+    res.send(html);
+});
+
+app.post('/register', async (req, res) => {
+    try {
+        const { barangay_id, first_name, middle_name, last_name, date_of_birth, gender, civil_status, contact_number, email, address, password } = req.body;
+
+        let photo_url = 'https://via.placeholder.com/150';
+
+        if (req.files && req.files.photo) {
+            const file = req.files.photo;
+            const fileName = `res-${Date.now()}-${file.name}`;
+            const { data, error } = await supabase.storage.from('resident-documents').upload(fileName, file.data, {
+                contentType: file.mimetype
+            });
+            if (!error) {
+                const { data: publicUrl } = supabase.storage.from('resident-documents').getPublicUrl(fileName);
+                photo_url = publicUrl.publicUrl;
+            }
+        }
+
+        // Create Resident User Account
+        const password_hash = await bcrypt.hash(password, 10);
+        const username = `${first_name.toLowerCase()}.${last_name.toLowerCase()}${Math.floor(Math.random() * 8999 + 1000)}`;
+
+        const { data: user, error: uErr } = await supabase.from('users').insert([{
+            barangay_id: barangay_id,
+            email: email,
+            username: username,
+            password_hash: password_hash,
+            full_name: `${first_name} ${last_name}`,
+            role: 'RESIDENT'
+        }]).select().single();
+
+        if (uErr) throw uErr;
+
+        // Auto Generate Unique Resident ID Format
+        const resIdNumber = `BRGY-${Math.floor(100000 + Math.random() * 900000)}`;
+
+        // Create Resident Profile with PENDING status
+        const { error: rErr } = await supabase.from('residents').insert([{
+            barangay_id: barangay_id,
+            user_id: user.id,
+            resident_id_number: resIdNumber,
+            first_name: first_name,
+            middle_name: middle_name,
+            last_name: last_name,
+            date_of_birth: date_of_birth,
+            gender: gender,
+            civil_status: civil_status,
+            contact_number: contact_number,
+            email: email,
+            address: address,
+            profile_photo_url: photo_url,
+            approval_status: 'PENDING'
+        }]);
+
+        if (rErr) throw rErr;
+
+        res.send(`<script>alert("Registration Successful! Your username is: ${username}. Your registration is now pending review by Barangay Staff."); window.location.href="/login";</script>`);
+    } catch (e) {
+        res.status(500).send(generateErrorPage('Registration Error', e.message));
+    }
+});
+
+// -----------------------------------------------------------------------------
+// 6. PUBLIC QR VERIFICATION MODULE
+// -----------------------------------------------------------------------------
+app.get('/verify/resident/:token', async (req, res) => {
+    const { token } = req.params;
+
+    const { data: resident } = await supabase
+        .from('residents')
+        .select('*, barangays(*)')
+        .eq('qr_verification_token', token)
+        .single();
+
+    if (!resident) {
+        return res.status(404).send(generateErrorPage('Verification Failed', 'Invalid QR Verification Token or Resident Record Not Found.'));
+    }
+
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><title>Resident Digital Identity Verification</title>${getGlobalStyles()}</head>
+    <body class="login-body">
+        <div class="login-card" style="max-width:500px; text-align:center;">
+            <img src="${resident.barangays.logo_url}" style="width:70px; height:70px; border-radius:50%;" />
+            <h3 style="margin-top:10px;">Barangay ${resident.barangays.name}</h3>
+            <p style="color:var(--text-muted); font-size:12px;">Official Resident Identity Verification Portal</p>
+            <hr style="margin:15px 0; border:0; border-top:1px solid var(--border);">
+            
+            <div style="background:#e8f5e9; padding:10px; border-radius:6px; color:#155724; font-weight:bold; margin-bottom:15px;">
+                ✓ OFFICIAL VERIFIED RESIDENT
+            </div>
+
+            <img src="${resident.profile_photo_url}" style="width:100px; height:100px; border-radius:8px; object-fit:cover; margin-bottom:15px;" />
+
+            <table style="text-align:left;">
+                <tr><th>Full Name:</th><td>${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</td></tr>
+                <tr><th>Resident ID:</th><td><strong>${resident.resident_id_number}</strong></td></tr>
+                <tr><th>Gender / Status:</th><td>${resident.gender} / ${resident.civil_status}</td></tr>
+                <tr><th>Address:</th><td>${resident.address}</td></tr>
+                <tr><th>Status:</th><td><span class="badge badge-success">${resident.approval_status}</span></td></tr>
+            </table>
+            <p style="font-size:11px; color:var(--text-muted); margin-top:20px;">Verification Timestamp: ${new Date().toLocaleString()}</p>
+        </div>
+    </body>
+    </html>
+    `;
+    res.send(html);
+});
+
+// Certificate Claim Verification Scanner Endpoint
+app.get('/verify/certificate/:token', authMiddleware, async (req, res) => {
+    const { token } = req.params;
+
+    const { data: cert } = await supabase
+        .from('certificate_requests')
+        .select('*, residents(*)')
+        .eq('barangay_id', req.user.barangay_id)
+        .eq('qr_code_token', token)
+        .single();
+
+    if (!cert) {
+        return res.status(404).send(generateErrorPage('Certificate Verification', 'Certificate request token not found.'));
+    }
+
+    const html = `
+    <div class="panel">
+        <div class="panel-header">
+            <span class="panel-title">Certificate Request Verification</span>
+        </div>
+        <div class="panel-body" style="text-align:center;">
+            <h3>Request Number: ${cert.request_number}</h3>
+            <p><strong>Resident Name:</strong> ${cert.residents.first_name} ${cert.residents.last_name}</p>
+            <p><strong>Document Requested:</strong> ${cert.certificate_type}</p>
+            <p><strong>Status:</strong> <span class="badge badge-info">${cert.status}</span></p>
+            
+            ${cert.status === 'READY_FOR_RELEASE' ? `
+                <form action="/certificates/release/${cert.id}" method="POST" style="margin-top:20px;">
+                    <button type="submit" class="btn btn-primary">Mark as RELEASED to Resident</button>
+                </form>
+            ` : `<p style="margin-top:15px; color:var(--text-muted);">This certificate is currently in ${cert.status} state.</p>`}
+        </div>
+    </div>
+    `;
+    res.send(renderShell('QR Verification', html, req.user, '/certificates', req.barangay));
+});
+
+// -----------------------------------------------------------------------------
+// 7. STAFF DASHBOARD & SYSTEM MODULES
+// -----------------------------------------------------------------------------
+app.get('/dashboard', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    const barangayId = req.user.barangay_id;
+
+    // Fetch Analytics Metrics in Parallel
+    const [
+        { count: totalResidents },
+        { count: pendingResidents },
+        { count: totalHouseholds },
+        { count: maleCount },
+        { count: femaleCount },
+        { count: seniorCount },
+        { count: pwdCount },
+        { count: certPending }
+    ] = await Promise.all([
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('approval_status', 'APPROVED'),
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('approval_status', 'PENDING'),
+        supabase.from('households').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId),
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('gender', 'Male'),
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('gender', 'Female'),
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('is_senior_citizen', true),
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('is_pwd', true),
+        supabase.from('certificate_requests').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('status', 'SUBMITTED')
+    ]);
+
+    const { data: recentLogs } = await supabase
+        .from('activity_logs')
+        .select('*')
+        .eq('barangay_id', barangayId)
+        .order('created_at', { ascending: false })
+        .limit(8);
+
+    const html = `
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">Barangay Executive Dashboard</h1>
+            <p style="color:var(--text-muted); font-size:13px;">Real-time overview & resident management statistics</p>
+        </div>
+    </div>
+
+    <div class="grid-cards">
+        <div class="card-stat">
+            <div class="title">Total Approved Residents</div>
+            <div class="value">${totalResidents || 0}</div>
+        </div>
+        <div class="card-stat orange">
+            <div class="title">Pending Registration Verification</div>
+            <div class="value">${pendingResidents || 0}</div>
+        </div>
+        <div class="card-stat blue">
+            <div class="title">Registered Households</div>
+            <div class="value">${totalHouseholds || 0}</div>
+        </div>
+        <div class="card-stat red">
+            <div class="title">Pending Certificate Requests</div>
+            <div class="value">${certPending || 0}</div>
+        </div>
+    </div>
+
+    <div class="grid-cards">
+        <div class="card-stat">
+            <div class="title">Male Demographics</div>
+            <div class="value">${maleCount || 0}</div>
+        </div>
+        <div class="card-stat">
+            <div class="title">Female Demographics</div>
+            <div class="value">${femaleCount || 0}</div>
+        </div>
+        <div class="card-stat">
+            <div class="title">Senior Citizens</div>
+            <div class="value">${seniorCount || 0}</div>
+        </div>
+        <div class="card-stat">
+            <div class="title">Persons with Disability (PWD)</div>
+            <div class="value">${pwdCount || 0}</div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">
+            <span class="panel-title">📋 Recent System Audit Logs</span>
+        </div>
+        <div class="panel-body">
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Action</th>
+                            <th>Description</th>
+                            <th>IP Address</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${recentLogs?.map(log => `
+                            <tr>
+                                <td>${new Date(log.created_at).toLocaleString()}</td>
+                                <td><span class="badge badge-info">${log.action}</span></td>
+                                <td>${log.description}</td>
+                                <td>${log.ip_address}</td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="4">No recent activity logs recorded.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+
+    res.send(renderShell('Dashboard', html, req.user, '/dashboard', req.barangay));
+});
+
+// -----------------------------------------------------------------------------
+// 8. RESIDENT MANAGEMENT MODULE (FULL CRUD + APPROVAL WORKFLOW)
+// -----------------------------------------------------------------------------
+app.get('/residents', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    const barangayId = req.user.barangay_id;
+    const search = req.query.search || '';
+    const statusFilter = req.query.status || 'APPROVED';
+
+    let query = supabase
+        .from('residents')
+        .select('*, puroks(name)')
+        .eq('barangay_id', barangayId)
+        .eq('approval_status', statusFilter);
+
+    if (search) {
+        query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,resident_id_number.ilike.%${search}%`);
+    }
+
+    const { data: residents } = await query.order('registered_at', { ascending: false });
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Resident Directory</h1>
+        <a href="/residents/new" class="btn btn-primary">+ Register New Resident</a>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">
+            <form style="display:flex; gap:10px; width:100%;" method="GET">
+                <input type="text" name="search" class="form-control" placeholder="Search by name or Resident ID..." value="${search}">
+                <select name="status" class="form-control" style="width:200px;" onchange="this.form.submit()">
+                    <option value="APPROVED" ${statusFilter === 'APPROVED' ? 'selected' : ''}>Approved Residents</option>
+                    <option value="PENDING" ${statusFilter === 'PENDING' ? 'selected' : ''}>Pending Verifications</option>
+                    <option value="REJECTED" ${statusFilter === 'REJECTED' ? 'selected' : ''}>Rejected Applications</option>
+                    <option value="ARCHIVED" ${statusFilter === 'ARCHIVED' ? 'selected' : ''}>Archived Records</option>
+                </select>
+                <button type="submit" class="btn btn-secondary">Search</button>
+            </form>
+        </div>
+        <div class="panel-body">
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Photo</th>
+                            <th>Resident ID</th>
+                            <th>Full Name</th>
+                            <th>Age / Sex</th>
+                            <th>Purok</th>
+                            <th>Special Categories</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${residents?.map(r => {
+                            const age = Math.floor((new Date() - new Date(r.date_of_birth)) / 31557600000);
+                            return `
+                            <tr>
+                                <td><img src="${r.profile_photo_url || 'https://via.placeholder.com/40'}" style="width:40px; height:40px; border-radius:50%; object-fit:cover;"></td>
+                                <td><strong>${r.resident_id_number}</strong></td>
+                                <td>${r.first_name} ${r.middle_name || ''} ${r.last_name}</td>
+                                <td>${age} yrs / ${r.gender}</td>
+                                <td>${r.puroks?.name || 'Unassigned'}</td>
+                                <td>
+                                    ${r.is_senior_citizen ? '<span class="badge badge-info">Senior</span>' : ''}
+                                    ${r.is_pwd ? '<span class="badge badge-warning">PWD</span>' : ''}
+                                    ${r.is_voter ? '<span class="badge badge-success">Voter</span>' : ''}
+                                </td>
+                                <td><span class="badge ${r.approval_status === 'APPROVED' ? 'badge-success' : r.approval_status === 'PENDING' ? 'badge-warning' : 'badge-danger'}">${r.approval_status}</span></td>
+                                <td>
+                                    <div style="display:flex; gap:5px;">
+                                        ${r.approval_status === 'PENDING' ? `
+                                            <form action="/residents/approve/${r.id}" method="POST"><button class="btn btn-primary btn-sm">Approve</button></form>
+                                            <form action="/residents/reject/${r.id}" method="POST"><button class="btn btn-danger btn-sm">Reject</button></form>
+                                        ` : `
+                                            <a href="/residents/edit/${r.id}" class="btn btn-secondary btn-sm">Edit</a>
+                                            <form action="/residents/archive/${r.id}" method="POST"><button class="btn btn-danger btn-sm">Archive</button></form>
+                                        `}
+                                    </div>
+                                </td>
+                            </tr>
+                            `;
+                        }).join('') || '<tr><td colspan="8">No resident records match the selected filter.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+
+    res.send(renderShell('Residents Management', html, req.user, '/residents', req.barangay));
+});
+
+// Register Resident Manual Form
+app.get('/residents/new', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    const { data: puroks } = await supabase.from('puroks').select('*').eq('barangay_id', req.user.barangay_id);
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Manual Resident Registration</h1>
+    </div>
+    <div class="panel">
+        <div class="panel-body">
+            <form action="/residents/new" method="POST" enctype="multipart/form-data">
+                <div class="grid-3">
+                    <div class="form-group"><label>First Name</label><input type="text" name="first_name" class="form-control" required></div>
+                    <div class="form-group"><label>Middle Name</label><input type="text" name="middle_name" class="form-control"></div>
+                    <div class="form-group"><label>Last Name</label><input type="text" name="last_name" class="form-control" required></div>
+                </div>
+                <div class="grid-3">
+                    <div class="form-group"><label>Date of Birth</label><input type="date" name="date_of_birth" class="form-control" required></div>
+                    <div class="form-group"><label>Gender</label>
+                        <select name="gender" class="form-control" required><option value="Male">Male</option><option value="Female">Female</option></select>
+                    </div>
+                    <div class="form-group"><label>Civil Status</label>
+                        <select name="civil_status" class="form-control"><option value="Single">Single</option><option value="Married">Married</option><option value="Widowed">Widowed</option></select>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group"><label>Purok Location</label>
+                        <select name="purok_id" class="form-control">
+                            <option value="">-- Select Purok --</option>
+                            ${puroks?.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group"><label>Street Address</label><input type="text" name="address" class="form-control" required></div>
+                </div>
+                <div class="grid-4" style="margin:15px 0;">
+                    <label><input type="checkbox" name="is_voter" value="true"> Registered Voter</label>
+                    <label><input type="checkbox" name="is_senior_citizen" value="true"> Senior Citizen</label>
+                    <label><input type="checkbox" name="is_pwd" value="true"> Person with Disability (PWD)</label>
+                    <label><input type="checkbox" name="is_solo_parent" value="true"> Solo Parent</label>
+                </div>
+                <div class="form-group"><label>Upload Profile Photo</label><input type="file" name="photo" class="form-control" accept="image/*"></div>
+                <button type="submit" class="btn btn-primary">Save Resident Record</button>
+            </form>
+        </div>
+    </div>
+    `;
+    res.send(renderShell('Add Resident', html, req.user, '/residents', req.barangay));
+});
+
+app.post('/residents/new', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    try {
+        const barangayId = req.user.barangay_id;
+        const body = req.body;
+
+        let photo_url = 'https://via.placeholder.com/150';
+        if (req.files && req.files.photo) {
+            const file = req.files.photo;
+            const fileName = `res-${Date.now()}-${file.name}`;
+            await supabase.storage.from('resident-documents').upload(fileName, file.data, { contentType: file.mimetype });
+            photo_url = supabase.storage.from('resident-documents').getPublicUrl(fileName).data.publicUrl;
+        }
+
+        const resIdNumber = `BRGY-${Math.floor(100000 + Math.random() * 900000)}`;
+
+        await supabase.from('residents').insert([{
+            barangay_id: barangayId,
+            resident_id_number: resIdNumber,
+            first_name: body.first_name,
+            middle_name: body.middle_name,
+            last_name: body.last_name,
+            date_of_birth: body.date_of_birth,
+            gender: body.gender,
+            civil_status: body.civil_status,
+            purok_id: body.purok_id || null,
+            address: body.address,
+            is_voter: body.is_voter === 'true',
+            is_senior_citizen: body.is_senior_citizen === 'true',
+            is_pwd: body.is_pwd === 'true',
+            is_solo_parent: body.is_solo_parent === 'true',
+            profile_photo_url: photo_url,
+            approval_status: 'APPROVED',
+            approved_at: new Date()
+        }]);
+
+        await logActivity(barangayId, req.user.id, 'ADD_RESIDENT', `Created resident record ${resIdNumber}`);
+        res.redirect('/residents');
+    } catch (e) {
+        res.status(500).send(generateErrorPage('Insert Error', e.message));
+    }
+});
+
+// Approve & Reject Endpoints
+app.post('/residents/approve/:id', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    await supabase.from('residents').update({ approval_status: 'APPROVED', approved_at: new Date() }).eq('id', req.params.id);
+    res.redirect('/residents');
+});
+
+app.post('/residents/reject/:id', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    await supabase.from('residents').update({ approval_status: 'REJECTED' }).eq('id', req.params.id);
+    res.redirect('/residents');
+});
+
+app.post('/residents/archive/:id', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN']), async (req, res) => {
+    await supabase.from('residents').update({ approval_status: 'ARCHIVED' }).eq('id', req.params.id);
+    res.redirect('/residents');
+});
+
+// -----------------------------------------------------------------------------
+// 9. CERTIFICATE MANAGEMENT & FILE UPLOADS
+// -----------------------------------------------------------------------------
+app.get('/certificates', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    const barangayId = req.user.barangay_id;
+
+    const { data: requests } = await supabase
+        .from('certificate_requests')
+        .select('*, residents(*)')
+        .eq('barangay_id', barangayId)
+        .order('requested_at', { ascending: false });
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Certificate Requests & Processing</h1>
+    </div>
+
+    <div class="panel">
+        <div class="panel-body">
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Request #</th>
+                            <th>Resident</th>
+                            <th>Certificate Type</th>
+                            <th>Purpose</th>
+                            <th>Status</th>
+                            <th>Attached Document</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${requests?.map(c => `
+                            <tr>
+                                <td><strong>${c.request_number}</strong></td>
+                                <td>${c.residents?.first_name} ${c.residents?.last_name}</td>
+                                <td>${c.certificate_type}</td>
+                                <td>${c.purpose}</td>
+                                <td><span class="badge badge-info">${c.status}</span></td>
+                                <td>${c.attached_file_url ? `<a href="${c.attached_file_url}" target="_blank" class="btn btn-sm btn-secondary">View File</a>` : 'No file'}</td>
+                                <td>
+                                    <button class="btn btn-primary btn-sm" onclick="document.getElementById('modal-${c.id}').style.display='block'">Process Request</button>
+
+                                    <!-- Processing Modal Dialog -->
+                                    <div id="modal-${c.id}" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100; align-items:center; justify-content:center;">
+                                        <div style="background:#fff; padding:25px; border-radius:8px; width:450px; margin:100px auto;">
+                                            <h3>Process Request #${c.request_number}</h3>
+                                            <form action="/certificates/process/${c.id}" method="POST" enctype="multipart/form-data" style="margin-top:15px;">
+                                                <div class="form-group">
+                                                    <label>Update Status</label>
+                                                    <select name="status" class="form-control">
+                                                        <option value="PROCESSING">Processing</option>
+                                                        <option value="READY_FOR_RELEASE">Ready for Release</option>
+                                                        <option value="RELEASED">Released</option>
+                                                        <option value="REJECTED">Rejected</option>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Upload Signed Certificate (PDF/Image)</label>
+                                                    <input type="file" name="cert_file" class="form-control" accept=".pdf,image/*">
+                                                </div>
+                                                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                                                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('modal-${c.id}').style.display='none'">Cancel</button>
+                                                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="7">No certificate requests found.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+
+    res.send(renderShell('Certificates', html, req.user, '/certificates', req.barangay));
+});
+
+app.post('/certificates/process/:id', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    try {
+        const { status } = req.body;
+        let updatePayload = { status: status, processed_at: new Date() };
+
+        if (status === 'RELEASED') {
+            updatePayload.released_at = new Date();
+        }
+
+        if (req.files && req.files.cert_file) {
+            const file = req.files.cert_file;
+            const fileName = `cert-${Date.now()}-${file.name}`;
+            await supabase.storage.from('resident-documents').upload(fileName, file.data, { contentType: file.mimetype });
+            updatePayload.attached_file_url = supabase.storage.from('resident-documents').getPublicUrl(fileName).data.publicUrl;
+        }
+
+        await supabase.from('certificate_requests').update(updatePayload).eq('id', req.params.id);
+        res.redirect('/certificates');
+    } catch (e) {
+        res.status(500).send(generateErrorPage('Certificate Update Error', e.message));
+    }
+});
+
+app.post('/certificates/release/:id', authMiddleware, async (req, res) => {
+    await supabase.from('certificate_requests').update({ status: 'RELEASED', released_at: new Date() }).eq('id', req.params.id);
+    res.redirect('/certificates');
+});
+
+// -----------------------------------------------------------------------------
+// 10. PHYSICAL ID PRINTING CENTER (8 CARDS PER BOND SHEET)
+// -----------------------------------------------------------------------------
+app.get('/print-ids', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    const barangayId = req.user.barangay_id;
+
+    // Fetch up to 8 approved residents for print batch layout preview
+    const { data: residents } = await supabase
+        .from('residents')
+        .select('*, puroks(name)')
+        .eq('barangay_id', barangayId)
+        .eq('approval_status', 'APPROVED')
+        .limit(8);
+
+    // Pre-generate QR Data URIs for each resident ID card
+    const cardsWithQR = await Promise.all((residents || []).map(async r => {
+        const qrDataUrl = await QRCode.toDataURL(`${req.protocol}://${req.get('host')}/verify/resident/${r.qr_verification_token}`);
+        return { ...r, qrCode: qrDataUrl };
+    }));
+
+    const html = `
+    <div class="page-header no-print">
+        <h1 class="page-title">🪪 Barangay ID Card Batch Printing (8 per Sheet)</h1>
+        <button onclick="window.print()" class="btn btn-primary">🖨️ Print Sheet Now</button>
+    </div>
+
+    <div class="panel no-print">
+        <div class="panel-body">
+            <p style="font-size:13px; color:var(--text-muted);">
+                This printing engine formats exactly 8 CR80 standard-sized Barangay Identification Cards onto an 8.5" x 11" Letter/Bond Paper grid with trim guides.
+            </p>
+        </div>
+    </div>
+
+    <div class="print-area">
+        <div class="id-sheet-grid">
+            ${cardsWithQR.map(r => `
+                <div class="id-card-frame">
+                    <div class="id-card-header">
+                        <img src="${req.barangay.logo_url || 'https://via.placeholder.com/32'}" />
+                        <div>
+                            <div class="id-card-title">Barangay ${req.barangay.name}</div>
+                            <div style="font-size:6px; color:#555;">${req.barangay.municipality},${req.barangay.province}</div>
+                        </div>
+                    </div>
+                    <div class="id-card-body">
+                        <img src="${r.profile_photo_url}" class="id-card-photo" />
+                        <div class="id-card-details">
+                            <div><strong>ID NO:</strong> ${r.resident_id_number}</div>
+                            <div><strong>NAME:</strong> ${r.first_name}${r.last_name}</div>
+                            <div><strong>DOB:</strong> ${r.date_of_birth}</div>
+                            <div><strong>ADDRESS:</strong> ${r.address.substring(0,25)}...</div>
+                            <div><strong>PUROK:</strong> ${r.puroks?.name || 'N/A'}</div>
+                        </div>
+                    </div>
+                    <div class="id-card-footer">
+                        <span>OFFICIAL BARANGAY IDENTIFICATION CARD</span>
+                        <img src="${r.qrCode}" style="width:30px; height:30px;" />
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    </div>
+    `;
+
+    res.send(renderShell('Print IDs', html, req.user, '/print-ids', req.barangay));
+});
+
+// -----------------------------------------------------------------------------
+// 11. HOUSEHOLD & PUROK MANAGEMENT
+// -----------------------------------------------------------------------------
+app.get('/households', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    const barangayId = req.user.barangay_id;
+
+    const { data: households } = await supabase
+        .from('households')
+        .select('*, puroks(name), residents!fk_household_head(first_name, last_name)')
+        .eq('barangay_id', barangayId);
+
+    const { data: puroks } = await supabase.from('puroks').select('*').eq('barangay_id', barangayId);
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Household Registry</h1>
+        <button class="btn btn-primary" onclick="document.getElementById('add-hh-modal').style.display='block'">+ Create Household Record</button>
+    </div>
+
+    <div id="add-hh-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100;">
+        <div style="background:#fff; padding:25px; border-radius:8px; width:450px; margin:100px auto;">
+            <h3>Create New Household</h3>
+            <form action="/households/new" method="POST" style="margin-top:15px;">
+                <div class="form-group">
+                    <label>Household Number</label>
+                    <input type="text" name="household_number" class="form-control" required placeholder="e.g. HH-2026-001">
+                </div>
+                <div class="form-group">
+                    <label>Purok</label>
+                    <select name="purok_id" class="form-control">
+                        ${puroks?.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Address</label>
+                    <input type="text" name="address" class="form-control" required>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('add-hh-modal').style.display='none'">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Household</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-body">
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Household #</th>
+                            <th>Purok</th>
+                            <th>Address</th>
+                            <th>Head of Household</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${households?.map(h => `
+                            <tr>
+                                <td><strong>${h.household_number}</strong></td>
+                                <td>${h.puroks?.name || 'N/A'}</td>
+                                <td>${h.address}</td>
+                                <td>${h.residents ? `${h.residents.first_name} ${h.residents.last_name}` : 'Unassigned'}</td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="4">No households registered.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+
+    res.send(renderShell('Households', html, req.user, '/households', req.barangay));
+});
+
+app.post('/households/new', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    const { household_number, purok_id, address } = req.body;
+    await supabase.from('households').insert([{
+        barangay_id: req.user.barangay_id,
+        household_number: household_number,
+        purok_id: purok_id,
+        address: address
+    }]);
+    res.redirect('/households');
+});
+
+app.get('/puroks', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY', 'STAFF']), async (req, res) => {
+    const barangayId = req.user.barangay_id;
+    const { data: puroks } = await supabase.from('puroks').select('*').eq('barangay_id', barangayId);
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Purok Management</h1>
+    </div>
+    <div class="grid-2">
+        <div class="panel">
+            <div class="panel-header"><span class="panel-title">Add New Purok</span></div>
+            <div class="panel-body">
+                <form action="/puroks/new" method="POST">
+                    <div class="form-group">
+                        <label>Purok Name</label>
+                        <input type="text" name="name" class="form-control" placeholder="e.g. Purok 1 - Sampaguita" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Description / Boundary</label>
+                        <textarea name="description" class="form-control"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create Purok</button>
+                </form>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-header"><span class="panel-title">Active Barangay Puroks</span></div>
+            <div class="panel-body">
+                <table>
+                    <thead><tr><th>Name</th><th>Description</th></tr></thead>
+                    <tbody>
+                        ${puroks?.map(p => `<tr><td><strong>${p.name}</strong></td><td>${p.description || 'N/A'}</td></tr>`).join('') || '<tr><td colspan="2">No puroks defined.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+    res.send(renderShell('Puroks', html, req.user, '/puroks', req.barangay));
+});
+
+app.post('/puroks/new', authMiddleware, async (req, res) => {
+    await supabase.from('puroks').insert([{
+        barangay_id: req.user.barangay_id,
+        name: req.body.name,
+        description: req.body.description
+    }]);
+    res.redirect('/puroks');
+});
+
+// -----------------------------------------------------------------------------
+// 12. APPOINTMENTS, BLOTTER, ASSISTANCE, BUSINESSES, ANNOUNCEMENTS
+// -----------------------------------------------------------------------------
+
+// Appointments Module
+app.get('/appointments', authMiddleware, async (req, res) => {
+    const { data: list } = await supabase.from('appointments').select('*, residents(first_name, last_name)').eq('barangay_id', req.user.barangay_id);
+    
+    const html = `
+    <div class="page-header"><h1 class="page-title">Resident Appointments Schedule</h1></div>
+    <div class="panel"><div class="panel-body"><div class="table-responsive">
+        <table>
+            <thead><tr><th>Resident</th><th>Service</th><th>Date & Time</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+                ${list?.map(a => `
+                    <tr>
+                        <td>${a.residents?.first_name} ${a.residents?.last_name}</td>
+                        <td>${a.service_type}</td>
+                        <td>${a.appointment_date} @${a.appointment_time}</td>
+                        <td><span class="badge badge-info">${a.status}</span></td>
+                        <td>
+                            <form action="/appointments/update/${a.id}" method="POST" style="display:inline;">
+                                <input type="hidden" name="status" value="APPROVED">
+                                <button class="btn btn-primary btn-sm">Approve</button>
+                            </form>
+                        </td>
+                    </tr>
+                `).join('') || '<tr><td colspan="5">No appointment schedules found.</td></tr>'}
+            </tbody>
+        </table>
+    </div></div></div>
+    `;
+    res.send(renderShell('Appointments', html, req.user, '/appointments', req.barangay));
+});
+
+app.post('/appointments/update/:id', authMiddleware, async (req, res) => {
+    await supabase.from('appointments').update({ status: req.body.status }).eq('id', req.params.id);
+    res.redirect('/appointments');
+});
+
+// Blotter Management
+app.get('/blotter', authMiddleware, async (req, res) => {
+    const { data: cases } = await supabase.from('blotter_cases').select('*').eq('barangay_id', req.user.barangay_id);
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Barangay Blotter Records</h1>
+        <button class="btn btn-primary" onclick="document.getElementById('blotter-modal').style.display='block'">+ Record Incident / Case</button>
+    </div>
+
+    <div id="blotter-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100;">
+        <div style="background:#fff; padding:25px; border-radius:8px; width:500px; margin:50px auto;">
+            <h3>Record New Case</h3>
+            <form action="/blotter/new" method="POST" style="margin-top:15px;">
+                <div class="form-group"><label>Complainant Name</label><input type="text" name="complainant_name" class="form-control" required></div>
+                <div class="form-group"><label>Respondent Name</label><input type="text" name="respondent_name" class="form-control" required></div>
+                <div class="grid-2">
+                    <div class="form-group"><label>Incident Date</label><input type="date" name="incident_date" class="form-control" required></div>
+                    <div class="form-group"><label>Location</label><input type="text" name="location" class="form-control" required></div>
+                </div>
+                <div class="form-group"><label>Narrative Description</label><textarea name="description" class="form-control" required></textarea></div>
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('blotter-modal').style.display='none'">Cancel</button>
+                    <button type="submit" class="btn btn-primary">File Blotter Case</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="panel"><div class="panel-body"><div class="table-responsive">
+        <table>
+            <thead><tr><th>Case #</th><th>Complainant</th><th>Respondent</th><th>Incident Date</th><th>Status</th></tr></thead>
+            <tbody>
+                ${cases?.map(c => `
+                    <tr>
+                        <td><strong>${c.case_number}</strong></td>
+                        <td>${c.complainant_name}</td>
+                        <td>${c.respondent_name}</td>
+                        <td>${c.incident_date}</td>
+                        <td><span class="badge badge-warning">${c.case_status}</span></td>
+                    </tr>
+                `).join('') || '<tr><td colspan="5">No blotter records filed.</td></tr>'}
+            </tbody>
+        </table>
+    </div></div></div>
+    `;
+    res.send(renderShell('Blotter System', html, req.user, '/blotter', req.barangay));
+});
+
+app.post('/blotter/new', authMiddleware, async (req, res) => {
+    const caseNum = `BLT-${Date.now().toString().slice(-6)}`;
+    await supabase.from('blotter_cases').insert([{
+        barangay_id: req.user.barangay_id,
+        case_number: caseNum,
+        complainant_name: req.body.complainant_name,
+        respondent_name: req.body.respondent_name,
+        incident_date: req.body.incident_date,
+        location: req.body.location,
+        description: req.body.description,
+        case_status: 'OPEN'
+    }]);
+    res.redirect('/blotter');
+});
+
+// Assistance Records
+app.get('/assistance', authMiddleware, async (req, res) => {
+    const { data: list } = await supabase.from('assistance_requests').select('*, residents(first_name, last_name)').eq('barangay_id', req.user.barangay_id);
+
+    const html = `
+    <div class="page-header"><h1 class="page-title">Financial & Social Assistance Directory</h1></div>
+    <div class="panel"><div class="panel-body"><div class="table-responsive">
+        <table>
+            <thead><tr><th>Resident</th><th>Type</th><th>Reason</th><th>Requested Amount</th><th>Status</th></tr></thead>
+            <tbody>
+                ${list?.map(a => `
+                    <tr>
+                        <td>${a.residents?.first_name} ${a.residents?.last_name}</td>
+                        <td>${a.assistance_type}</td>
+                        <td>${a.reason}</td>
+                        <td>₱${a.amount_requested || '0.00'}</td>
+                        <td><span class="badge badge-info">${a.status}</span></td>
+                    </tr>
+                `).join('') || '<tr><td colspan="5">No assistance records on file.</td></tr>'}
+            </tbody>
+        </table>
+    </div></div></div>
+    `;
+    res.send(renderShell('Assistance', html, req.user, '/assistance', req.barangay));
+});
+
+// Business Registry
+app.get('/businesses', authMiddleware, async (req, res) => {
+    const { data: list } = await supabase.from('businesses').select('*').eq('barangay_id', req.user.barangay_id);
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Barangay Commercial & Business Permits</h1>
+        <button class="btn btn-primary" onclick="document.getElementById('biz-modal').style.display='block'">+ Register Business</button>
+    </div>
+
+    <div id="biz-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100;">
+        <div style="background:#fff; padding:25px; border-radius:8px; width:450px; margin:100px auto;">
+            <h3>Register New Enterprise</h3>
+            <form action="/businesses/new" method="POST" style="margin-top:15px;">
+                <div class="form-group"><label>Business Name</label><input type="text" name="business_name" class="form-control" required></div>
+                <div class="form-group"><label>Owner Name</label><input type="text" name="owner_name" class="form-control" required></div>
+                <div class="form-group"><label>Business Type</label><input type="text" name="business_type" class="form-control" placeholder="e.g. Sari-Sari Store" required></div>
+                <div class="form-group"><label>Address</label><input type="text" name="address" class="form-control" required></div>
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('biz-modal').style.display='none'">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Business</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="panel"><div class="panel-body"><div class="table-responsive">
+        <table>
+            <thead><tr><th>Business Name</th><th>Owner</th><th>Type</th><th>Address</th><th>Permit Status</th></tr></thead>
+            <tbody>
+                ${list?.map(b => `
+                    <tr>
+                        <td><strong>${b.business_name}</strong></td>
+                        <td>${b.owner_name}</td>
+                        <td>${b.business_type}</td>
+                        <td>${b.address}</td>
+                        <td><span class="badge badge-success">${b.permit_status}</span></td>
+                    </tr>
+                `).join('') || '<tr><td colspan="5">No business permits issued.</td></tr>'}
+            </tbody>
+        </table>
+    </div></div></div>
+    `;
+    res.send(renderShell('Businesses', html, req.user, '/businesses', req.barangay));
+});
+
+app.post('/businesses/new', authMiddleware, async (req, res) => {
+    await supabase.from('businesses').insert([{
+        barangay_id: req.user.barangay_id,
+        business_name: req.body.business_name,
+        owner_name: req.body.owner_name,
+        business_type: req.body.business_type,
+        address: req.body.address,
+        permit_status: 'ACTIVE'
+    }]);
+    res.redirect('/businesses');
+});
+
+// Announcements Module
+app.get('/announcements', authMiddleware, async (req, res) => {
+    const { data: list } = await supabase.from('announcements').select('*').eq('barangay_id', req.user.barangay_id).order('created_at', { ascending: false });
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Public Bulletin & Announcements</h1>
+        <button class="btn btn-primary" onclick="document.getElementById('anc-modal').style.display='block'">+ Create Announcement</button>
+    </div>
+
+    <div id="anc-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100;">
+        <div style="background:#fff; padding:25px; border-radius:8px; width:500px; margin:50px auto;">
+            <h3>Post Public Announcement</h3>
+            <form action="/announcements/new" method="POST" style="margin-top:15px;">
+                <div class="form-group"><label>Title</label><input type="text" name="title" class="form-control" required></div>
+                <div class="grid-2">
+                    <div class="form-group"><label>Category</label>
+                        <select name="category" class="form-control">
+                            <option value="General">General</option>
+                            <option value="Event">Event</option>
+                            <option value="Emergency Notice">Emergency Notice</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>Priority Level</label>
+                        <select name="priority" class="form-control">
+                            <option value="Normal">Normal</option>
+                            <option value="High">High</option>
+                            <option value="Urgent">Urgent</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group"><label>Content Body</label><textarea name="content" class="form-control" style="height:100px;" required></textarea></div>
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('anc-modal').style.display='none'">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Broadcast Announcement</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        ${list?.map(a => `
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">${a.title}</span>
+                    <span class="badge ${a.priority === 'Urgent' ? 'badge-danger' : 'badge-info'}">${a.category}</span>
+                </div>
+                <div class="panel-body">
+                    <p>${a.content}</p>
+                    <small style="color:var(--text-muted); display:block; margin-top:10px;">Posted on: ${new Date(a.created_at).toLocaleString()}</small>
+                </div>
+            </div>
+        `).join('') || '<p>No public announcements broadcasted.</p>'}
+    </div>
+    `;
+    res.send(renderShell('Announcements', html, req.user, '/announcements', req.barangay));
+});
+
+app.post('/announcements/new', authMiddleware, async (req, res) => {
+    await supabase.from('announcements').insert([{
+        barangay_id: req.user.barangay_id,
+        title: req.body.title,
+        category: req.body.category,
+        priority: req.body.priority,
+        content: req.body.content,
+        created_by: req.user.id
+    }]);
+    res.redirect('/announcements');
+});
+
+// -----------------------------------------------------------------------------
+// 13. SYSTEM REPORTS MODULE
+// -----------------------------------------------------------------------------
+app.get('/reports', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN', 'BARANGAY_SECRETARY']), async (req, res) => {
+    const barangayId = req.user.barangay_id;
+
+    const [
+        { count: totalRes },
+        { count: seniorRes },
+        { count: pwdRes },
+        { count: voterRes },
+        { count: certCount }
+    ] = await Promise.all([
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('approval_status', 'APPROVED'),
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('is_senior_citizen', true),
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('is_pwd', true),
+        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId).eq('is_voter', true),
+        supabase.from('certificate_requests').select('*', { count: 'exact', head: true }).eq('barangay_id', barangayId)
+    ]);
+
+    const html = `
+    <div class="page-header no-print">
+        <h1 class="page-title">Executive Demographic Reports</h1>
+        <button onclick="window.print()" class="btn btn-primary">🖨️ Print Summary</button>
+    </div>
+
+    <div class="panel print-area">
+        <div class="panel-header"><span class="panel-title">Barangay Demographic Summary Breakdown</span></div>
+        <div class="panel-body">
+            <table>
+                <thead>
+                    <tr><th>Demographic Metric Category</th><th>Total Count</th><th>Percentage of Population</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total Population (Approved Residents)</td><td><strong>${totalRes}</strong></td><td>100%</td></tr>
+                    <tr><td>Senior Citizens (60+)</td><td>${seniorRes}</td><td>${totalRes ? ((seniorRes/totalRes)*100).toFixed(1) : 0}%</td></tr>
+                    <tr><td>Persons with Disabilities (PWD)</td><td>${pwdRes}</td><td>${totalRes ? ((pwdRes/totalRes)*100).toFixed(1) : 0}%</td></tr>
+                    <tr><td>Registered Voters</td><td>${voterRes}</td><td>${totalRes ? ((voterRes/totalRes)*100).toFixed(1) : 0}%</td></tr>
+                    <tr><td>Total Certificates Processed</td><td>${certCount}</td><td>N/A</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    `;
+    res.send(renderShell('Reports', html, req.user, '/reports', req.barangay));
+});
+
+// -----------------------------------------------------------------------------
+// 14. ADMIN BARANGAY SETTINGS & CUSTOMIZATION
+// -----------------------------------------------------------------------------
+app.get('/settings', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN']), async (req, res) => {
+    const barangay = req.barangay;
+
+    const html = `
+    <div class="page-header"><h1 class="page-title">Barangay Administration Settings</h1></div>
+
+    <div class="panel">
+        <div class="panel-header"><span class="panel-title">Customization & Official Details</span></div>
+        <div class="panel-body">
+            <form action="/settings" method="POST" enctype="multipart/form-data">
+                <div class="grid-3">
+                    <div class="form-group">
+                        <label>Barangay Name</label>
+                        <input type="text" name="name" class="form-control" value="${barangay.name}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Municipality/City</label>
+                        <input type="text" name="municipality" class="form-control" value="${barangay.municipality}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Province</label>
+                        <input type="text" name="province" class="form-control" value="${barangay.province}" required>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Contact Number</label>
+                        <input type="text" name="contact_number" class="form-control" value="${barangay.contact_number || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label>Email Address</label>
+                        <input type="email" name="email" class="form-control" value="${barangay.email || ''}">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Update Barangay Official Logo</label>
+                    <input type="file" name="logo" class="form-control" accept="image/*">
+                </div>
+                <button type="submit" class="btn btn-primary">Save Settings Updates</button>
+            </form>
+        </div>
+    </div>
+    `;
+    res.send(renderShell('Settings', html, req.user, '/settings', req.barangay));
+});
+
+app.post('/settings', authMiddleware, roleGuard(['SUPER_ADMIN', 'BARANGAY_ADMIN']), async (req, res) => {
+    try {
+        const barangayId = req.user.barangay_id;
+        const { name, municipality, province, contact_number, email } = req.body;
+
+        let updateData = { name, municipality, province, contact_number, email };
+
+        if (req.files && req.files.logo) {
+            const logoFile = req.files.logo;
+            const fileName = `logo-${Date.now()}-${logoFile.name}`;
+            await supabase.storage.from('barangay-assets').upload(fileName, logoFile.data, { contentType: logoFile.mimetype });
+            updateData.logo_url = supabase.storage.from('barangay-assets').getPublicUrl(fileName).data.publicUrl;
+        }
+
+        await supabase.from('barangays').update(updateData).eq('id', barangayId);
+        res.redirect('/settings');
+    } catch (e) {
+        res.status(500).send(generateErrorPage('Settings Error', e.message));
+    }
+});
+
+// -----------------------------------------------------------------------------
+// 15. RESIDENT PORTAL & SELF-SERVICE SUITE
+// -----------------------------------------------------------------------------
+app.get('/resident/portal', authMiddleware, async (req, res) => {
+    const barangayId = req.user.barangay_id;
+
+    // Fetch Resident details
+    const { data: resident } = await supabase
+        .from('residents')
+        .select('*, households(household_number), puroks(name)')
+        .eq('user_id', req.user.id)
+        .single();
+
+    const { data: announcements } = await supabase
+        .from('announcements')
+        .select('*')
+        .eq('barangay_id', barangayId)
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+    const { data: myCerts } = await supabase
+        .from('certificate_requests')
+        .select('*')
+        .eq('resident_id', resident?.id || '00000000-0000-0000-0000-000000000000');
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Welcome, ${req.user.full_name}!</h1>
+    </div>
+
+    ${resident?.approval_status === 'PENDING' ? `
+        <div style="background:#fff3cd; color:#856404; padding:15px; border-radius:8px; margin-bottom:20px; border-left:4px solid #ffc107;">
+            ⚠️ <strong>Verification Pending:</strong> Your account registration is currently under review by Barangay Staff. Your Digital ID and certificate requests will be fully activated upon verification.
+        </div>
+    ` : ''}
+
+    <div class="grid-cards">
+        <div class="card-stat">
+            <div class="title">My Resident ID</div>
+            <div class="value" style="font-size:20px;">${resident?.resident_id_number || 'PENDING'}</div>
+        </div>
+        <div class="card-stat blue">
+            <div class="title">Assigned Household #</div>
+            <div class="value" style="font-size:20px;">${resident?.households?.household_number || 'Unassigned'}</div>
+        </div>
+        <div class="card-stat orange">
+            <div class="title">Active Certificate Requests</div>
+            <div class="value">${myCerts?.length || 0}</div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header"><span class="panel-title">📢 Latest Barangay Announcements</span></div>
+        <div class="panel-body">
+            ${announcements?.map(a => `
+                <div style="margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;">
+                    <h4 style="color:var(--primary);">${a.title}</h4>
+                    <p style="font-size:14px; margin-top:5px;">${a.content}</p>
+                    <small style="color:var(--text-muted);">${new Date(a.created_at).toLocaleDateString()}</small>
+                </div>
+            `).join('') || '<p>No current announcements.</p>'}
+        </div>
+    </div>
+    `;
+
+    res.send(renderShell('Resident Portal', html, req.user, '/resident/portal', req.barangay));
+});
+
+// Digital ID Display Page
+app.get('/resident/digital-id', authMiddleware, async (req, res) => {
+    const { data: resident } = await supabase
+        .from('residents')
+        .select('*, puroks(name)')
+        .eq('user_id', req.user.id)
+        .single();
+
+    if (!resident || resident.approval_status !== 'APPROVED') {
+        return res.send(renderShell('Digital ID', '<div class="panel"><div class="panel-body">Your Digital ID will be issued once your account is verified.</div></div>', req.user, '/resident/digital-id', req.barangay));
+    }
+
+    const qrDataUrl = await QRCode.toDataURL(`${req.protocol}://${req.get('host')}/verify/resident/${resident.qr_verification_token}`);
+
+    const html = `
+    <div class="page-header">
+        <h1 class="page-title">Official Digital Barangay ID Card</h1>
+        <button onclick="window.print()" class="btn btn-primary no-print">🖨️ Print Digital ID</button>
+    </div>
+
+    <div class="print-area" style="display:flex; justify-content:center;">
+        <div class="id-card-frame" style="width:380px; height:240px; padding:15px;">
+            <div class="id-card-header">
+                <img src="${req.barangay.logo_url}" />
+                <div>
+                    <div class="id-card-title" style="font-size:12px;">Barangay ${req.barangay.name}</div>
+                    <div style="font-size:9px; color:#555;">${req.barangay.municipality}, ${req.barangay.province}</div>
+                </div>
+            </div>
+            <div class="id-card-body" style="margin-top:10px;">
+                <img src="${resident.profile_photo_url}" class="id-card-photo" style="width:85px; height:85px;" />
+                <div class="id-card-details" style="font-size:10px; line-height:1.4;">
+                    <div><strong>ID NO:</strong> ${resident.resident_id_number}</div>
+                    <div><strong>NAME:</strong> ${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</div>
+                    <div><strong>DOB:</strong> ${resident.date_of_birth}</div>
+                    <div><strong>GENDER:</strong> ${resident.gender}</div>
+                    <div><strong>PUROK:</strong> ${resident.puroks?.name || 'N/A'}</div>
+                </div>
+            </div>
+            <div class="id-card-footer" style="font-size:8px;">
+                <span>VERIFIED DIGITAL RESIDENT IDENTIFICATION</span>
+                <img src="${qrDataUrl}" style="width:40px; height:40px;" />
+            </div>
+        </div>
+    </div>
+    `;
+
+    res.send(renderShell('Digital ID', html, req.user, '/resident/digital-id', req.barangay));
+});
+
+// Resident Request Certificate
+app.get('/resident/certificates', authMiddleware, async (req, res) => {
+    const { data: resident } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+    const { data: myRequests } = await supabase.from('certificate_requests').select('*').eq('resident_id', resident?.id || '00000000-0000-0000-0000-000000000000');
+
+    const html = `
+    <div class="page-header"><h1 class="page-title">Request Barangay Clearance / Certificate</h1></div>
+
+    <div class="grid-2">
+        <div class="panel">
+            <div class="panel-header"><span class="panel-title">New Certificate Request</span></div>
+            <div class="panel-body">
+                <form action="/resident/certificates/new" method="POST">
+                    <div class="form-group">
+                        <label>Certificate Type</label>
+                        <select name="certificate_type" class="form-control" required>
+                            <option value="Barangay Clearance">Barangay Clearance</option>
+                            <option value="Certificate of Residency">Certificate of Residency</option>
+                            <option value="Certificate of Indigency">Certificate of Indigency</option>
+                            <option value="Certificate of Good Moral">Certificate of Good Moral</option>
+                            <option value="Certificate of Solo Parent">Certificate of Solo Parent</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Purpose of Request</label>
+                        <textarea name="purpose" class="form-control" placeholder="e.g. Employment / Local Application" required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Submit Document Request</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header"><span class="panel-title">Request History & Tracking</span></div>
+            <div class="panel-body">
+                <table>
+                    <thead><tr><th>Request #</th><th>Type</th><th>Status</th><th>Download Document</th></tr></thead>
+                    <tbody>
+                        ${myRequests?.map(r => `
+                            <tr>
+                                <td><strong>${r.request_number}</strong></td>
+                                <td>${r.certificate_type}</td>
+                                <td><span class="badge badge-info">${r.status}</span></td>
+                                <td>${r.attached_file_url ? `<a href="${r.attached_file_url}" target="_blank" class="btn btn-sm btn-secondary">Get File</a>` : 'Processing'}</td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="4">No requests submitted.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+
+    res.send(renderShell('Certificates', html, req.user, '/resident/certificates', req.barangay));
+});
+
+app.post('/resident/certificates/new', authMiddleware, async (req, res) => {
+    const { data: resident } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+    const reqNumber = `REQ-${Date.now().toString().slice(-6)}`;
+
+    await supabase.from('certificate_requests').insert([{
+        barangay_id: req.user.barangay_id,
+        resident_id: resident.id,
+        request_number: reqNumber,
+        certificate_type: req.body.certificate_type,
+        purpose: req.body.purpose,
+        status: 'SUBMITTED'
+    }]);
+
+    res.redirect('/resident/certificates');
+});
+
+// Resident Book Appointments & Assistance
+app.get('/resident/appointments', authMiddleware, async (req, res) => {
+    const html = `
+    <div class="page-header"><h1 class="page-title">Book Desk Appointment</h1></div>
+    <div class="panel" style="max-width:600px;">
+        <div class="panel-body">
+            <form action="/resident/appointments/new" method="POST">
+                <div class="form-group">
+                    <label>Service Type</label>
+                    <input type="text" name="service_type" class="form-control" placeholder="e.g. Lupon Hearing, Inquiries" required>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group"><label>Appointment Date</label><input type="date" name="appointment_date" class="form-control" required></div>
+                    <div class="form-group"><label>Preferred Time</label><input type="time" name="appointment_time" class="form-control" required></div>
+                </div>
+                <div class="form-group"><label>Purpose Notes</label><textarea name="purpose" class="form-control" required></textarea></div>
+                <button type="submit" class="btn btn-primary">Book Appointment</button>
+            </form>
+        </div>
+    </div>
+    `;
+    res.send(renderShell('Book Appointment', html, req.user, '/resident/appointments', req.barangay));
+});
+
+app.post('/resident/appointments/new', authMiddleware, async (req, res) => {
+    const { data: resident } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+    await supabase.from('appointments').insert([{
+        barangay_id: req.user.barangay_id,
+        resident_id: resident.id,
+        service_type: req.body.service_type,
+        appointment_date: req.body.appointment_date,
+        appointment_time: req.body.appointment_time,
+        purpose: req.body.purpose,
+        status: 'PENDING'
+    }]);
+    res.redirect('/resident/portal');
+});
+
+app.get('/resident/assistance', authMiddleware, async (req, res) => {
+    const html = `
+    <div class="page-header"><h1 class="page-title">Apply for Social / Financial Assistance</h1></div>
+    <div class="panel" style="max-width:600px;">
+        <div class="panel-body">
+            <form action="/resident/assistance/new" method="POST">
+                <div class="form-group">
+                    <label>Type of Assistance Requested</label>
+                    <select name="assistance_type" class="form-control">
+                        <option value="Financial Assistance">Financial Assistance</option>
+                        <option value="Medical Assistance">Medical Assistance</option>
+                        <option value="Educational Assistance">Educational Assistance</option>
+                        <option value="Emergency Food Assistance">Emergency Food Assistance</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Amount Requested (if applicable)</label><input type="number" name="amount_requested" class="form-control"></div>
+                <div class="form-group"><label>Detailed Reason</label><textarea name="reason" class="form-control" required></textarea></div>
+                <button type="submit" class="btn btn-primary">Submit Assistance Claim</button>
+            </form>
+        </div>
+    </div>
+    `;
+    res.send(renderShell('Assistance Program', html, req.user, '/resident/assistance', req.barangay));
+});
+
+app.post('/resident/assistance/new', authMiddleware, async (req, res) => {
+    const { data: resident } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+    await supabase.from('assistance_requests').insert([{
+        barangay_id: req.user.barangay_id,
+        resident_id: resident.id,
+        assistance_type: req.body.assistance_type,
+        amount_requested: req.body.amount_requested || null,
+        reason: req.body.reason,
+        status: 'SUBMITTED'
+    }]);
+    res.redirect('/resident/portal');
+});
+
+// Root Redirect Rule
+app.get('/', (req, res) => {
+    res.redirect('/login');
+});
+
+// 404 Fallback Handler
+app.use((req, res) => {
+    res.status(404).send(generateErrorPage('404 Not Found', 'The requested resource or endpoint does not exist.'));
+});
+
+// -----------------------------------------------------------------------------
+// 16. APPLICATION SERVER STARTUP
+// -----------------------------------------------------------------------------
 app.listen(PORT, () => {
-  console.log(`===================================================`);
-  console.log(`Barangay Resident Management System Running`);
-  console.log(`Server listening on port: ${PORT}`);
-  console.log(`===================================================`);
+    console.log(`================================================================`);
+    console.log(`🚀 BARANGAY RESIDENT MANAGEMENT SYSTEM SERVER ONLINE`);
+    console.log(`📡 Listening on Port: ${PORT}`);
+    console.log(`🌐 System URL: http://localhost:${PORT}`);
+    console.log(`================================================================`);
 });
