@@ -1,1039 +1,1199 @@
 /**
+ * ============================================================================
  * BARANGAY RESIDENT MANAGEMENT SYSTEM (BRMS)
- * Monolithic Production Code for Render & Supabase deployment
+ * Single-File Node.js / Express / Supabase Web Application
+ * ============================================================================
  */
 
 const express = require('express');
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config();
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser');
+const cors = require('cors');
+const QRCode = require('qrcode');
+const multer = require('multer');
+
+// ============================================================================
+// 3. SUPABASE & SERVER CONFIGURATION
+// ============================================================================
+// PLEASE PASTE YOUR SUPABASE CREDENTIALS HERE:
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://your-supabase-project-id.supabase.co";
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "your-supabase-anon-key";
+const JWT_SECRET = process.env.JWT_SECRET || "barangay_super_secret_jwt_key_2026";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'brms_production_jwt_secret_key_2026_green_blue';
+const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB Upload limit
 
-// SUPABASE CLIENT INIT
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('CRITICAL: SUPABASE_URL and SUPABASE_ANON_KEY environment variables are required.');
+// Initialize Supabase Client
+let supabase = null;
+if (SUPABASE_URL && !SUPABASE_URL.includes("your-supabase-project-id") && SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.includes("your-supabase-anon-key")) {
+  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
-const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder');
-
-// MIDDLEWARES
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(cors());
 
-// UPLOAD HANDLING (MEMORY)
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
-
-// AUTH MIDDLEWARE
-const authenticate = async (req, res, next) => {
-    try {
-        const token = req.cookies.token || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
-        if (!token) return res.status(401).json({ error: 'Unauthorized: No token provided' });
-
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded;
-        next();
-    } catch (err) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+// Check Supabase readiness middleware
+const checkDbConfig = (req, res, next) => {
+  if (!supabase) {
+    if (req.path.startsWith('/api/')) {
+      return res.status(500).json({ error: "DATABASE NOT CONFIGURED. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in app.js." });
     }
+    return res.send(renderDbConfigErrorPage());
+  }
+  next();
 };
 
-const authorize = (roles = []) => {
-    return (req, res, next) => {
-        if (!roles.includes(req.user.role)) {
-            return res.status(403).json({ error: 'Forbidden: Access denied for your role' });
-        }
-        next();
-    };
+// Log activity helper
+async function logActivity(userName, userRole, action, description) {
+  if (!supabase) return;
+  try {
+    await supabase.from('activity_logs').insert([{
+      user_name: userName || 'System',
+      user_role: userRole || 'System',
+      action,
+      description,
+      created_at: new Date().toISOString()
+    }]);
+  } catch (err) {
+    console.error('Activity Log Error:', err.message);
+  }
+}
+
+// Authentication Middleware
+const authenticateToken = async (req, res, next) => {
+  const token = req.cookies.auth_token;
+  if (!token) return res.status(401).json({ error: "Unauthorized access. Please login." });
+
+  try {
+    const verified = jwt.verify(token, JWT_SECRET);
+    req.user = verified;
+    next();
+  } catch (err) {
+    res.clearCookie('auth_token');
+    return res.status(403).json({ error: "Session expired. Please login again." });
+  }
 };
 
-// ==========================================
-// API ROUTES
-// ==========================================
-
-// SETUP CHECK
-app.get('/api/setup/status', async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('users').select('id').eq('role', 'admin').limit(1);
-        if (error) throw error;
-        res.json({ setupRequired: data.length === 0 });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+const authorizeRoles = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: "Access denied. Insufficient permissions." });
     }
+    next();
+  };
+};
+
+// Helper: Fetch Barangay Settings
+async function getSettings() {
+  if (!supabase) return null;
+  const { data } = await supabase.from('barangay_settings').select('*').single();
+  return data || {
+    barangay_name: 'Barangay San Jose',
+    municipality: 'San Fernando',
+    province: 'Pampanga',
+    address: 'Main Street, San Fernando',
+    contact_number: '+63 917 123 4567',
+    email: 'info@barangay.gov.ph',
+    barangay_captain: 'Hon. Juan Dela Cruz',
+    barangay_secretary: 'Maria Santos',
+    id_prefix: 'BRGY-2026',
+    certificate_prefix: 'CERT-2026'
+  };
+}
+
+// ============================================================================
+// API ROUTES - SYSTEM SETUP & AUTH
+// ============================================================================
+
+app.get('/api/check-setup', checkDbConfig, async (req, res) => {
+  try {
+    const { count, error } = await supabase.from('users').select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    res.json({ hasAdmin: count > 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// INITIAL ADMIN SETUP
-app.post('/api/setup/admin', async (req, res) => {
-    try {
-        const { data: existingAdmins } = await supabase.from('users').select('id').eq('role', 'admin');
-        if (existingAdmins && existingAdmins.length > 0) {
-            return res.status(400).json({ error: 'Admin setup already completed.' });
-        }
+app.post('/api/setup-admin', checkDbConfig, async (req, res) => {
+  const { fullName, username, email, password, confirmPassword } = req.body;
+  if (!fullName || !username || !email || !password) {
+    return res.status(400).json({ error: "All fields are required." });
+  }
+  if (password !== confirmPassword) {
+    return res.status(400).json({ error: "Passwords do not match." });
+  }
 
-        const { fullName, username, email, password, confirmPassword } = req.body;
-
-        if (!fullName || !username || !email || !password) {
-            return res.status(400).json({ error: 'All fields are required.' });
-        }
-
-        if (password !== confirmPassword) {
-            return res.status(400).json({ error: 'Passwords do not match.' });
-        }
-
-        const passwordHash = await bcrypt.hash(password, 10);
-
-        const { data, error } = await supabase.from('users').insert([{
-            full_name: fullName,
-            username: username.toLowerCase().trim(),
-            email: email.toLowerCase().trim(),
-            password_hash: passwordHash,
-            role: 'admin'
-        }]).select();
-
-        if (error) throw error;
-
-        res.json({ success: true, message: 'First Administrator account created successfully.' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+  try {
+    const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
+    if (count > 0) {
+      return res.status(400).json({ error: "Admin account already exists. Setup is locked." });
     }
+
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(password, salt);
+
+    const { data, error } = await supabase.from('users').insert([{
+      full_name: fullName,
+      username,
+      email,
+      password_hash,
+      role: 'SUPER ADMIN',
+      is_active: true
+    }]).select();
+
+    if (error) throw error;
+
+    await logActivity(fullName, 'SUPER ADMIN', 'System Initialized', 'First-time super admin account created.');
+    res.json({ success: true, message: "Super Admin account created successfully!" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// AUTHENTICATION
-app.post('/api/auth/login', async (req, res) => {
-    try {
-        const { username, password } = req.body;
-        const { data: users, error } = await supabase
-            .from('users')
-            .select('*')
-            .or(`username.eq.${username.toLowerCase().trim()},email.eq.${username.toLowerCase().trim()}`)
-            .eq('is_active', true);
+app.post('/api/login', checkDbConfig, async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "Username/Email and Password required." });
 
-        if (error || !users || users.length === 0) {
-            return res.status(400).json({ error: 'Invalid username/email or password.' });
-        }
+  try {
+    const { data: users, error } = await supabase.from('users')
+      .select('*')
+      .or(`username.eq.${username},email.eq.${username}`);
 
-        const user = users[0];
-        const match = await bcrypt.compare(password, user.password_hash);
-
-        if (!match) {
-            return res.status(400).json({ error: 'Invalid username/email or password.' });
-        }
-
-        let residentData = null;
-        if (user.role === 'resident') {
-            const { data: resRec } = await supabase.from('residents').select('*').eq('user_id', user.id).single();
-            residentData = resRec;
-        }
-
-        const token = jwt.sign(
-            { id: user.id, username: user.username, role: user.role, email: user.email, residentId: residentData ? residentData.id : null },
-            JWT_SECRET,
-            { expiresIn: '1d' }
-        );
-
-        res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: 86400000 });
-        res.json({ success: true, role: user.role, token, user: { id: user.id, name: user.full_name, email: user.email, role: user.role, residentId: residentData ? residentData.id : null } });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    if (error || !users || users.length === 0) {
+      return res.status(400).json({ error: "Invalid username/email or password." });
     }
-});
 
-app.post('/api/auth/logout', (req, res) => {
-    res.clearCookie('token');
-    res.json({ success: true, message: 'Logged out successfully' });
-});
-
-// PUBLIC RESIDENT REGISTRATION
-app.post('/api/auth/register-resident', upload.single('profilePhoto'), async (req, res) => {
-    try {
-        const {
-            firstName, middleName, lastName, suffix, dateOfBirth, gender, civilStatus,
-            address, purokId, contactNumber, email, username, password, occupation,
-            educationalAttainment, nationality, voterStatus, isSenior, isPwd, isSoloParent
-        } = req.body;
-
-        if (!firstName || !lastName || !dateOfBirth || !gender || !civilStatus || !address || !username || !password || !email) {
-            return res.status(400).json({ error: 'Please fill in all mandatory fields.' });
-        }
-
-        const { data: existingUser } = await supabase.from('users').select('id').or(`username.eq.${username.toLowerCase().trim()},email.eq.${email.toLowerCase().trim()}`);
-        if (existingUser && existingUser.length > 0) {
-            return res.status(400).json({ error: 'Username or email is already registered.' });
-        }
-
-        const passwordHash = await bcrypt.hash(password, 10);
-
-        const { data: user, error: userErr } = await supabase.from('users').insert([{
-            full_name: `${firstName} ${lastName}`,
-            username: username.toLowerCase().trim(),
-            email: email.toLowerCase().trim(),
-            password_hash: passwordHash,
-            role: 'resident'
-        }]).select().single();
-
-        if (userErr) throw userErr;
-
-        let photoBase64 = '';
-        if (req.file) {
-            photoBase64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-        }
-
-        const { data: resident, error: resErr } = await supabase.from('residents').insert([{
-            user_id: user.id,
-            first_name: firstName,
-            middle_name: middleName || '',
-            last_name: lastName,
-            suffix: suffix || '',
-            date_of_birth: dateOfBirth,
-            gender,
-            civil_status: civilStatus,
-            address,
-            purok_id: purokId || null,
-            contact_number: contactNumber,
-            email,
-            occupation: occupation || '',
-            educational_attainment: educationalAttainment || '',
-            nationality: nationality || 'Filipino',
-            voter_status: voterStatus || 'Non-Voter',
-            is_senior: isSenior === 'true' || isSenior === true,
-            is_pwd: isPwd === 'true' || isPwd === true,
-            is_solo_parent: isSoloParent === 'true' || isSoloParent === true,
-            profile_photo: photoBase64,
-            approval_status: 'Pending'
-        }]).select().single();
-
-        if (resErr) throw resErr;
-
-        res.json({ success: true, message: 'Registration submitted successfully. Your account is PENDING APPROVAL.' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    const user = users[0];
+    if (!user.is_active) {
+      return res.status(403).json({ error: "Account is disabled. Contact Barangay Administrator." });
     }
-});
 
-// SYSTEM SETTINGS
-app.get('/api/settings', async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('system_settings').select('*').single();
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    const validPass = await bcrypt.compare(password, user.password_hash);
+    if (!validPass) return res.status(400).json({ error: "Invalid username/email or password." });
+
+    let residentData = null;
+    if (user.role === 'RESIDENT') {
+      const { data: resData } = await supabase.from('residents').select('*').eq('user_id', user.id).single();
+      residentData = resData;
     }
+
+    const token = jwt.sign({
+      id: user.id,
+      username: user.username,
+      fullName: user.full_name,
+      role: user.role,
+      residentId: residentData ? residentData.id : null
+    }, JWT_SECRET, { expiresIn: '12h' });
+
+    res.cookie('auth_token', token, { httpOnly: true, maxAge: 12 * 3600 * 1000 });
+    await logActivity(user.full_name, user.role, 'Login', 'User logged into system.');
+
+    res.json({
+      success: true,
+      role: user.role,
+      user: { id: user.id, name: user.full_name, role: user.role }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/settings', authenticate, authorize(['admin']), upload.single('logo'), async (req, res) => {
-    try {
-        const { barangayName, municipality, province, address, contactNumber, email, captainName, secretaryName } = req.body;
-        let updateData = {
-            barangay_name: barangayName,
-            municipality,
-            province,
-            address,
-            contact_number: contactNumber,
-            email,
-            captain_name: captainName,
-            secretary_name: secretaryName,
-            updated_at: new Date()
-        };
+app.post('/api/logout', (req, res) => {
+  res.clearCookie('auth_token');
+  res.json({ success: true });
+});
 
-        if (req.file) {
-            updateData.logo_url = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-        }
+// ============================================================================
+// API ROUTES - PUBLIC RESIDENT REGISTRATION
+// ============================================================================
 
-        const { data, error } = await supabase.from('system_settings').update(updateData).eq('id', 1).select();
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+app.post('/api/register-resident', checkDbConfig, async (req, res) => {
+  const {
+    firstName, middleName, lastName, suffix, dateOfBirth, gender, civilStatus,
+    nationality, contactNumber, email, address, purok, occupation, educationalAttainment,
+    isVoter, isPwd, isSeniorCitizen, isSoloParent, is4ps, emergencyContact, emergencyContactNumber,
+    password, confirmPassword, profilePhotoUrl, validIdUrl
+  } = req.body;
+
+  if (!firstName || !lastName || !dateOfBirth || !gender || !civilStatus || !contactNumber || !email || !address || !purok || !password) {
+    return res.status(400).json({ error: "Missing required registration fields." });
+  }
+  if (password !== confirmPassword) return res.status(400).json({ error: "Passwords do not match." });
+
+  try {
+    // Check existing email
+    const { data: existingUser } = await supabase.from('users').select('id').eq('email', email);
+    if (existingUser && existingUser.length > 0) {
+      return res.status(400).json({ error: "Email address is already registered." });
     }
+
+    // Hash Password
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(password, salt);
+
+    // Create User Account
+    const username = email.split('@')[0] + Math.floor(1000 + Math.random() * 9000);
+    const fullName = `${firstName} ${middleName ? middleName + ' ' : ''}${lastName} ${suffix || ''}`.trim();
+
+    const { data: userData, error: userError } = await supabase.from('users').insert([{
+      full_name: fullName,
+      username,
+      email,
+      password_hash,
+      role: 'RESIDENT',
+      is_active: true
+    }]).select().single();
+
+    if (userError) throw userError;
+
+    // Generate Temporary Resident Number
+    const settings = await getSettings();
+    const tempResNum = `${settings.id_prefix || 'BRGY'}-PENDING-${Date.now().toString().slice(-6)}`;
+
+    // Create Resident Record
+    const { data: residentData, error: resError } = await supabase.from('residents').insert([{
+      user_id: userData.id,
+      resident_number: tempResNum,
+      first_name: firstName,
+      middle_name: middleName || '',
+      last_name: lastName,
+      suffix: suffix || '',
+      date_of_birth: dateOfBirth,
+      gender,
+      civil_status: civilStatus,
+      nationality: nationality || 'Filipino',
+      contact_number: contactNumber,
+      email,
+      address,
+      purok,
+      occupation: occupation || 'Unemployed',
+      educational_attainment: educationalAttainment || 'N/A',
+      is_voter: !!isVoter,
+      is_pwd: !!isPwd,
+      is_senior_citizen: !!isSeniorCitizen,
+      is_solo_parent: !!isSoloParent,
+      is_4ps: !!is4ps,
+      emergency_contact: emergencyContact,
+      emergency_contact_number: emergencyContactNumber,
+      profile_photo_url: profilePhotoUrl || '',
+      valid_id_url: validIdUrl || '',
+      status: 'PENDING'
+    }]).select().single();
+
+    if (resError) throw resError;
+
+    await logActivity('Public User', 'RESIDENT', 'Registration Submitted', `New resident registration submitted for ${fullName}.`);
+
+    res.json({
+      success: true,
+      message: "Application submitted successfully! Please wait for staff approval.",
+      residentNumber: tempResNum
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// DASHBOARD STATS
-app.get('/api/stats/dashboard', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const [
-            residents, households, certs, appts, assist, complaints
-        ] = await Promise.all([
-            supabase.from('residents').select('approval_status, gender, is_senior, is_pwd, is_solo_parent, voter_status, date_of_birth, is_archived'),
-            supabase.from('households').select('id', { count: 'exact' }).eq('is_archived', false),
-            supabase.from('certificate_requests').select('status'),
-            supabase.from('appointments').select('status'),
-            supabase.from('assistance_requests').select('status'),
-            supabase.from('complaints').select('status')
-        ]);
+// ============================================================================
+// API ROUTES - DASHBOARD & STATS (REAL SUPABASE DATA)
+// ============================================================================
 
-        const activeRes = (residents.data || []).filter(r => !r.is_archived);
+app.get('/api/staff/dashboard-stats', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  try {
+    const [
+      resTotal, resPending, resApproved, resRejected,
+      households, maleCount, femaleCount, seniorCount, pwdCount, soloParentCount, voterCount,
+      pendingCerts, pendingApps, pendingComplaints, activeBiz, purokList
+    ] = await Promise.all([
+      supabase.from('residents').select('id', { count: 'exact', head: true }),
+      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('status', 'PENDING'),
+      supabase.from('residents').select('id', { count: 'exact', head: true }).in('status', ['APPROVED', 'ACTIVE']),
+      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('status', 'REJECTED'),
+      supabase.from('households').select('id', { count: 'exact', head: true }),
+      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('gender', 'Male'),
+      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('gender', 'Female'),
+      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('is_senior_citizen', true),
+      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('is_pwd', true),
+      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('is_solo_parent', true),
+      supabase.from('residents').select('id', { count: 'exact', head: true }).eq('is_voter', true),
+      supabase.from('certificate_requests').select('id', { count: 'exact', head: true }).eq('status', 'PENDING'),
+      supabase.from('appointments').select('id', { count: 'exact', head: true }).eq('status', 'PENDING'),
+      supabase.from('complaints').select('id', { count: 'exact', head: true }).eq('status', 'SUBMITTED'),
+      supabase.from('businesses').select('id', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
+      supabase.from('puroks').select('name')
+    ]);
 
-        let stats = {
-            totalResidents: activeRes.length,
-            pendingResidents: activeRes.filter(r => r.approval_status === 'Pending').length,
-            approvedResidents: activeRes.filter(r => r.approval_status === 'Approved').length,
-            rejectedResidents: activeRes.filter(r => r.approval_status === 'Rejected').length,
-            totalHouseholds: households.count || 0,
-            maleResidents: activeRes.filter(r => r.gender === 'Male').length,
-            femaleResidents: activeRes.filter(r => r.gender === 'Female').length,
-            seniorCitizens: activeRes.filter(r => r.is_senior).length,
-            pwd: activeRes.filter(r => r.is_pwd).length,
-            soloParents: activeRes.filter(r => r.is_solo_parent).length,
-            minors: activeRes.filter(r => {
-                const age = new Date().getFullYear() - new Date(r.date_of_birth).getFullYear();
-                return age < 18;
-            }).length,
-            registeredVoters: activeRes.filter(r => r.voter_status === 'Registered').length,
-            pendingCertificates: (certs.data || []).filter(c => c.status === 'Pending').length,
-            pendingAppointments: (appts.data || []).filter(a => a.status === 'Pending').length,
-            pendingAssistance: (assist.data || []).filter(a => a.status === 'Pending').length,
-            pendingComplaints: (complaints.data || []).filter(c => c.status === 'Submitted' || c.status === 'Under Review').length
-        };
-
-        res.json(stats);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    // Aggregate Purok Demographics
+    const { data: purokResidents } = await supabase.from('residents').select('purok');
+    const purokCounts = {};
+    if (purokResidents) {
+      purokResidents.forEach(r => {
+        purokCounts[r.purok] = (purokCounts[r.purok] || 0) + 1;
+      });
     }
+
+    res.json({
+      totalResidents: resTotal.count || 0,
+      pendingResidents: resPending.count || 0,
+      approvedResidents: resApproved.count || 0,
+      rejectedResidents: resRejected.count || 0,
+      totalHouseholds: households.count || 0,
+      maleResidents: maleCount.count || 0,
+      femaleResidents: femaleCount.count || 0,
+      seniorCitizens: seniorCount.count || 0,
+      pwd: pwdCount.count || 0,
+      soloParents: soloParentCount.count || 0,
+      voters: voterCount.count || 0,
+      pendingCertificates: pendingCerts.count || 0,
+      pendingAppointments: pendingApps.count || 0,
+      pendingComplaints: pendingComplaints.count || 0,
+      activeBusinesses: activeBiz.count || 0,
+      purokDemographics: purokCounts
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// RESIDENTS MANAGEMENT
-app.get('/api/residents', authenticate, async (req, res) => {
-    try {
-        const { status, archived, search } = req.query;
-        let query = supabase.from('residents').select('*, puroks(name), households(household_number)');
+// ============================================================================
+// API ROUTES - RESIDENT APPROVAL & MANAGEMENT
+// ============================================================================
 
-        if (req.user.role === 'resident') {
-            query = query.eq('id', req.user.residentId);
-        } else {
-            if (archived === 'true') {
-                query = query.eq('is_archived', true);
-            } else {
-                query = query.eq('is_archived', false);
-            }
+app.get('/api/residents', checkDbConfig, authenticateToken, async (req, res) => {
+  try {
+    const { status, search, purok, gender, filterType } = req.query;
+    let query = supabase.from('residents').select('*').order('created_at', { ascending: false });
 
-            if (status) {
-                query = query.eq('approval_status', status);
-            }
-        }
+    if (status) query = query.eq('status', status);
+    if (purok) query = query.eq('purok', purok);
+    if (gender) query = query.eq('gender', gender);
+    if (filterType === 'senior') query = query.eq('is_senior_citizen', true);
+    if (filterType === 'pwd') query = query.eq('is_pwd', true);
+    if (filterType === 'voter') query = query.eq('is_voter', true);
 
-        const { data, error } = await query.order('registered_at', { ascending: false });
-        if (error) throw error;
-
-        let result = data;
-        if (search) {
-            const s = search.toLowerCase();
-            result = result.filter(r => 
-                `${r.first_name} ${r.last_name}`.toLowerCase().includes(s) ||
-                (r.resident_id && r.resident_id.toLowerCase().includes(s)) ||
-                (r.address && r.address.toLowerCase().includes(s))
-            );
-        }
-
-        res.json(result);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    if (search) {
+      query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,resident_number.ilike.%${search}%`);
     }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/residents/approve-reject', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { residentId, status, rejectionReason } = req.body;
-        
-        let updates = {
-            approval_status: status,
-            rejection_reason: status === 'Rejected' ? rejectionReason : null,
-            updated_at: new Date()
-        };
+app.post('/api/residents/approve/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  try {
+    const residentId = req.params.id;
+    const settings = await getSettings();
 
-        if (status === 'Approved') {
-            const { count } = await supabase.from('residents').select('id', { count: 'exact' }).eq('approval_status', 'Approved');
-            const seq = String((count || 0) + 1).padStart(6, '0');
-            updates.resident_id = `BRGY-${seq}`;
-        }
+    // Fetch total active/approved count to generate sequence number
+    const { count } = await supabase.from('residents').select('id', { count: 'exact', head: true }).in('status', ['APPROVED', 'ACTIVE']);
+    const seqNum = String((count || 0) + 1).padStart(6, '0');
+    const uniqueResidentNumber = `${settings.id_prefix || 'BRGY-2026'}-${seqNum}`;
 
-        const { data: resident, error } = await supabase.from('residents').update(updates).eq('id', residentId).select().single();
-        if (error) throw error;
+    const { data, error } = await supabase.from('residents').update({
+      status: 'APPROVED',
+      resident_number: uniqueResidentNumber,
+      updated_at: new Date().toISOString()
+    }).eq('id', residentId).select().single();
 
-        await supabase.from('notifications').insert([{
-            user_id: resident.user_id,
-            title: `Resident Registration ${status}`,
-            message: status === 'Approved' 
-                ? `Congratulations! Your residency registration has been approved. Your Resident ID is ${updates.resident_id}.`
-                : `Your registration was rejected. Reason: ${rejectionReason}`
-        }]);
+    if (error) throw error;
 
-        res.json({ success: true, data: resident });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    // Send Notification to Resident User Account
+    if (data.user_id) {
+      await supabase.from('notifications').insert([{
+        user_id: data.user_id,
+        title: 'Registration Approved',
+        message: `Congratulations! Your Barangay registration has been APPROVED. Your Official Resident ID is ${uniqueResidentNumber}.`,
+        link: '/resident'
+      }]);
     }
+
+    await logActivity(req.user.fullName, req.user.role, 'Approve Resident', `Approved resident ${data.first_name} ${data.last_name} with ID ${uniqueResidentNumber}.`);
+    res.json({ success: true, message: 'Resident approved successfully!', resident: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/residents/archive-toggle', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { residentId, archive } = req.body;
-        const { data, error } = await supabase.from('residents').update({ is_archived: archive }).eq('id', residentId).select().single();
-        if (error) throw error;
-        res.json({ success: true, data });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+app.post('/api/residents/reject/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  const { rejectionReason } = req.body;
+  if (!rejectionReason) return res.status(400).json({ error: "Rejection reason is required." });
+
+  try {
+    const residentId = req.params.id;
+    const { data, error } = await supabase.from('residents').update({
+      status: 'REJECTED',
+      rejection_reason: rejectionReason,
+      updated_at: new Date().toISOString()
+    }).eq('id', residentId).select().single();
+
+    if (error) throw error;
+
+    if (data.user_id) {
+      await supabase.from('notifications').insert([{
+        user_id: data.user_id,
+        title: 'Registration Rejected',
+        message: `Your registration application was rejected. Reason: ${rejectionReason}`,
+        link: '/resident'
+      }]);
     }
+
+    await logActivity(req.user.fullName, req.user.role, 'Reject Resident', `Rejected resident ${data.first_name} ${data.last_name}.`);
+    res.json({ success: true, message: 'Resident application rejected.', resident: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// PUBLIC VERIFICATION FOR QR CODE
-app.get('/api/verify/resident/:residentId', async (req, res) => {
-    try {
-        const { residentId } = req.params;
-        const { data: resident, error } = await supabase
-            .from('residents')
-            .select('resident_id, first_name, last_name, approval_status, is_archived')
-            .eq('resident_id', residentId)
-            .single();
+app.post('/api/residents/archive/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  const { statusReason } = req.body; // ARCHIVED, MOVED OUT, DECEASED, INACTIVE
+  const targetStatus = statusReason || 'ARCHIVED';
 
-        if (error || !resident) {
-            return res.status(404).json({ verified: false, message: 'Resident record not found.' });
-        }
+  try {
+    const { data, error } = await supabase.from('residents').update({
+      status: targetStatus,
+      updated_at: new Date().toISOString()
+    }).eq('id', req.params.id).select().single();
 
-        const { data: sys } = await supabase.from('system_settings').select('barangay_name').single();
+    if (error) throw error;
 
-        res.json({
-            verified: resident.approval_status === 'Approved' && !resident.is_archived,
-            residentId: resident.resident_id,
-            fullName: `${resident.first_name} ${resident.last_name}`,
-            barangay: sys ? sys.barangay_name : 'Barangay Central',
-            status: resident.is_archived ? 'INACTIVE / ARCHIVED' : (resident.approval_status === 'Approved' ? 'ACTIVE / VERIFIED' : resident.approval_status)
-        });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    await logActivity(req.user.fullName, req.user.role, 'Archive Resident', `Archived resident ${data.first_name} ${data.last_name} (Status: ${targetStatus}).`);
+    res.json({ success: true, message: `Resident status changed to ${targetStatus}.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/residents/restore/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('residents').update({
+      status: 'APPROVED',
+      updated_at: new Date().toISOString()
+    }).eq('id', req.params.id).select().single();
+
+    if (error) throw error;
+
+    await logActivity(req.user.fullName, req.user.role, 'Restore Resident', `Restored archived resident ${data.first_name} ${data.last_name}.`);
+    res.json({ success: true, message: "Resident record restored to APPROVED." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// API ROUTES - HOUSEHOLDS & PUROKS
+// ============================================================================
+
+app.get('/api/households', checkDbConfig, authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('households').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/households', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  const { householdNumber, householdHeadName, address, purok, householdType } = req.body;
+  try {
+    const { data, error } = await supabase.from('households').insert([{
+      household_number: householdNumber,
+      household_head_name: householdHeadName,
+      address,
+      purok,
+      household_type: householdType || 'Single Family'
+    }]).select().single();
+
+    if (error) throw error;
+    await logActivity(req.user.fullName, req.user.role, 'Create Household', `Created Household #${householdNumber}`);
+    res.json({ success: true, household: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/puroks', checkDbConfig, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('puroks').select('*').order('name');
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/puroks', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY'), async (req, res) => {
+  const { name, description } = req.body;
+  try {
+    const { data, error } = await supabase.from('puroks').insert([{ name, description }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, purok: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// API ROUTES - CERTIFICATES & CLAIMING BY QR
+// ============================================================================
+
+app.get('/api/certificates', checkDbConfig, authenticateToken, async (req, res) => {
+  try {
+    let query = supabase.from('certificate_requests').select('*, residents(first_name, last_name, resident_number)').order('created_at', { ascending: false });
+    if (req.user.role === 'RESIDENT') {
+      query = query.eq('resident_id', req.user.residentId);
     }
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// PUROK MANAGEMENT
-app.get('/api/puroks', async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('puroks').select('*').order('name');
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+app.post('/api/certificates/request', checkDbConfig, authenticateToken, authorizeRoles('RESIDENT'), async (req, res) => {
+  const { certificateType, purpose } = req.body;
+  if (!certificateType || !purpose) return res.status(400).json({ error: "Certificate type and purpose required." });
+
+  try {
+    const settings = await getSettings();
+    const reqNum = `${settings.certificate_prefix || 'REQ'}-${Date.now().toString().slice(-6)}`;
+
+    const { data, error } = await supabase.from('certificate_requests').insert([{
+      request_number: reqNum,
+      resident_id: req.user.residentId,
+      certificate_type: certificateType,
+      purpose,
+      status: 'PENDING'
+    }]).select().single();
+
+    if (error) throw error;
+
+    await logActivity(req.user.fullName, 'RESIDENT', 'Certificate Request', `Requested ${certificateType} (${reqNum})`);
+    res.json({ success: true, request: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/certificates/update-status/:id', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  const { status, remarks, documentUrl } = req.body;
+  try {
+    const updateData = { status, updated_at: new Date().toISOString() };
+    if (remarks) updateData.remarks = remarks;
+    if (documentUrl) updateData.document_url = documentUrl;
+    if (status === 'RELEASED') {
+      updateData.released_by = req.user.fullName;
+      updateData.released_at = new Date().toISOString();
     }
-});
 
-app.post('/api/puroks', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { name, description } = req.body;
-        const { data, error } = await supabase.from('puroks').insert([{ name, description }]).select();
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    const { data, error } = await supabase.from('certificate_requests').update(updateData).eq('id', req.params.id).select('*, residents(user_id)').single();
+    if (error) throw error;
+
+    if (data.residents && data.residents.user_id) {
+      await supabase.from('notifications').insert([{
+        user_id: data.residents.user_id,
+        title: `Certificate Status: ${status}`,
+        message: `Your request for ${data.certificate_type} is now ${status}.`,
+        link: '/resident'
+      }]);
     }
+
+    await logActivity(req.user.fullName, req.user.role, 'Certificate Status Change', `Updated Request ${data.request_number} to ${status}`);
+    res.json({ success: true, request: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.delete('/api/puroks/:id', authenticate, authorize(['admin', 'captain', 'secretary']), async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { error } = await supabase.from('puroks').delete().eq('id', id);
-        if (error) throw error;
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+// Scan Claim QR Code Route for Staff
+app.get('/api/certificates/claim-scan/:token', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('certificate_requests')
+      .select('*, residents(first_name, last_name, resident_number, address, purok)')
+      .eq('claim_qr_token', req.params.token)
+      .single();
+
+    if (error || !data) return res.status(404).json({ error: "Certificate request QR token not found or invalid." });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// HOUSEHOLD MANAGEMENT
-app.get('/api/households', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('households').select('*, puroks(name), residents(*)').eq('is_archived', false);
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+// ============================================================================
+// API ROUTES - ANNOUNCEMENTS & NOTIFICATIONS
+// ============================================================================
+
+app.get('/api/announcements', checkDbConfig, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('announcements').select('*').eq('is_published', true).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/households', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { householdNumber, address, purokId } = req.body;
-        const { data, error } = await supabase.from('households').insert([{ household_number: householdNumber, address, purok_id: purokId }]).select();
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.post('/api/announcements', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  const { title, content, category, priority } = req.body;
+  try {
+    const { data, error } = await supabase.from('announcements').insert([{
+      title,
+      content,
+      category: category || 'General',
+      priority: priority || 'Normal',
+      is_published: true,
+      created_by: req.user.fullName
+    }]).select().single();
+
+    if (error) throw error;
+    await logActivity(req.user.fullName, req.user.role, 'Published Announcement', `Announcement: ${title}`);
+    res.json({ success: true, announcement: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// CERTIFICATES
-app.get('/api/certificates', authenticate, async (req, res) => {
-    try {
-        let query = supabase.from('certificate_requests').select('*, residents(first_name, last_name, resident_id)');
-        if (req.user.role === 'resident') {
-            query = query.eq('resident_id', req.user.residentId);
-        }
-        const { data, error } = await query.order('requested_at', { ascending: false });
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.get('/api/notifications', checkDbConfig, authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('notifications').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/certificates/request', authenticate, authorize(['resident']), async (req, res) => {
-    try {
-        const { certificateType, purpose } = req.body;
-        const { data, error } = await supabase.from('certificate_requests').insert([{
-            resident_id: req.user.residentId,
-            certificate_type: certificateType,
-            purpose,
-            status: 'Pending'
-        }]).select();
-
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.post('/api/certificates/process', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), upload.single('certificateFile'), async (req, res) => {
-    try {
-        const { requestId, status, rejectionReason, remarks, certificateNumber, releaseDate } = req.body;
-        
-        let updates = {
-            status,
-            rejection_reason: rejectionReason,
-            remarks,
-            certificate_number: certificateNumber,
-            release_date: releaseDate || null,
-            updated_at: new Date()
-        };
-
-        if (req.file) {
-            updates.file_url = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-        }
-
-        const { data: cert, error } = await supabase.from('certificate_requests').update(updates).eq('id', requestId).select('*, residents(user_id)').single();
-        if (error) throw error;
-
-        await supabase.from('notifications').insert([{
-            user_id: cert.residents.user_id,
-            title: `Certificate Request ${status}`,
-            message: `Your request for ${cert.certificate_type} is now: ${status}.`
-        }]);
-
-        res.json({ success: true, data: cert });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+// ============================================================================
+// API ROUTES - APPOINTMENTS, COMPLAINTS, BLOTTER, ASSISTANCE, BUSINESSES
+// ============================================================================
 
 // APPOINTMENTS
-app.get('/api/appointments', authenticate, async (req, res) => {
-    try {
-        let query = supabase.from('appointments').select('*, residents(first_name, last_name, resident_id, contact_number)');
-        if (req.user.role === 'resident') {
-            query = query.eq('resident_id', req.user.residentId);
-        }
-        const { data, error } = await query.order('created_at', { ascending: false });
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.get('/api/appointments', checkDbConfig, authenticateToken, async (req, res) => {
+  try {
+    let query = supabase.from('appointments').select('*, residents(first_name, last_name)').order('created_at', { ascending: false });
+    if (req.user.role === 'RESIDENT') query = query.eq('resident_id', req.user.residentId);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/appointments', authenticate, async (req, res) => {
-    try {
-        const { serviceType, preferredDate, preferredTime, purpose } = req.body;
-        const { data, error } = await supabase.from('appointments').insert([{
-            resident_id: req.user.residentId,
-            service_type: serviceType,
-            preferred_date: preferredDate,
-            preferred_time: preferredTime,
-            purpose
-        }]).select();
-
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.post('/api/appointments', checkDbConfig, authenticateToken, authorizeRoles('RESIDENT'), async (req, res) => {
+  const { serviceType, appointmentDate, appointmentTime, purpose } = req.body;
+  try {
+    const appNum = `APT-${Date.now().toString().slice(-6)}`;
+    const { data, error } = await supabase.from('appointments').insert([{
+      appointment_number: appNum,
+      resident_id: req.user.residentId,
+      service_type: serviceType,
+      appointment_date: appointmentDate,
+      appointment_time: appointmentTime,
+      purpose,
+      status: 'PENDING'
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, appointment: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/appointments/status', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { appointmentId, status, remarks } = req.body;
-        const { data: appt, error } = await supabase.from('appointments').update({ status, remarks, updated_at: new Date() }).eq('id', appointmentId).select('*, residents(user_id)').single();
-        if (error) throw error;
-
-        await supabase.from('notifications').insert([{
-            user_id: appt.residents.user_id,
-            title: `Appointment Status Updated`,
-            message: `Your appointment for ${appt.service_type} on ${appt.preferred_date} has been updated to: ${status}.`
-        }]);
-
-        res.json({ success: true, data: appt });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+// COMPLAINTS
+app.get('/api/complaints', checkDbConfig, authenticateToken, async (req, res) => {
+  try {
+    let query = supabase.from('complaints').select('*').order('created_at', { ascending: false });
+    if (req.user.role === 'RESIDENT') query = query.eq('complainant_id', req.user.residentId);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// COMPLAINTS / BLOTTER
-app.get('/api/complaints', authenticate, async (req, res) => {
-    try {
-        let query = supabase.from('complaints').select('*');
-        if (req.user.role === 'resident') {
-            query = query.eq('complainant_id', req.user.residentId);
-        }
-        const { data, error } = await query.order('created_at', { ascending: false });
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.post('/api/complaints', checkDbConfig, authenticateToken, async (req, res) => {
+  const { category, subject, details, location } = req.body;
+  try {
+    const cmpNum = `CMP-${Date.now().toString().slice(-6)}`;
+    const { data, error } = await supabase.from('complaints').insert([{
+      complaint_number: cmpNum,
+      complainant_id: req.user.role === 'RESIDENT' ? req.user.residentId : null,
+      complainant_name: req.user.fullName,
+      category,
+      subject,
+      details,
+      location: location || '',
+      status: 'SUBMITTED'
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, complaint: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/complaints', authenticate, async (req, res) => {
-    try {
-        const { respondentName, witnessNames, complaintType, incidentDate, incidentLocation, description } = req.body;
-        
-        const { data: resRec } = await supabase.from('residents').select('first_name, last_name').eq('id', req.user.residentId).single();
-        const complainantName = resRec ? `${resRec.first_name} ${resRec.last_name}` : 'Anonymous Resident';
-        
-        const caseNumber = `BLOTTER-${Date.now().toString().slice(-6)}`;
-
-        const { data, error } = await supabase.from('complaints').insert([{
-            case_number: caseNumber,
-            complainant_id: req.user.residentId,
-            complainant_name: complainantName,
-            respondent_name: respondentName,
-            witness_names: witnessNames,
-            complaint_type: complaintType,
-            incident_date: incidentDate,
-            incident_location: incidentLocation,
-            description,
-            status: 'Submitted'
-        }]).select();
-
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+// BLOTTER RECORDS
+app.get('/api/blotter', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('blotter_records').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/complaints/status', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { complaintId, status, resolutionDetails } = req.body;
-        const { data: comp, error } = await supabase.from('complaints').update({ status, resolution_details: resolutionDetails, updated_at: new Date() }).eq('id', complaintId).select().single();
-        if (error) throw error;
-
-        if (comp.complainant_id) {
-            const { data: resRec } = await supabase.from('residents').select('user_id').eq('id', comp.complainant_id).single();
-            if (resRec) {
-                await supabase.from('notifications').insert([{
-                    user_id: resRec.user_id,
-                    title: `Complaint Status Update`,
-                    message: `Your complaint Case #${comp.case_number} status changed to ${status}.`
-                }]);
-            }
-        }
-
-        res.json({ success: true, data: comp });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.post('/api/blotter', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  const { complainantName, respondentName, witnessName, incidentDate, incidentTime, location, description, actionTaken } = req.body;
+  try {
+    const caseNum = `BLT-${Date.now().toString().slice(-6)}`;
+    const { data, error } = await supabase.from('blotter_records').insert([{
+      case_number: caseNum,
+      complainant_name: complainantName,
+      respondent_name: respondentName,
+      witness_name: witnessName || '',
+      incident_date: incidentDate,
+      incident_time: incidentTime,
+      location,
+      description,
+      action_taken: actionTaken || '',
+      status: 'ACTIVE'
+    }]).select().single();
+    if (error) throw error;
+    await logActivity(req.user.fullName, req.user.role, 'Created Blotter Record', `Case #${caseNum}`);
+    res.json({ success: true, blotter: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ASSISTANCE REQUESTS
-app.get('/api/assistance', authenticate, async (req, res) => {
-    try {
-        let query = supabase.from('assistance_requests').select('*, residents(first_name, last_name, resident_id)');
-        if (req.user.role === 'resident') {
-            query = query.eq('resident_id', req.user.residentId);
-        }
-        const { data, error } = await query.order('created_at', { ascending: false });
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.get('/api/assistance', checkDbConfig, authenticateToken, async (req, res) => {
+  try {
+    let query = supabase.from('assistance_requests').select('*, residents(first_name, last_name)').order('created_at', { ascending: false });
+    if (req.user.role === 'RESIDENT') query = query.eq('resident_id', req.user.residentId);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/assistance', authenticate, authorize(['resident']), async (req, res) => {
-    try {
-        const { assistanceType, details } = req.body;
-        const { data, error } = await supabase.from('assistance_requests').insert([{
-            resident_id: req.user.residentId,
-            assistance_type: assistanceType,
-            details,
-            status: 'Pending'
-        }]).select();
-
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.post('/api/assistance/status', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { requestId, status, remarks } = req.body;
-        const { data: reqData, error } = await supabase.from('assistance_requests').update({ status, remarks, updated_at: new Date() }).eq('id', requestId).select('*, residents(user_id)').single();
-        if (error) throw error;
-
-        await supabase.from('notifications').insert([{
-            user_id: reqData.residents.user_id,
-            title: `Assistance Request ${status}`,
-            message: `Your request for ${reqData.assistance_type} status is now: ${status}.`
-        }]);
-
-        res.json({ success: true, data: reqData });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// ANNOUNCEMENTS
-app.get('/api/announcements', async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('announcements').select('*').eq('status', 'Active').order('created_at', { ascending: false });
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.post('/api/announcements', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), upload.single('image'), async (req, res) => {
-    try {
-        const { title, description, category } = req.body;
-        let imageUrl = '';
-        if (req.file) {
-            imageUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-        }
-
-        const { data, error } = await supabase.from('announcements').insert([{
-            title, description, category, image_url: imageUrl, created_by: req.user.id
-        }]).select();
-
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// NOTIFICATIONS
-app.get('/api/notifications', authenticate, async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('notifications').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false });
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.post('/api/notifications/read', authenticate, async (req, res) => {
-    try {
-        await supabase.from('notifications').update({ is_read: true }).eq('user_id', req.user.id);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.post('/api/assistance', checkDbConfig, authenticateToken, authorizeRoles('RESIDENT'), async (req, res) => {
+  const { assistanceType, reason, amountRequested } = req.body;
+  try {
+    const reqNum = `AST-${Date.now().toString().slice(-6)}`;
+    const { data, error } = await supabase.from('assistance_requests').insert([{
+      request_number: reqNum,
+      resident_id: req.user.residentId,
+      assistance_type: assistanceType,
+      reason,
+      amount_requested: parseFloat(amountRequested) || 0,
+      status: 'PENDING'
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, assistance: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // BUSINESS MANAGEMENT
-app.get('/api/businesses', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('business_records').select('*').eq('is_archived', false).order('created_at', { ascending: false });
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.get('/api/businesses', checkDbConfig, authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('businesses').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/businesses', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { businessName, ownerName, businessType, address, contactNumber, permitNumber, expirationDate } = req.body;
-        const { data, error } = await supabase.from('business_records').insert([{
-            business_name: businessName,
-            owner_name: ownerName,
-            business_type: businessType,
-            address,
-            contact_number: contactNumber,
-            permit_number: permitNumber,
-            expiration_date: expirationDate
-        }]).select();
-
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.post('/api/businesses', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  const { businessName, ownerName, address, businessType, contactNumber, permitNumber, dateIssued, expirationDate } = req.body;
+  try {
+    const { data, error } = await supabase.from('businesses').insert([{
+      business_name: businessName,
+      owner_name: ownerName,
+      address,
+      business_type: businessType,
+      contact_number: contactNumber,
+      permit_number: permitNumber,
+      date_issued: dateIssued,
+      expiration_date: expirationDate,
+      status: 'ACTIVE'
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, business: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// FEEDBACK
-app.post('/api/feedback', authenticate, authorize(['resident']), async (req, res) => {
-    try {
-        const { serviceType, rating, comment } = req.body;
-        const { data, error } = await supabase.from('service_feedback').insert([{
-            resident_id: req.user.residentId,
-            service_type: serviceType,
-            rating: parseInt(rating),
-            comment
-        }]).select();
-
-        if (error) throw error;
-        res.json({ success: true, data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+// ACTIVITY LOGS & USERS MANAGEMENT
+app.get('/api/activity-logs', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN'), async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(200);
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// USER PROFILE UPDATE
-app.post('/api/user/update-profile', authenticate, async (req, res) => {
-    try {
-        const { fullName, email, username, currentPassword, newPassword } = req.body;
-        
-        const { data: user } = await supabase.from('users').select('*').eq('id', req.user.id).single();
-        const match = await bcrypt.compare(currentPassword, user.password_hash);
-        if (!match) {
-            return res.status(400).json({ error: 'Current password incorrect.' });
-        }
-
-        let updates = {
-            full_name: fullName,
-            email,
-            username,
-            updated_at: new Date()
-        };
-
-        if (newPassword && newPassword.trim().length > 0) {
-            updates.password_hash = await bcrypt.hash(newPassword, 10);
-        }
-
-        const { data, error } = await supabase.from('users').update(updates).eq('id', req.user.id).select().single();
-        if (error) throw error;
-
-        res.json({ success: true, message: 'Profile updated successfully.' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+app.get('/api/users', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN'), async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('users').select('id, full_name, username, email, role, is_active, created_at').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/resident/request-update', authenticate, authorize(['resident']), async (req, res) => {
-    try {
-        const { contactNumber, occupation, civilStatus, address } = req.body;
-        const { data, error } = await supabase.from('notifications').insert([{
-            user_id: req.user.id,
-            title: 'Profile Update Requested',
-            message: `You requested updates to your profile info (${contactNumber}, ${occupation}, ${civilStatus}, ${address}). Awaiting staff confirmation.`
-        }]).select();
+app.post('/api/users/create-staff', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN'), async (req, res) => {
+  const { fullName, username, email, password, role } = req.body;
+  try {
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(password, salt);
 
-        if (error) throw error;
-        res.json({ success: true, message: 'Update request sent to staff.' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    const { data, error } = await supabase.from('users').insert([{
+      full_name: fullName,
+      username,
+      email,
+      password_hash,
+      role: role || 'STAFF',
+      is_active: true
+    }]).select().single();
+
+    if (error) throw error;
+    await logActivity(req.user.fullName, req.user.role, 'Create Staff User', `Created staff account for ${fullName}`);
+    res.json({ success: true, user: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// SETTINGS MANAGEMENT
+app.get('/api/settings', checkDbConfig, async (req, res) => {
+  try {
+    const settings = await getSettings();
+    res.json(settings);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
-// ==========================================
-// DYNAMIC SINGLE-PAGE APPLICATION FRONTEND
-// ==========================================
+app.post('/api/settings', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN'), async (req, res) => {
+  const { barangay_name, municipality, province, address, contact_number, email, barangay_captain, barangay_secretary, id_prefix, certificate_prefix, logo_url } = req.body;
+  try {
+    const { data, error } = await supabase.from('barangay_settings').upsert({
+      id: 1,
+      barangay_name,
+      municipality,
+      province,
+      address,
+      contact_number,
+      email,
+      barangay_captain,
+      barangay_secretary,
+      id_prefix,
+      certificate_prefix,
+      logo_url,
+      updated_at: new Date().toISOString()
+    }).select().single();
 
-app.get('*', (req, res) => {
-    res.send(`
-<!DOCTYPE html>
+    if (error) throw error;
+    await logActivity(req.user.fullName, req.user.role, 'Update Barangay Settings', 'System configuration updated');
+    res.json({ success: true, settings: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// PUBLIC QR CODE VERIFICATION API & PAGE
+// ============================================================================
+
+app.get('/verify/:token', checkDbConfig, async (req, res) => {
+  const token = req.params.token;
+  try {
+    const settings = await getSettings();
+    const { data: resident, error } = await supabase.from('residents').select('*').eq('qr_token', token).single();
+
+    if (error || !resident) {
+      return res.send(renderVerificationResultPage(settings, null, false));
+    }
+
+    res.send(renderVerificationResultPage(settings, resident, true));
+  } catch (err) {
+    res.status(500).send("Verification error occurred.");
+  }
+});
+
+// Batch 8-ID Print Route
+app.post('/api/print-batch-ids', checkDbConfig, authenticateToken, authorizeRoles('SUPER ADMIN', 'BARANGAY CAPTAIN', 'BARANGAY SECRETARY', 'STAFF'), async (req, res) => {
+  const { residentIds, paperSize } = req.body; // Array of IDs
+  if (!residentIds || !Array.isArray(residentIds) || residentIds.length === 0) {
+    return res.status(400).json({ error: "Select at least 1 resident ID to print." });
+  }
+
+  try {
+    const settings = await getSettings();
+    const { data: residents, error } = await supabase.from('residents').select('*').in('id', residentIds);
+    if (error) throw error;
+
+    const cardsHtml = await Promise.all(residents.map(async (resData) => {
+      const qrDataUrl = await QRCode.toDataURL(`${req.protocol}://${req.get('host')}/verify/${resData.qr_token}`);
+      return renderSingleIdCardHtml(settings, resData, qrDataUrl);
+    }));
+
+    res.json({ success: true, html: render8IdPrintSheetHtml(cardsHtml, paperSize || 'A4') });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Single Digital ID Route
+app.get('/api/resident-id-card/:id', checkDbConfig, authenticateToken, async (req, res) => {
+  try {
+    const settings = await getSettings();
+    const { data: resData, error } = await supabase.from('residents').select('*').eq('id', req.params.id).single();
+    if (error || !resData) return res.status(404).json({ error: "Resident not found" });
+
+    const qrDataUrl = await QRCode.toDataURL(`${req.protocol}://${req.get('host')}/verify/${resData.qr_token}`);
+    const cardHtml = renderSingleIdCardHtml(settings, resData, qrDataUrl);
+
+    res.json({ success: true, html: cardHtml, qrUrl: qrDataUrl, resident: resData, settings });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// SINGLE PAGE FRONTEND GENERATOR (EXPRESS HTML/CSS/JS DELIVERABLE)
+// ============================================================================
+
+function renderMainAppPage() {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Barangay Resident Management System</title>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <!-- FontAwesome & Google Fonts -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
-            --primary-green: #10b981;
-            --dark-green: #047857;
-            --light-green: #d1fae5;
-            --primary-blue: #0284c7;
-            --dark-blue: #0369a1;
-            --light-blue: #e0f2fe;
-            --bg-neutral: #f8fafc;
-            --card-bg: #ffffff;
-            --text-main: #0f172a;
-            --text-muted: #64748b;
-            --border-color: #e2e8f0;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --success: #10b981;
+            --primary-green: #0d7a40;
+            --primary-green-dark: #08522a;
+            --secondary-blue: #1e40af;
+            --secondary-blue-light: #3b82f6;
+            --bg-light: #f3f4f6;
+            --text-dark: #1f2937;
+            --text-muted: #6b7280;
+            --white: #ffffff;
+            --border-color: #e5e7eb;
+            --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+        body { background-color: var(--bg-light); color: var(--text-dark); min-height: 100vh; display: flex; flex-direction: column; }
+        
+        /* Layout Structure */
+        #app { display: flex; width: 100vw; min-height: 100vh; }
+        .sidebar { width: 260px; background: linear-gradient(180deg, var(--primary-green-dark) 0%, var(--primary-green) 100%); color: var(--white); display: flex; flex-direction: column; flex-shrink: 0; transition: all 0.3s; }
+        .sidebar-header { padding: 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .sidebar-header img { width: 42px; height: 42px; border-radius: 50%; background: #fff; object-fit: cover; }
+        .sidebar-header h2 { font-size: 16px; font-weight: 700; line-height: 1.2; }
+        .sidebar-menu { list-style: none; padding: 15px 10px; flex-grow: 1; overflow-y: auto; }
+        .sidebar-menu li a { display: flex; align-items: center; gap: 12px; padding: 12px 15px; color: rgba(255,255,255,0.85); text-decoration: none; border-radius: 8px; font-size: 14px; font-weight: 500; margin-bottom: 4px; transition: 0.2s; }
+        .sidebar-menu li a:hover, .sidebar-menu li a.active { background: rgba(255,255,255,0.2); color: #fff; font-weight: 600; }
+        
+        .main-content { flex-grow: 1; display: flex; flex-direction: column; overflow-x: hidden; }
+        .top-navbar { height: 65px; background: var(--white); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; padding: 0 30px; }
+        .top-navbar .user-profile { display: flex; align-items: center; gap: 15px; }
+        .page-container { padding: 30px; flex-grow: 1; overflow-y: auto; }
+        
+        /* Components */
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: var(--white); padding: 20px; border-radius: 12px; box-shadow: var(--card-shadow); border-left: 5px solid var(--secondary-blue); display: flex; justify-content: space-between; align-items: center; }
+        .stat-card.green { border-left-color: var(--primary-green); }
+        .stat-card.yellow { border-left-color: #f59e0b; }
+        .stat-card.red { border-left-color: #ef4444; }
+        .stat-card .val { font-size: 26px; font-weight: 700; color: var(--text-dark); margin-top: 5px; }
+        .stat-card .title { font-size: 13px; color: var(--text-muted); font-weight: 500; }
+        .stat-card i { font-size: 28px; opacity: 0.3; }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: var(--bg-neutral); color: var(--text-main); min-height: 100vh; display: flex; flex-direction: column; }
+        .content-card { background: var(--white); border-radius: 12px; padding: 25px; box-shadow: var(--card-shadow); margin-bottom: 25px; }
+        .content-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; }
+        .content-header h3 { font-size: 18px; color: var(--secondary-blue); display: flex; align-items: center; gap: 10px; }
+        
+        /* Tables & Buttons */
+        .table-responsive { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        th, td { padding: 12px 15px; border-bottom: 1px solid var(--border-color); }
+        th { background: #f9fafb; font-weight: 600; color: var(--text-dark); }
+        tr:hover { background: #f8fafc; }
 
-        header { background: linear-gradient(135deg, var(--dark-green), var(--dark-blue)); color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-        .branding { display: flex; align-items: center; gap: 1rem; }
-        .branding img { width: 50px; height: 50px; border-radius: 50%; background: white; object-fit: cover; }
-        .branding h1 { font-size: 1.25rem; font-weight: 700; }
-        .nav-tools { display: flex; align-items: center; gap: 1rem; }
+        .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; transition: 0.2s; }
+        .btn-primary { background: var(--primary-green); color: #fff; }
+        .btn-primary:hover { background: var(--primary-green-dark); }
+        .btn-secondary { background: var(--secondary-blue); color: #fff; }
+        .btn-secondary:hover { background: #1d4ed8; }
+        .btn-danger { background: #ef4444; color: #fff; }
+        .btn-warning { background: #f59e0b; color: #fff; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
 
-        .btn { padding: 0.5rem 1rem; border-radius: 6px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; font-size: 0.9rem; }
-        .btn-green { background-color: var(--primary-green); color: white; }
-        .btn-green:hover { background-color: var(--dark-green); }
-        .btn-blue { background-color: var(--primary-blue); color: white; }
-        .btn-blue:hover { background-color: var(--dark-blue); }
-        .btn-danger { background-color: var(--danger); color: white; }
-        .btn-secondary { background-color: #cbd5e1; color: #334155; }
-        .btn-secondary:hover { background-color: #94a3b8; }
+        .badge { padding: 4px 10px; border-radius: 50px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+        .badge-pending { background: #fef3c7; color: #d97706; }
+        .badge-approved, .badge-active { background: #d1fae5; color: #059669; }
+        .badge-rejected, .badge-inactive { background: #fee2e2; color: #dc2626; }
 
-        .app-container { display: flex; flex: 1; }
-        aside { width: 260px; background: white; border-right: 1px solid var(--border-color); padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
-        aside button { width: 100%; text-align: left; padding: 0.75rem 1rem; border: none; background: none; border-radius: 6px; color: var(--text-muted); font-weight: 600; cursor: pointer; }
-        aside button:hover, aside button.active { background-color: var(--light-blue); color: var(--primary-blue); }
+        /* Auth Pages Layout */
+        .auth-container { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0d7a40 0%, #1e40af 100%); padding: 20px; }
+        .auth-box { background: #fff; border-radius: 16px; width: 100%; max-width: 480px; padding: 40px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2); }
+        .auth-header { text-align: center; margin-bottom: 30px; }
+        .auth-header img { width: 80px; margin-bottom: 15px; }
+        .auth-header h2 { font-size: 22px; color: var(--text-dark); }
+        .form-group { margin-bottom: 18px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-dark); }
+        .form-control { width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; outline: none; }
+        .form-control:focus { border-color: var(--secondary-blue); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
 
-        main { flex: 1; padding: 2rem; overflow-y: auto; }
+        /* Modal Dialogs */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 999; }
+        .modal-overlay.active { display: flex; }
+        .modal-box { background: #fff; width: 90%; max-width: 650px; border-radius: 12px; max-height: 90vh; overflow-y: auto; padding: 25px; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 20px; }
 
-        .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
-        .stat-card { background: white; padding: 1.5rem; border-radius: 8px; border-left: 5px solid var(--primary-green); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .stat-card.blue { border-left-color: var(--primary-blue); }
-        .stat-card.warning { border-left-color: var(--warning); }
-        .stat-card.danger { border-left-color: var(--danger); }
-        .stat-card h3 { font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; }
-        .stat-card .val { font-size: 1.8rem; font-weight: 700; margin-top: 0.5rem; }
-
-        .table-container { background: white; border-radius: 8px; border: 1px solid var(--border-color); overflow-x: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
-        th { background: #f1f5f9; padding: 0.75rem 1rem; color: var(--text-muted); font-weight: 600; }
-        td { padding: 0.75rem 1rem; border-top: 1px solid var(--border-color); }
-        tr:hover { background-color: #f8fafc; }
-
-        .badge { padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 700; }
-        .badge-success { background: var(--light-green); color: var(--dark-green); }
-        .badge-warning { background: #fef3c7; color: #b45309; }
-        .badge-danger { background: #fee2e2; color: #b91c1c; }
-
-        .form-group { margin-bottom: 1rem; }
-        .form-group label { display: block; margin-bottom: 0.4rem; font-weight: 600; font-size: 0.85rem; }
-        .form-control { width: 100%; padding: 0.6rem 0.8rem; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.9rem; }
-
-        .id-card { width: 350px; height: 220px; border-radius: 10px; background: linear-gradient(135deg, #047857, #0284c7); color: white; padding: 12px; position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.2); font-size: 0.8rem; display: inline-block; margin: 10px; vertical-align: top; }
-        .id-card-header { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 6px; }
-        .id-card-header img { width: 35px; height: 35px; border-radius: 50%; background: white; }
-        .id-card-body { display: flex; gap: 10px; margin-top: 10px; }
-        .id-card-photo { width: 80px; height: 80px; border-radius: 6px; background: #fff; object-fit: cover; border: 2px solid white; }
-        .id-card-details { flex: 1; }
-        .id-card-details div { margin-bottom: 3px; }
-        .id-card-qr { position: absolute; bottom: 10px; right: 10px; background: white; padding: 4px; border-radius: 4px; }
-
-        @media print {
-            body * { visibility: hidden; }
-            #print-area, #print-area * { visibility: visible; }
-            #print-area { position: absolute; left: 0; top: 0; width: 100%; }
+        /* Responsiveness */
+        @media (max-width: 768px) {
+            #app { flex-direction: column; }
+            .sidebar { width: 100%; }
+            .top-navbar { padding: 0 15px; }
+            .page-container { padding: 15px; }
         }
-
-        .print-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; width: 100%; max-width: 800px; margin: auto; }
     </style>
 </head>
 <body>
-    <div id="app">Loading Barangay System...</div>
-    <div id="print-area"></div>
+    <div id="app"></div>
+
+    <!-- Modal Container -->
+    <div id="modalOverlay" class="modal-overlay">
+        <div class="modal-box" id="modalContent"></div>
+    </div>
 
     <script>
+        // Global Application State
         let currentUser = null;
-        let systemSettings = {};
-        let activeTab = 'dashboard';
+        let currentSettings = null;
 
+        // Initialize Application
         async function initApp() {
-            await fetchSettings();
-            const res = await fetch('/api/setup/status');
-            const data = await res.json();
-
-            if (data.setupRequired) {
-                renderFirstSetup();
-            } else {
-                renderLogin();
-            }
-        }
-
-        async function fetchSettings() {
             try {
-                const res = await fetch('/api/settings');
-                systemSettings = await res.json();
-            } catch(e) {
-                systemSettings = { barangay_name: 'Barangay Central' };
+                // Fetch Settings
+                const setRes = await fetch('/api/settings');
+                currentSettings = await setRes.json();
+
+                // Check First Time Setup
+                const setupRes = await fetch('/api/check-setup');
+                const setupData = await setupRes.json();
+
+                if (!setupData.hasAdmin) {
+                    renderSetupAdminView();
+                    return;
+                }
+
+                // Render Login View by default if unauthenticated
+                renderLoginView();
+            } catch (err) {
+                console.error("Init Error:", err);
             }
         }
 
-        function renderFirstSetup() {
-            document.getElementById('app').innerHTML = \`
-                <div style="max-width: 450px; margin: 4rem auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                    <h2 style="color: var(--dark-green); margin-bottom: 0.5rem;">Initial Admin Setup</h2>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">No administrator account exists yet. Please create the first administrator account.</p>
-                    <form onsubmit="handleFirstSetup(event)">
-                        <div class="form-group"><label>Admin Full Name</label><input type="text" id="setupName" class="form-control" required /></div>
-                        <div class="form-group"><label>Username</label><input type="text" id="setupUsername" class="form-control" required /></div>
-                        <div class="form-group"><label>Email Address</label><input type="email" id="setupEmail" class="form-control" required /></div>
-                        <div class="form-group"><label>Password</label><input type="password" id="setupPassword" class="form-control" required /></div>
-                        <div class="form-group"><label>Confirm Password</label><input type="password" id="setupConfirm" class="form-control" required /></div>
-                        <button type="submit" class="btn btn-green" style="width: 100%;">Create Admin Account</button>
-                    </form>
+        // ============================================================================
+        // VIEWS: SETUP ADMIN & AUTHENTICATION
+        // ============================================================================
+
+        function renderSetupAdminView() {
+            const app = document.getElementById('app');
+            app.innerHTML = \`
+                <div class="auth-container" style="width:100%;">
+                    <div class="auth-box">
+                        <div class="auth-header">
+                            <i class="fa-solid fa-shield-halved" style="font-size: 50px; color: var(--primary-green);"></i>
+                            <h2 style="margin-top:15px;">FIRST-TIME ADMIN SETUP</h2>
+                            <p style="font-size:13px; color:var(--text-muted); margin-top:5px;">No administrator account was detected. Please create the primary Super Admin account to initialize the system.</p>
+                        </div>
+                        <form id="setupForm" onsubmit="handleAdminSetup(event)">
+                            <div class="form-group">
+                                <label>Full Name</label>
+                                <input type="text" id="setupFullName" class="form-control" required placeholder="e.g. Juan Dela Cruz">
+                            </div>
+                            <div class="form-group">
+                                <label>Username</label>
+                                <input type="text" id="setupUsername" class="form-control" required placeholder="admin">
+                            </div>
+                            <div class="form-group">
+                                <label>Email Address</label>
+                                <input type="email" id="setupEmail" class="form-control" required placeholder="admin@barangay.gov.ph">
+                            </div>
+                            <div class="form-group">
+                                <label>Password</label>
+                                <input type="password" id="setupPassword" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Confirm Password</label>
+                                <input type="password" id="setupConfirmPassword" class="form-control" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px;">
+                                <i class="fa-solid fa-user-plus"></i> CREATE ADMINISTRATOR ACCOUNT
+                            </button>
+                        </form>
+                    </div>
                 </div>
             \`;
         }
 
-        async function handleFirstSetup(e) {
+        async function handleAdminSetup(e) {
             e.preventDefault();
-            const payload = {
-                fullName: document.getElementById('setupName').value,
-                username: document.getElementById('setupUsername').value,
-                email: document.getElementById('setupEmail').value,
-                password: document.getElementById('setupPassword').value,
-                confirmPassword: document.getElementById('setupConfirm').value
-            };
+            const fullName = document.getElementById('setupFullName').value;
+            const username = document.getElementById('setupUsername').value;
+            const email = document.getElementById('setupEmail').value;
+            const password = document.getElementById('setupPassword').value;
+            const confirmPassword = document.getElementById('setupConfirmPassword').value;
 
-            const res = await fetch('/api/setup/admin', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
+            try {
+                const res = await fetch('/api/setup-admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fullName, username, email, password, confirmPassword })
+                });
+                const data = await res.json();
+                if (data.error) return alert(data.error);
 
-            if (data.success) {
-                alert('Administrator account created successfully! Please login.');
-                renderLogin();
-            } else {
-                alert(data.error || 'Failed to setup admin account.');
+                alert(data.message);
+                renderLoginView();
+            } catch (err) {
+                alert("Setup failed: " + err.message);
             }
         }
 
-        function renderLogin() {
-            document.getElementById('app').innerHTML = \`
-                <div style="max-width: 400px; margin: 4rem auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                    <div style="text-align: center; margin-bottom: 1.5rem;">
-                        <img src="\${systemSettings.logo_url || 'https://via.placeholder.com/80'}" style="width: 70px; height: 70px; border-radius: 50%;" />
-                        <h2 style="color: var(--dark-green); margin-top: 0.5rem;">\${systemSettings.barangay_name || 'Barangay Portal'}</h2>
-                        <p style="color: var(--text-muted); font-size: 0.85rem;">System Login</p>
-                    </div>
-                    <form onsubmit="handleLogin(event)">
-                        <div class="form-group"><label>Username or Email</label><input type="text" id="loginUsername" class="form-control" required /></div>
-                        <div class="form-group"><label>Password</label><input type="password" id="loginPassword" class="form-control" required /></div>
-                        <button type="submit" class="btn btn-blue" style="width: 100%; margin-top: 0.5rem;">Sign In</button>
-                    </form>
-                    <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border-color);" />
-                    <div style="text-align: center;">
-                        <p style="font-size: 0.85rem; color: var(--text-muted);">New resident in this barangay?</p>
-                        <button onclick="renderRegistration()" class="btn btn-green" style="width: 100%; margin-top: 0.5rem;">Register as Resident</button>
+        function renderLoginView() {
+            const app = document.getElementById('app');
+            app.innerHTML = \`
+                <div class="auth-container" style="width:100%;">
+                    <div class="auth-box">
+                        <div class="auth-header">
+                            <h2 style="color:var(--primary-green); font-weight:800;">\${currentSettings ? currentSettings.barangay_name.toUpperCase() : 'BARANGAY'}</h2>
+                            <p style="font-size:12px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-top:2px;">Resident Management System</p>
+                        </div>
+                        <form id="loginForm" onsubmit="handleLogin(event)">
+                            <div class="form-group">
+                                <label>Username or Email</label>
+                                <input type="text" id="loginUsername" class="form-control" required placeholder="Enter username or email">
+                            </div>
+                            <div class="form-group">
+                                <label>Password</label>
+                                <input type="password" id="loginPassword" class="form-control" required placeholder="Enter password">
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px; margin-top:10px;">
+                                <i class="fa-solid fa-right-to-bracket"></i> LOGIN
+                            </button>
+                        </form>
+                        <div style="margin-top:25px; text-align:center; border-top:1px solid var(--border-color); padding-top:20px;">
+                            <p style="font-size:13px; color:var(--text-muted);">Don't have a resident account yet?</p>
+                            <button onclick="renderRegisterView()" class="btn btn-secondary" style="width:100%; justify-content:center; margin-top:10px;">
+                                <i class="fa-solid fa-user-plus"></i> REGISTER AS RESIDENT
+                            </button>
+                        </div>
                     </div>
                 </div>
             \`;
@@ -1041,1103 +1201,661 @@ app.get('*', (req, res) => {
 
         async function handleLogin(e) {
             e.preventDefault();
-            const res = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    username: document.getElementById('loginUsername').value,
-                    password: document.getElementById('loginPassword').value
-                })
-            });
-            const data = await res.json();
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
 
-            if (data.success) {
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+                if (data.error) return alert(data.error);
+
                 currentUser = data.user;
-                renderPortal();
-            } else {
-                alert(data.error || 'Login failed.');
-            }
-        }
-
-        async function renderRegistration() {
-            const puroksRes = await fetch('/api/puroks');
-            const puroks = await puroksRes.json();
-
-            document.getElementById('app').innerHTML = \`
-                <div style="max-width: 700px; margin: 2rem auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                    <h2 style="color: var(--dark-green); margin-bottom: 0.5rem;">Resident Registration</h2>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">Fill out the official form. Your application will be reviewed by Barangay staff.</p>
-                    
-                    <form onsubmit="handleRegistration(event)">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
-                            <div class="form-group"><label>First Name *</label><input type="text" id="regFirst" class="form-control" required /></div>
-                            <div class="form-group"><label>Middle Name</label><input type="text" id="regMiddle" class="form-control" /></div>
-                            <div class="form-group"><label>Last Name *</label><input type="text" id="regLast" class="form-control" required /></div>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
-                            <div class="form-group"><label>Suffix</label><input type="text" id="regSuffix" class="form-control" placeholder="e.g. Jr, III" /></div>
-                            <div class="form-group"><label>Date of Birth *</label><input type="date" id="regDob" class="form-control" required /></div>
-                            <div class="form-group"><label>Gender *</label><select id="regGender" class="form-control" required><option value="Male">Male</option><option value="Female">Female</option></select></div>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                            <div class="form-group"><label>Civil Status *</label><select id="regCivil" class="form-control" required><option value="Single">Single</option><option value="Married">Married</option><option value="Widowed">Widowed</option><option value="Separated">Separated</option></select></div>
-                            <div class="form-group"><label>Purok *</label><select id="regPurok" class="form-control">\${puroks.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')}</select></div>
-                        </div>
-
-                        <div class="form-group"><label>Complete Address *</label><input type="text" id="regAddress" class="form-control" required /></div>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                            <div class="form-group"><label>Contact Number</label><input type="text" id="regContact" class="form-control" /></div>
-                            <div class="form-group"><label>Email Address *</label><input type="email" id="regEmail" class="form-control" required /></div>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                            <div class="form-group"><label>Username *</label><input type="text" id="regUsername" class="form-control" required /></div>
-                            <div class="form-group"><label>Password *</label><input type="password" id="regPassword" class="form-control" required /></div>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 0.5rem;">
-                            <label><input type="checkbox" id="regSenior" /> Senior Citizen</label>
-                            <label><input type="checkbox" id="regPwd" /> PWD</label>
-                            <label><input type="checkbox" id="regSolo" /> Solo Parent</label>
-                        </div>
-
-                        <div class="form-group" style="margin-top: 1rem;">
-                            <label>Profile Photo</label>
-                            <input type="file" id="regPhoto" accept="image/*" class="form-control" />
-                        </div>
-
-                        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-                            <button type="button" onclick="renderLogin()" class="btn btn-secondary">Back to Login</button>
-                            <button type="submit" class="btn btn-green" style="flex:1;">Submit Registration</button>
-                        </div>
-                    </form>
-                </div>
-            \`;
-        }
-
-        async function handleRegistration(e) {
-            e.preventDefault();
-            const formData = new FormData();
-            formData.append('firstName', document.getElementById('regFirst').value);
-            formData.append('middleName', document.getElementById('regMiddle').value);
-            formData.append('lastName', document.getElementById('regLast').value);
-            formData.append('suffix', document.getElementById('regSuffix').value);
-            formData.append('dateOfBirth', document.getElementById('regDob').value);
-            formData.append('gender', document.getElementById('regGender').value);
-            formData.append('civilStatus', document.getElementById('regCivil').value);
-            formData.append('purokId', document.getElementById('regPurok').value);
-            formData.append('address', document.getElementById('regAddress').value);
-            formData.append('contactNumber', document.getElementById('regContact').value);
-            formData.append('email', document.getElementById('regEmail').value);
-            formData.append('username', document.getElementById('regUsername').value);
-            formData.append('password', document.getElementById('regPassword').value);
-            formData.append('isSenior', document.getElementById('regSenior').checked);
-            formData.append('isPwd', document.getElementById('regPwd').checked);
-            formData.append('isSoloParent', document.getElementById('regSolo').checked);
-
-            const fileInput = document.getElementById('regPhoto');
-            if (fileInput.files[0]) {
-                formData.append('profilePhoto', fileInput.files[0]);
-            }
-
-            const res = await fetch('/api/auth/register-resident', {
-                method: 'POST',
-                body: formData
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                document.getElementById('app').innerHTML = \`
-                    <div style="max-width: 500px; margin: 4rem auto; background: white; padding: 2rem; border-radius: 8px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                        <h2 style="color: var(--primary-green);">Registration Successful</h2>
-                        <p style="margin: 1rem 0; color: var(--text-muted);">Your registration status is: <strong>PENDING APPROVAL</strong>.</p>
-                        <p style="font-size: 0.85rem; color: var(--text-muted);">Please wait for barangay staff to review your submitted information.</p>
-                        <button onclick="renderLogin()" class="btn btn-blue" style="margin-top: 1.5rem;">Go to Login</button>
-                    </div>
-                \`;
-            } else {
-                alert(data.error || 'Registration failed.');
-            }
-        }
-
-        function renderPortal() {
-            const isStaff = ['admin', 'captain', 'secretary', 'staff'].includes(currentUser.role);
-
-            document.getElementById('app').innerHTML = \`
-                <header>
-                    <div class="branding">
-                        <img src="\${systemSettings.logo_url || 'https://via.placeholder.com/50'}" />
-                        <div>
-                            <h1>\${systemSettings.barangay_name}</h1>
-                            <div style="font-size: 0.75rem; opacity: 0.8;">\${systemSettings.municipality}, \${systemSettings.province}</div>
-                        </div>
-                    </div>
-                    <div class="nav-tools">
-                        <span>Welcome, <strong>\${currentUser.name}</strong> (\${currentUser.role.toUpperCase()})</span>
-                        <button onclick="handleLogout()" class="btn btn-danger">Logout</button>
-                    </div>
-                </header>
-                <div class="app-container">
-                    <aside id="sidebar-nav"></aside>
-                    <main id="portal-content"></main>
-                </div>
-            \`;
-
-            renderSidebar(isStaff);
-            loadTab(isStaff ? 'dashboard' : 'res-dashboard');
-        }
-
-        function renderSidebar(isStaff) {
-            const nav = document.getElementById('sidebar-nav');
-            if (isStaff) {
-                nav.innerHTML = \`
-                    <button onclick="loadTab('dashboard')" id="nav-dashboard">Dashboard</button>
-                    <button onclick="loadTab('residents')" id="nav-residents">Resident Records</button>
-                    <button onclick="loadTab('households')" id="nav-households">Households</button>
-                    <button onclick="loadTab('puroks')" id="nav-puroks">Puroks</button>
-                    <button onclick="loadTab('certificates')" id="nav-certificates">Certificates</button>
-                    <button onclick="loadTab('appointments')" id="nav-appointments">Appointments</button>
-                    <button onclick="loadTab('complaints')" id="nav-complaints">Blotter / Complaints</button>
-                    <button onclick="loadTab('assistance')" id="nav-assistance">Assistance Requests</button>
-                    <button onclick="loadTab('announcements')" id="nav-announcements">Announcements</button>
-                    <button onclick="loadTab('businesses')" id="nav-businesses">Local Businesses</button>
-                    <button onclick="loadTab('printing')" id="nav-printing">Batch Print IDs</button>
-                    \${currentUser.role === 'admin' ? \`<button onclick="loadTab('settings')" id="nav-settings">Barangay Settings</button>\` : ''}
-                \`;
-            } else {
-                nav.innerHTML = \`
-                    <button onclick="loadTab('res-dashboard')" id="nav-res-dashboard">My Dashboard</button>
-                    <button onclick="loadTab('res-profile')" id="nav-res-profile">My Profile</button>
-                    <button onclick="loadTab('res-id')" id="nav-res-id">My Digital ID</button>
-                    <button onclick="loadTab('res-certificates')" id="nav-res-certificates">Request Certificate</button>
-                    <button onclick="loadTab('res-appointments')" id="nav-res-appointments">Book Appointment</button>
-                    <button onclick="loadTab('res-complaints')" id="nav-res-complaints">Report Incident</button>
-                    <button onclick="loadTab('res-assistance')" id="nav-res-assistance">Request Assistance</button>
-                \`;
-            }
-        }
-
-        function setActiveNav(tab) {
-            document.querySelectorAll('aside button').forEach(btn => btn.classList.remove('active'));
-            const targetBtn = document.getElementById(\`nav-\${tab}\`);
-            if (targetBtn) targetBtn.classList.add('active');
-        }
-
-        async function loadTab(tab) {
-            activeTab = tab;
-            setActiveNav(tab);
-            const content = document.getElementById('portal-content');
-            content.innerHTML = '<p>Loading page content...</p>';
-
-            if (tab === 'dashboard') {
-                const res = await fetch('/api/stats/dashboard');
-                const s = await res.json();
-                content.innerHTML = \`
-                    <h2>Staff Control Dashboard</h2>
-                    <div class="grid-4" style="margin-top: 1rem;">
-                        <div class="stat-card"><h3>Total Residents</h3><div class="val">\${s.totalResidents}</div></div>
-                        <div class="stat-card warning"><h3>Pending Approvals</h3><div class="val">\${s.pendingResidents}</div></div>
-                        <div class="stat-card blue"><h3>Approved Residents</h3><div class="val">\${s.approvedResidents}</div></div>
-                        <div class="stat-card danger"><h3>Rejected Requests</h3><div class="val">\${s.rejectedResidents}</div></div>
-                        <div class="stat-card"><h3>Senior Citizens</h3><div class="val">\${s.seniorCitizens}</div></div>
-                        <div class="stat-card blue"><h3>PWD</h3><div class="val">\${s.pwd}</div></div>
-                        <div class="stat-card warning"><h3>Pending Certificates</h3><div class="val">\${s.pendingCertificates}</div></div>
-                        <div class="stat-card danger"><h3>Active Complaints</h3><div class="val">\${s.pendingComplaints}</div></div>
-                    </div>
-                \`;
-            } else if (tab === 'residents') {
-                const res = await fetch('/api/residents');
-                const residents = await res.json();
-                content.innerHTML = \`
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                        <h2>Resident Management</h2>
-                        <input type="text" placeholder="Search residents..." class="form-control" style="width: 250px;" onkeyup="filterResidentTable(this.value)" />
-                    </div>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Full Name</th>
-                                    <th>Gender</th>
-                                    <th>Address</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="res-tbl">
-                                \${residents.map(r => \`
-                                    <tr>
-                                        <td>\${r.resident_id || 'PENDING'}</td>
-                                        <td>\${r.first_name} \${r.last_name}</td>
-                                        <td>\${r.gender}</td>
-                                        <td>\${r.address}</td>
-                                        <td><span class="badge \${r.approval_status === 'Approved' ? 'badge-success' : (r.approval_status === 'Pending' ? 'badge-warning' : 'badge-danger')}">\${r.approval_status}</span></td>
-                                        <td>
-                                            \${r.approval_status === 'Pending' ? \`
-                                                <button onclick="reviewResident('\${r.id}', 'Approved')" class="btn btn-green" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Approve</button>
-                                                <button onclick="reviewResident('\${r.id}', 'Rejected')" class="btn btn-danger" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Reject</button>
-                                            \` : ''}
-                                            <button onclick="toggleArchiveResident('\${r.id}', \${!r.is_archived})" class="btn btn-secondary" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">\${r.is_archived ? 'Restore' : 'Archive'}</button>
-                                        </td>
-                                    </tr>
-                                \`).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                \`;
-            } else if (tab === 'puroks') {
-                const res = await fetch('/api/puroks');
-                const puroks = await res.json();
-                content.innerHTML = \`
-                    <h2>Purok Management</h2>
-                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1rem;">
-                        <form onsubmit="addPurok(event)" style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                            <h3>Add New Purok</h3>
-                            <div class="form-group" style="margin-top: 1rem;">
-                                <label>Purok Name</label>
-                                <input type="text" id="purokName" class="form-control" required />
-                            </div>
-                            <div class="form-group">
-                                <label>Description</label>
-                                <textarea id="purokDesc" class="form-control"></textarea>
-                            </div>
-                            <button type="submit" class="btn btn-green" style="width:100%;">Add Purok</button>
-                        </form>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr><th>Name</th><th>Description</th><th>Action</th></tr>
-                                </thead>
-                                <tbody>
-                                    \${puroks.map(p => \`
-                                        <tr>
-                                            <td><strong>\${p.name}</strong></td>
-                                            <td>\${p.description || '-'}</td>
-                                            <td><button onclick="deletePurok('\${p.id}')" class="btn btn-danger" style="padding:0.2rem 0.5rem; font-size:0.75rem;">Delete</button></td>
-                                        </tr>
-                                    \`).join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                \`;
-            } else if (tab === 'households') {
-                const [hRes, pRes] = await Promise.all([fetch('/api/households'), fetch('/api/puroks')]);
-                const households = await hRes.json();
-                const puroks = await pRes.json();
-                content.innerHTML = \`
-                    <h2>Household Management</h2>
-                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1rem;">
-                        <form onsubmit="addHousehold(event)" style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                            <h3>Add Household</h3>
-                            <div class="form-group" style="margin-top: 1rem;">
-                                <label>Household Number</label>
-                                <input type="text" id="hhNumber" class="form-control" required placeholder="HH-001" />
-                            </div>
-                            <div class="form-group">
-                                <label>Purok</label>
-                                <select id="hhPurok" class="form-control">
-                                    \${puroks.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')}
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Address</label>
-                                <input type="text" id="hhAddress" class="form-control" required />
-                            </div>
-                            <button type="submit" class="btn btn-green" style="width:100%;">Save Household</button>
-                        </form>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr><th>Household #</th><th>Purok</th><th>Address</th></tr>
-                                </thead>
-                                <tbody>
-                                    \${households.map(h => \`
-                                        <tr>
-                                            <td><strong>\${h.household_number}</strong></td>
-                                            <td>\${h.puroks ? h.puroks.name : '-'}</td>
-                                            <td>\${h.address}</td>
-                                        </tr>
-                                    \`).join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                \`;
-            } else if (tab === 'certificates') {
-                const res = await fetch('/api/certificates');
-                const certs = await res.json();
-                content.innerHTML = \`
-                    <h2>Certificate Requests</h2>
-                    <div class="table-container" style="margin-top: 1rem;">
-                        <table>
-                            <thead>
-                                <tr><th>Resident</th><th>Type</th><th>Purpose</th><th>Status</th><th>Actions</th></tr>
-                            </thead>
-                            <tbody>
-                                \${certs.map(c => \`
-                                    <tr>
-                                        <td>\${c.residents ? c.residents.first_name + ' ' + c.residents.last_name : 'N/A'}</td>
-                                        <td>\${c.certificate_type}</td>
-                                        <td>\${c.purpose}</td>
-                                        <td><span class="badge \${c.status === 'Approved' || c.status === 'Released' ? 'badge-success' : (c.status === 'Pending' ? 'badge-warning' : 'badge-danger')}">\${c.status}</span></td>
-                                        <td>
-                                            \${c.status === 'Pending' ? \`
-                                                <button onclick="processCert('\${c.id}', 'Approved')" class="btn btn-green" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Approve</button>
-                                                <button onclick="processCert('\${c.id}', 'Rejected')" class="btn btn-danger" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Reject</button>
-                                            \` : ''}
-                                            \${c.status === 'Approved' ? \`
-                                                <button onclick="processCert('\${c.id}', 'Ready for Release')" class="btn btn-blue" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Mark Ready</button>
-                                            \` : ''}
-                                            \${c.status === 'Ready for Release' ? \`
-                                                <button onclick="processCert('\${c.id}', 'Released')" class="btn btn-secondary" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Mark Released</button>
-                                            \` : ''}
-                                        </td>
-                                    </tr>
-                                \`).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                \`;
-            } else if (tab === 'appointments') {
-                const res = await fetch('/api/appointments');
-                const appts = await res.json();
-                content.innerHTML = \`
-                    <h2>Appointment Schedule</h2>
-                    <div class="table-container" style="margin-top: 1rem;">
-                        <table>
-                            <thead>
-                                <tr><th>Resident</th><th>Service</th><th>Preferred Date</th><th>Time</th><th>Status</th><th>Action</th></tr>
-                            </thead>
-                            <tbody>
-                                \${appts.map(a => \`
-                                    <tr>
-                                        <td>\${a.residents ? a.residents.first_name + ' ' + a.residents.last_name : 'N/A'}</td>
-                                        <td>\${a.service_type}</td>
-                                        <td>\${a.preferred_date}</td>
-                                        <td>\${a.preferred_time}</td>
-                                        <td><span class="badge \${a.status === 'Approved' ? 'badge-success' : 'badge-warning'}">\${a.status}</span></td>
-                                        <td>
-                                            \${a.status === 'Pending' ? \`
-                                                <button onclick="updateAppt('\${a.id}', 'Approved')" class="btn btn-green" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Approve</button>
-                                                <button onclick="updateAppt('\${a.id}', 'Rejected')" class="btn btn-danger" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Reject</button>
-                                            \` : ''}
-                                        </td>
-                                    </tr>
-                                \`).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                \`;
-            } else if (tab === 'complaints') {
-                const res = await fetch('/api/complaints');
-                const complaints = await res.json();
-                content.innerHTML = \`
-                    <h2>Blotter / Complaint Records</h2>
-                    <div class="table-container" style="margin-top: 1rem;">
-                        <table>
-                            <thead>
-                                <tr><th>Case #</th><th>Complainant</th><th>Respondent</th><th>Type</th><th>Incident Date</th><th>Status</th><th>Action</th></tr>
-                            </thead>
-                            <tbody>
-                                \${complaints.map(c => \`
-                                    <tr>
-                                        <td><strong>\${c.case_number}</strong></td>
-                                        <td>\${c.complainant_name}</td>
-                                        <td>\${c.respondent_name}</td>
-                                        <td>\${c.complaint_type}</td>
-                                        <td>\${c.incident_date}</td>
-                                        <td><span class="badge badge-warning">\${c.status}</span></td>
-                                        <td>
-                                            <button onclick="updateComplaint('\${c.id}', 'Under Review')" class="btn btn-blue" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Review</button>
-                                            <button onclick="updateComplaint('\${c.id}', 'Resolved')" class="btn btn-green" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Resolve</button>
-                                        </td>
-                                    </tr>
-                                \`).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                \`;
-            } else if (tab === 'assistance') {
-                const res = await fetch('/api/assistance');
-                const assist = await res.json();
-                content.innerHTML = \`
-                    <h2>Assistance Requests</h2>
-                    <div class="table-container" style="margin-top: 1rem;">
-                        <table>
-                            <thead>
-                                <tr><th>Resident</th><th>Assistance Type</th><th>Details</th><th>Status</th><th>Action</th></tr>
-                            </thead>
-                            <tbody>
-                                \${assist.map(a => \`
-                                    <tr>
-                                        <td>\${a.residents ? a.residents.first_name + ' ' + a.residents.last_name : 'N/A'}</td>
-                                        <td>\${a.assistance_type}</td>
-                                        <td>\${a.details}</td>
-                                        <td><span class="badge \${a.status === 'Approved' ? 'badge-success' : 'badge-warning'}">\${a.status}</span></td>
-                                        <td>
-                                            \${a.status === 'Pending' ? \`
-                                                <button onclick="updateAssist('\${a.id}', 'Approved')" class="btn btn-green" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Approve</button>
-                                                <button onclick="updateAssist('\${a.id}', 'Rejected')" class="btn btn-danger" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Reject</button>
-                                            \` : ''}
-                                        </td>
-                                    </tr>
-                                \`).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                \`;
-            } else if (tab === 'announcements') {
-                const res = await fetch('/api/announcements');
-                const ann = await res.json();
-                content.innerHTML = \`
-                    <h2>Community Announcements</h2>
-                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1rem;">
-                        <form onsubmit="postAnnouncement(event)" style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                            <h3>Post New Announcement</h3>
-                            <div class="form-group" style="margin-top:1rem;">
-                                <label>Title</label>
-                                <input type="text" id="annTitle" class="form-control" required />
-                            </div>
-                            <div class="form-group">
-                                <label>Category</label>
-                                <select id="annCategory" class="form-control">
-                                    <option value="General">General</option>
-                                    <option value="Emergency">Emergency</option>
-                                    <option value="Event">Event</option>
-                                    <option value="Health">Health</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Description</label>
-                                <textarea id="annDesc" class="form-control" required></textarea>
-                            </div>
-                            <button type="submit" class="btn btn-green" style="width:100%;">Publish</button>
-                        </form>
-                        <div>
-                            \${ann.map(a => \`
-                                <div style="background: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid var(--border-color);">
-                                    <span class="badge badge-success" style="float: right;">\${a.category}</span>
-                                    <h3>\${a.title}</h3>
-                                    <p style="color: var(--text-muted); margin-top: 0.5rem;">\${a.description}</p>
-                                    <small style="color: #94a3b8; display:block; margin-top:0.5rem;">Posted on: \${new Date(a.created_at).toLocaleDateString()}</small>
-                                </div>
-                            \`).join('')}
-                        </div>
-                    </div>
-                \`;
-            } else if (tab === 'businesses') {
-                const res = await fetch('/api/businesses');
-                const biz = await res.json();
-                content.innerHTML = \`
-                    <h2>Local Business Permits</h2>
-                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1rem;">
-                        <form onsubmit="addBusiness(event)" style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                            <h3>Register Business</h3>
-                            <div class="form-group" style="margin-top:1rem;">
-                                <label>Business Name</label>
-                                <input type="text" id="bizName" class="form-control" required />
-                            </div>
-                            <div class="form-group">
-                                <label>Owner Name</label>
-                                <input type="text" id="bizOwner" class="form-control" required />
-                            </div>
-                            <div class="form-group">
-                                <label>Business Type</label>
-                                <input type="text" id="bizType" class="form-control" required placeholder="e.g. Sari-Sari Store" />
-                            </div>
-                            <div class="form-group">
-                                <label>Address</label>
-                                <input type="text" id="bizAddress" class="form-control" required />
-                            </div>
-                            <div class="form-group">
-                                <label>Permit Number</label>
-                                <input type="text" id="bizPermit" class="form-control" required placeholder="BP-2026-001" />
-                            </div>
-                            <div class="form-group">
-                                <label>Expiration Date</label>
-                                <input type="date" id="bizExp" class="form-control" required />
-                            </div>
-                            <button type="submit" class="btn btn-green" style="width:100%;">Save Business</button>
-                        </form>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr><th>Business</th><th>Owner</th><th>Permit #</th><th>Status</th></tr>
-                                </thead>
-                                <tbody>
-                                    \${biz.map(b => \`
-                                        <tr>
-                                            <td><strong>\${b.business_name}</strong><br><small>\${b.business_type}</small></td>
-                                            <td>\${b.owner_name}</td>
-                                            <td>\${b.permit_number}</td>
-                                            <td><span class="badge badge-success">\${b.permit_status}</span></td>
-                                        </tr>
-                                    \`).join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                \`;
-            } else if (tab === 'settings') {
-                content.innerHTML = \`
-                    <h2>Barangay Settings</h2>
-                    <form onsubmit="saveSettings(event)" style="max-width: 600px; margin-top: 1rem; background: white; padding: 1.5rem; border-radius: 8px;">
-                        <div class="form-group"><label>Barangay Name</label><input type="text" id="setBrgy" class="form-control" value="\${systemSettings.barangay_name || ''}" required /></div>
-                        <div class="form-group"><label>Municipality</label><input type="text" id="setMuni" class="form-control" value="\${systemSettings.municipality || ''}" required /></div>
-                        <div class="form-group"><label>Province</label><input type="text" id="setProv" class="form-control" value="\${systemSettings.province || ''}" required /></div>
-                        <div class="form-group"><label>Captain Name</label><input type="text" id="setCap" class="form-control" value="\${systemSettings.captain_name || ''}" /></div>
-                        <div class="form-group"><label>Barangay Logo</label><input type="file" id="setLogo" class="form-control" accept="image/*" /></div>
-                        <button type="submit" class="btn btn-green">Save Changes</button>
-                    </form>
-                \`;
-            } else if (tab === 'printing') {
-                const res = await fetch('/api/residents?status=Approved');
-                const residents = await res.json();
-                content.innerHTML = \`
-                    <h2>Physical ID Batch Printer</h2>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">Select up to 8 approved residents to generate standard 8-cards-per-bond-paper print layout.</p>
-                    <button onclick="triggerPrintBatch()" class="btn btn-blue" style="margin-bottom: 1rem;">Print Selected (Max 8)</button>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr><th>Select</th><th>ID</th><th>Name</th><th>Address</th></tr>
-                            </thead>
-                            <tbody>
-                                \${residents.map(r => \`
-                                    <tr>
-                                        <td><input type="checkbox" class="id-print-checkbox" value="\${r.id}" data-json='\${JSON.stringify(r)}' /></td>
-                                        <td>\${r.resident_id}</td>
-                                        <td>\${r.first_name} \${r.last_name}</td>
-                                        <td>\${r.address}</td>
-                                    </tr>
-                                \`).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                \`;
-            } else if (tab === 'res-dashboard') {
-                const [cRes, aRes, nRes] = await Promise.all([
-                    fetch('/api/certificates'),
-                    fetch('/api/appointments'),
-                    fetch('/api/notifications')
-                ]);
-                const certs = await cRes.json();
-                const appts = await aRes.json();
-                const notifs = await nRes.json();
-
-                content.innerHTML = \`
-                    <h2>Resident Portal Dashboard</h2>
-                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; margin-top: 1rem;">
-                        <div>
-                            <div class="stat-card blue" style="margin-bottom: 1.5rem;">
-                                <h3>Account Overview</h3>
-                                <div class="val" style="font-size: 1.2rem;">\${currentUser.name}</div>
-                                <p style="color: var(--text-muted); font-size: 0.85rem;">Status: Active Barangay Resident</p>
-                            </div>
-                            <h3>Recent Certificate Requests</h3>
-                            <div class="table-container" style="margin-top: 0.5rem; margin-bottom: 1.5rem;">
-                                <table>
-                                    <thead><tr><th>Type</th><th>Purpose</th><th>Status</th></tr></thead>
-                                    <tbody>
-                                        \${certs.slice(0, 5).map(c => \`
-                                            <tr>
-                                                <td>\${c.certificate_type}</td>
-                                                <td>\${c.purpose}</td>
-                                                <td><span class="badge \${c.status === 'Approved' || c.status === 'Released' ? 'badge-success' : 'badge-warning'}">\${c.status}</span></td>
-                                            </tr>
-                                        \`).join('')}
-                                        \${certs.length === 0 ? '<tr><td colspan="3">No requests found.</td></tr>' : ''}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                            <h3>Notifications</h3>
-                            <div style="margin-top: 1rem;">
-                                \${notifs.map(n => \`
-                                    <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; margin-bottom: 0.5rem;">
-                                        <strong>\${n.title}</strong>
-                                        <p style="font-size: 0.8rem; color: var(--text-muted);">\${n.message}</p>
-                                    </div>
-                                \`).join('')}
-                                \${notifs.length === 0 ? '<p style="font-size: 0.85rem; color: var(--text-muted);">No new notifications.</p>' : ''}
-                            </div>
-                        </div>
-                    </div>
-                \`;
-            } else if (tab === 'res-profile') {
-                const res = await fetch('/api/residents');
-                const list = await res.json();
-                const myRec = list[0] || {};
-
-                content.innerHTML = \`
-                    <h2>My Official Profile</h2>
-                    <div style="max-width: 600px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
-                        <div style="display: flex; gap: 1.5rem; align-items: center; margin-bottom: 1.5rem;">
-                            <img src="\${myRec.profile_photo || 'https://via.placeholder.com/100'}" style="width: 90px; height: 90px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary-green);" />
-                            <div>
-                                <h3 style="color: var(--dark-green);">\${myRec.first_name || ''} \${myRec.middle_name || ''} \${myRec.last_name || ''}</h3>
-                                <p style="color: var(--text-muted); font-size: 0.85rem;">Resident ID: <strong>\${myRec.resident_id || 'PENDING'}</strong></p>
-                                <span class="badge badge-success">\${myRec.approval_status || 'Pending'}</span>
-                            </div>
-                        </div>
-                        <hr style="margin-bottom: 1rem; border: none; border-top: 1px solid var(--border-color);" />
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: 0.9rem;">
-                            <div><strong>Date of Birth:</strong> \${myRec.date_of_birth || '-'}</div>
-                            <div><strong>Gender:</strong> \${myRec.gender || '-'}</div>
-                            <div><strong>Civil Status:</strong> \${myRec.civil_status || '-'}</div>
-                            <div><strong>Contact:</strong> \${myRec.contact_number || '-'}</div>
-                            <div><strong>Email:</strong> \${myRec.email || '-'}</div>
-                            <div><strong>Occupation:</strong> \${myRec.occupation || '-'}</div>
-                            <div style="grid-column: span 2;"><strong>Address:</strong> \${myRec.address || '-'}</div>
-                        </div>
-                    </div>
-                \`;
-            } else if (tab === 'res-id') {
-                const res = await fetch('/api/residents');
-                const list = await res.json();
-                const myRec = list[0] || {};
-                
-                content.innerHTML = \`
-                    <h2>My Official Digital ID</h2>
-                    <div style="margin-top: 1.5rem;">
-                        <div class="id-card" id="digital-id-card">
-                            <div class="id-card-header">
-                                <img src="\${systemSettings.logo_url || 'https://via.placeholder.com/35'}" />
-                                <div>
-                                    <div style="font-weight:700; font-size: 0.75rem;">\${systemSettings.barangay_name}</div>
-                                    <div style="font-size: 0.6rem; opacity:0.8;">\${systemSettings.municipality}</div>
-                                </div>
-                            </div>
-                            <div class="id-card-body">
-                                <img src="\${myRec.profile_photo || 'https://via.placeholder.com/80'}" class="id-card-photo" />
-                                <div class="id-card-details">
-                                    <div style="font-weight:700; font-size: 0.9rem;">\${myRec.first_name} \${myRec.last_name}</div>
-                                    <div>ID: <strong>\${myRec.resident_id || 'PENDING'}</strong></div>
-                                    <div>DOB: \${myRec.date_of_birth}</div>
-                                    <div>Status: ACTIVE</div>
-                                </div>
-                            </div>
-                            <div class="id-card-qr" id="qrcode-box"></div>
-                        </div>
-                    </div>
-                \`;
-
-                if (myRec.resident_id) {
-                    setTimeout(() => {
-                        QRCode.toCanvas(document.getElementById('qrcode-box'), \`\${window.location.origin}/api/verify/resident/\${myRec.resident_id}\`, { width: 50 });
-                    }, 100);
+                if (data.role === 'RESIDENT') {
+                    renderResidentPortal();
+                } else {
+                    renderStaffPortal();
                 }
-            } else if (tab === 'res-certificates') {
-                content.innerHTML = \`
-                    <h2>Request Official Certificate</h2>
-                    <form onsubmit="requestCert(event)" style="max-width: 500px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
-                        <div class="form-group">
-                            <label>Certificate Type</label>
-                            <select id="certType" class="form-control" required>
-                                <option value="Barangay Clearance">Barangay Clearance</option>
-                                <option value="Certificate of Residency">Certificate of Residency</option>
-                                <option value="Certificate of Indigency">Certificate of Indigency</option>
-                                <option value="Certificate of Good Moral Character">Certificate of Good Moral Character</option>
-                            </select>
+            } catch (err) {
+                alert("Login Error: " + err.message);
+            }
+        }
+
+        function renderRegisterView() {
+            const app = document.getElementById('app');
+            app.innerHTML = \`
+                <div class="auth-container" style="width:100%; padding: 40px 20px;">
+                    <div class="auth-box" style="max-width: 800px;">
+                        <div class="auth-header">
+                            <h2>BARANGAY RESIDENT REGISTRATION</h2>
+                            <p style="font-size:13px; color:var(--text-muted);">Fill out the official registration form accurately.</p>
                         </div>
-                        <div class="form-group">
-                            <label>Purpose</label>
-                            <textarea id="certPurpose" class="form-control" required placeholder="e.g. Employment, Scholarship"></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-green" style="width:100%;">Submit Certificate Request</button>
-                    </form>
-                \`;
-            } else if (tab === 'res-appointments') {
-                content.innerHTML = \`
-                    <h2>Book an Appointment</h2>
-                    <form onsubmit="bookAppt(event)" style="max-width: 500px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
-                        <div class="form-group">
-                            <label>Service Type</label>
-                            <select id="apptService" class="form-control" required>
-                                <option value="Consultation">Consultation</option>
-                                <option value="Document Pick-up">Document Pick-up</option>
-                                <option value="Lupon / Mediation">Lupon / Mediation</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Preferred Date</label>
-                            <input type="date" id="apptDate" class="form-control" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Preferred Time</label>
-                            <input type="time" id="apptTime" class="form-control" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Purpose / Details</label>
-                            <textarea id="apptPurpose" class="form-control" required></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-green" style="width:100%;">Submit Appointment</button>
-                    </form>
-                \`;
-            } else if (tab === 'res-complaints') {
-                content.innerHTML = \`
-                    <h2>File Incident / Complaint Report</h2>
-                    <form onsubmit="submitComplaint(event)" style="max-width: 600px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
-                        <div class="form-group">
-                            <label>Respondent Name (Inirereklamo)</label>
-                            <input type="text" id="compRespondent" class="form-control" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Witnesses (Mga Saksi)</label>
-                            <input type="text" id="compWitnesses" class="form-control" placeholder="Optional" />
-                        </div>
-                        <div class="form-group">
-                            <label>Complaint Type</label>
-                            <select id="compType" class="form-control" required>
-                                <option value="Noise Disturbance">Noise Disturbance</option>
-                                <option value="Property Dispute">Property Dispute</option>
-                                <option value="Physical Altercation">Physical Altercation</option>
-                                <option value="Other Concerns">Other Concerns</option>
-                            </select>
-                        </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                            <div class="form-group">
-                                <label>Incident Date</label>
-                                <input type="date" id="compDate" class="form-control" required />
+                        <form onsubmit="handleResidentRegistration(event)">
+                            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:15px;">
+                                <div class="form-group"><label>First Name *</label><input type="text" id="regFirstName" class="form-control" required></div>
+                                <div class="form-group"><label>Middle Name</label><input type="text" id="regMiddleName" class="form-control"></div>
+                                <div class="form-group"><label>Last Name *</label><input type="text" id="regLastName" class="form-control" required></div>
+                                <div class="form-group"><label>Suffix</label><input type="text" id="regSuffix" class="form-control" placeholder="e.g. Jr., Sr."></div>
+                                <div class="form-group"><label>Date of Birth *</label><input type="date" id="regDob" class="form-control" required></div>
+                                <div class="form-group">
+                                    <label>Gender *</label>
+                                    <select id="regGender" class="form-control" required>
+                                        <option value="">Select Gender</option>
+                                        <option value="Male">Male</option>
+                                        <option value="Female">Female</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Civil Status *</label>
+                                    <select id="regCivilStatus" class="form-control" required>
+                                        <option value="Single">Single</option>
+                                        <option value="Married">Married</option>
+                                        <option value="Widowed">Widowed</option>
+                                        <option value="Separated">Separated</option>
+                                    </select>
+                                </div>
+                                <div class="form-group"><label>Contact Number *</label><input type="text" id="regContact" class="form-control" required></div>
+                                <div class="form-group"><label>Email Address *</label><input type="email" id="regEmail" class="form-control" required></div>
+                                <div class="form-group"><label>Purok *</label><input type="text" id="regPurok" class="form-control" placeholder="e.g. Purok 1" required></div>
+                                <div class="form-group" style="grid-column: span 2;"><label>Full Address *</label><input type="text" id="regAddress" class="form-control" required></div>
+                                <div class="form-group"><label>Emergency Contact Name *</label><input type="text" id="regEmerName" class="form-control" required></div>
+                                <div class="form-group"><label>Emergency Contact Number *</label><input type="text" id="regEmerNum" class="form-control" required></div>
+                                <div class="form-group"><label>Account Password *</label><input type="password" id="regPass" class="form-control" required></div>
+                                <div class="form-group"><label>Confirm Password *</label><input type="password" id="regConfPass" class="form-control" required></div>
                             </div>
-                            <div class="form-group">
-                                <label>Location</label>
-                                <input type="text" id="compLoc" class="form-control" required />
+                            <div style="margin-top:20px; display:flex; gap:15px;">
+                                <button type="button" onclick="renderLoginView()" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back to Login</button>
+                                <button type="submit" class="btn btn-primary" style="flex-grow:1; justify-content:center;"><i class="fa-solid fa-paper-plane"></i> SUBMIT APPLICATION</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            \`;
+        }
+
+        async function handleResidentRegistration(e) {
+            e.preventDefault();
+            const payload = {
+                firstName: document.getElementById('regFirstName').value,
+                middleName: document.getElementById('regMiddleName').value,
+                lastName: document.getElementById('regLastName').value,
+                suffix: document.getElementById('regSuffix').value,
+                dateOfBirth: document.getElementById('regDob').value,
+                gender: document.getElementById('regGender').value,
+                civilStatus: document.getElementById('regCivilStatus').value,
+                contactNumber: document.getElementById('regContact').value,
+                email: document.getElementById('regEmail').value,
+                address: document.getElementById('regAddress').value,
+                purok: document.getElementById('regPurok').value,
+                emergencyContact: document.getElementById('regEmerName').value,
+                emergencyContactNumber: document.getElementById('regEmerNum').value,
+                password: document.getElementById('regPass').value,
+                confirmPassword: document.getElementById('regConfPass').value
+            };
+
+            try {
+                const res = await fetch('/api/register-resident', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.error) return alert(data.error);
+
+                alert("REGISTRATION SUCCESSFUL! Application Number: " + data.residentNumber + ". Please await staff approval.");
+                renderLoginView();
+            } catch (err) { alert("Registration Failed: " + err.message); }
+        }
+
+        // ============================================================================
+        // STAFF PORTAL VIEWS & NAVIGATION
+        // ============================================================================
+
+        function renderStaffPortal() {
+            const app = document.getElementById('app');
+            app.innerHTML = \`
+                <div class="sidebar">
+                    <div class="sidebar-header">
+                        <i class="fa-solid fa-building-columns" style="font-size: 24px;"></i>
+                        <div>
+                            <h2>\${currentSettings ? currentSettings.barangay_name : 'Barangay Admin'}</h2>
+                            <span style="font-size:10px; opacity:0.8;">STAFF PORTAL</span>
+                        </div>
+                    </div>
+                    <ul class="sidebar-menu">
+                        <li><a href="#" onclick="loadDashboard()" class="active"><i class="fa-solid fa-chart-line"></i> Dashboard</a></li>
+                        <li><a href="#" onclick="loadResidentApprovals()"><i class="fa-solid fa-user-check"></i> Resident Approvals</a></li>
+                        <li><a href="#" onclick="loadResidents()"><i class="fa-solid fa-users"></i> Resident Management</a></li>
+                        <li><a href="#" onclick="loadHouseholds()"><i class="fa-solid fa-house"></i> Households</a></li>
+                        <li><a href="#" onclick="loadCertificates()"><i class="fa-solid fa-file-contract"></i> Certificate Requests</a></li>
+                        <li><a href="#" onclick="loadScanClaimQr()"><i class="fa-solid fa-qrcode"></i> QR Certificate Claim</a></li>
+                        <li><a href="#" onclick="loadBlotter()"><i class="fa-solid fa-book"></i> Blotter Records</a></li>
+                        <li><a href="#" onclick="loadComplaints()"><i class="fa-solid fa-triangle-exclamation"></i> Complaints</a></li>
+                        <li><a href="#" onclick="loadAnnouncements()"><i class="fa-solid fa-bullhorn"></i> Announcements</a></li>
+                        <li><a href="#" onclick="loadSettings()"><i class="fa-solid fa-gear"></i> Settings</a></li>
+                        <li><a href="#" onclick="handleLogout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></li>
+                    </ul>
+                </div>
+                <div class="main-content">
+                    <div class="top-navbar">
+                        <h4 id="pageTitle">Dashboard Overview</h4>
+                        <div class="user-profile">
+                            <span style="font-size:13px; font-weight:600;"><i class="fa-solid fa-user"></i> \${currentUser ? currentUser.name : 'Staff'} (\${currentUser ? currentUser.role : ''})</span>
+                        </div>
+                    </div>
+                    <div class="page-container" id="mainContainer"></div>
+                </div>
+            \`;
+            loadDashboard();
+        }
+
+        async function loadDashboard() {
+            document.getElementById('pageTitle').innerText = "Dashboard Overview";
+            const container = document.getElementById('mainContainer');
+            container.innerHTML = '<p>Loading statistics from database...</p>';
+
+            try {
+                const res = await fetch('/api/staff/dashboard-stats');
+                const stats = await res.json();
+
+                container.innerHTML = \`
+                    <div class="card-grid">
+                        <div class="stat-card green"><div class="info"><div class="title">TOTAL RESIDENTS</div><div class="val">\${stats.totalResidents}</div></div><i class="fa-solid fa-users"></i></div>
+                        <div class="stat-card yellow"><div class="info"><div class="title">PENDING APPROVALS</div><div class="val">\${stats.pendingResidents}</div></div><i class="fa-solid fa-clock"></i></div>
+                        <div class="stat-card"><div class="info"><div class="title">TOTAL HOUSEHOLDS</div><div class="val">\${stats.totalHouseholds}</div></div><i class="fa-solid fa-house"></i></div>
+                        <div class="stat-card green"><div class="info"><div class="title">PENDING CERTS</div><div class="val">\${stats.pendingCertificates}</div></div><i class="fa-solid fa-file-contract"></i></div>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+                        <div class="content-card">
+                            <div class="content-header"><h3><i class="fa-solid fa-chart-pie"></i> Gender Demographics</h3></div>
+                            <canvas id="genderChart" style="max-height:250px;"></canvas>
+                        </div>
+                        <div class="content-card">
+                            <div class="content-header"><h3><i class="fa-solid fa-layer-group"></i> Special Population</h3></div>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:20px;">
+                                <div style="padding:15px; background:#f8fafc; border-radius:8px;"><strong>Senior Citizens:</strong> \${stats.seniorCitizens}</div>
+                                <div style="padding:15px; background:#f8fafc; border-radius:8px;"><strong>PWD:</strong> \${stats.pwd}</div>
+                                <div style="padding:15px; background:#f8fafc; border-radius:8px;"><strong>Solo Parents:</strong> \${stats.soloParents}</div>
+                                <div style="padding:15px; background:#f8fafc; border-radius:8px;"><strong>Registered Voters:</strong> \${stats.voters}</div>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label>Description of Incident</label>
-                            <textarea id="compDesc" class="form-control" required style="height:100px;"></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-danger" style="width:100%;">Submit Complaint Report</button>
-                    </form>
+                    </div>
                 \`;
-            } else if (tab === 'res-assistance') {
-                content.innerHTML = \`
-                    <h2>Request Barangay Assistance</h2>
-                    <form onsubmit="requestAssist(event)" style="max-width: 500px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
-                        <div class="form-group">
-                            <label>Assistance Type</label>
-                            <select id="assistType" class="form-control" required>
-                                <option value="Financial Assistance">Financial Assistance</option>
-                                <option value="Medical Assistance">Medical Assistance</option>
-                                <option value="Educational Assistance">Educational Assistance</option>
-                                <option value="Food Assistance">Food Assistance</option>
-                                <option value="Emergency Relief">Emergency Relief</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Details / Reason</label>
-                            <textarea id="assistDetails" class="form-control" required></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-green" style="width:100%;">Submit Request</button>
-                    </form>
+
+                // Render Chart.js
+                const ctx = document.getElementById('genderChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Male', 'Female'],
+                        datasets: [{ data: [stats.maleResidents, stats.femaleResidents], backgroundColor: ['#1e40af', '#0d7a40'] }]
+                    }
+                });
+            } catch (err) { container.innerHTML = '<p style="color:red;">Failed to load statistics.</p>'; }
+        }
+
+        async function loadResidentApprovals() {
+            document.getElementById('pageTitle').innerText = "Pending Resident Registration Approvals";
+            const container = document.getElementById('mainContainer');
+            container.innerHTML = '<p>Loading pending applications...</p>';
+
+            try {
+                const res = await fetch('/api/residents?status=PENDING');
+                const residents = await res.json();
+
+                let html = \`
+                    <div class="content-card">
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Applicant Name</th>
+                                        <th>Registration Date</th>
+                                        <th>Contact</th>
+                                        <th>Purok</th>
+                                        <th>Address</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
                 \`;
-            }
+
+                if (residents.length === 0) {
+                    html += \`<tr><td colspan="6" style="text-align:center;">No pending resident applications found.</td></tr>\`;
+                } else {
+                    residents.forEach(r => {
+                        html += \`
+                            <tr>
+                                <td><strong>\${r.first_name} \${r.last_name}</strong></td>
+                                <td>\${new Date(r.created_at).toLocaleDateString()}</td>
+                                <td>\${r.contact_number}</td>
+                                <td>\${r.purok}</td>
+                                <td>\${r.address}</td>
+                                <td>
+                                    <button onclick="approveResident('\${r.id}')" class="btn btn-primary btn-sm"><i class="fa-solid fa-check"></i> Approve</button>
+                                    <button onclick="promptRejectResident('\${r.id}')" class="btn btn-danger btn-sm"><i class="fa-solid fa-xmark"></i> Reject</button>
+                                </td>
+                            </tr>
+                        \`;
+                    });
+                }
+
+                html += \`</tbody></table></div></div>\`;
+                container.innerHTML = html;
+            } catch (err) { container.innerHTML = '<p style="color:red;">Error loading resident approvals.</p>'; }
         }
 
-        // HANDLERS FOR STAFF & RESIDENT ACTIONS
-        async function reviewResident(id, status) {
-            let reason = '';
-            if (status === 'Rejected') {
-                reason = prompt('Enter rejection reason:');
-                if (!reason) return;
-            }
-
-            const res = await fetch('/api/residents/approve-reject', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ residentId: id, status, rejectionReason: reason })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                alert(\`Resident application \${status}.\`);
-                loadTab('residents');
-            }
+        async function approveResident(id) {
+            if (!confirm("Are you sure you want to approve this resident application?")) return;
+            try {
+                const res = await fetch(\`/api/residents/approve/\${id}\`, { method: 'POST' });
+                const data = await res.json();
+                if (data.error) return alert(data.error);
+                alert(data.message);
+                loadResidentApprovals();
+            } catch (err) { alert(err.message); }
         }
 
-        async function toggleArchiveResident(id, archive) {
-            if (!confirm(\`Are you sure you want to \${archive ? 'archive' : 'restore'} this record?\`)) return;
-
-            const res = await fetch('/api/residents/archive-toggle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ residentId: id, archive })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                loadTab('residents');
-            }
+        function promptRejectResident(id) {
+            const reason = prompt("Enter Rejection Reason:");
+            if (!reason) return;
+            rejectResident(id, reason);
         }
 
-        async function addPurok(e) {
-            e.preventDefault();
-            const res = await fetch('/api/puroks', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: document.getElementById('purokName').value,
-                    description: document.getElementById('purokDesc').value
-                })
-            });
-            const data = await res.json();
-            if (data.success) { alert('Purok added!'); loadTab('puroks'); }
+        async function rejectResident(id, rejectionReason) {
+            try {
+                const res = await fetch(\`/api/residents/reject/\${id}\`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rejectionReason })
+                });
+                const data = await res.json();
+                if (data.error) return alert(data.error);
+                alert(data.message);
+                loadResidentApprovals();
+            } catch (err) { alert(err.message); }
         }
 
-        async function deletePurok(id) {
-            if (!confirm('Are you sure you want to delete this Purok?')) return;
-            const res = await fetch(\`/api/puroks/\${id}\`, { method: 'DELETE' });
-            const data = await res.json();
-            if (data.success) { alert('Purok deleted!'); loadTab('puroks'); }
+        async function loadResidents() {
+            document.getElementById('pageTitle').innerText = "Approved Resident Database";
+            const container = document.getElementById('mainContainer');
+
+            try {
+                const res = await fetch('/api/residents?status=APPROVED');
+                const residents = await res.json();
+
+                let html = \`
+                    <div class="content-card">
+                        <div style="margin-bottom:15px; display:flex; justify-content:space-between;">
+                            <input type="text" id="resSearch" class="form-control" style="max-width:300px;" placeholder="Search by name or Resident ID..." onkeyup="filterResidentTable()">
+                            <button onclick="printSelected8Ids()" class="btn btn-secondary"><i class="fa-solid fa-print"></i> Batch Print Selected 8-IDs Sheet</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table id="resTable">
+                                <thead>
+                                    <tr>
+                                        <th><input type="checkbox" onclick="toggleSelectAllIds(this)"></th>
+                                        <th>Resident ID</th>
+                                        <th>Name</th>
+                                        <th>Gender</th>
+                                        <th>Purok</th>
+                                        <th>Contact</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                \`;
+
+                residents.forEach(r => {
+                    html += \`
+                        <tr>
+                            <td><input type="checkbox" class="id-select-cb" value="\${r.id}"></td>
+                            <td><strong>\${r.resident_number}</strong></td>
+                            <td>\${r.first_name} \${r.last_name}</td>
+                            <td>\${r.gender}</td>
+                            <td>\${r.purok}</td>
+                            <td>\${r.contact_number}</td>
+                            <td><span class="badge badge-approved">\${r.status}</span></td>
+                            <td>
+                                <button onclick="viewDigitalId('\${r.id}')" class="btn btn-primary btn-sm"><i class="fa-solid fa-id-card"></i> View Digital ID</button>
+                                <button onclick="archiveResident('\${r.id}')" class="btn btn-danger btn-sm"><i class="fa-solid fa-box-archive"></i> Archive</button>
+                            </td>
+                        </tr>
+                    \`;
+                });
+
+                html += \`</tbody></table></div></div>\`;
+                container.innerHTML = html;
+            } catch (err) { container.innerHTML = '<p>Error loading residents.</p>'; }
         }
 
-        async function addHousehold(e) {
-            e.preventDefault();
-            const res = await fetch('/api/households', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    householdNumber: document.getElementById('hhNumber').value,
-                    purokId: document.getElementById('hhPurok').value,
-                    address: document.getElementById('hhAddress').value
-                })
-            });
-            const data = await res.json();
-            if (data.success) { alert('Household created!'); loadTab('households'); }
+        async function archiveResident(id) {
+            if (!confirm("Are you sure you want to archive this resident record?")) return;
+            try {
+                const res = await fetch(\`/api/residents/archive/\${id}\`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ statusReason: 'ARCHIVED' })
+                });
+                const data = await res.json();
+                if (data.error) return alert(data.error);
+                alert(data.message);
+                loadResidents();
+            } catch (err) { alert(err.message); }
         }
 
-        async function processCert(id, status) {
-            const res = await fetch('/api/certificates/process', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ requestId: id, status })
-            });
-            const data = await res.json();
-            if (data.success) { alert(\`Status updated to \${status}\`); loadTab('certificates'); }
+        async function viewDigitalId(id) {
+            try {
+                const res = await fetch(\`/api/resident-id-card/\${id}\`);
+                const data = await res.json();
+                if (data.error) return alert(data.error);
+
+                openModal("BARANGAY RESIDENT IDENTIFICATION CARD", \`
+                    <div style="display:flex; flex-direction:column; align-items:center; gap:20px;">
+                        \${data.html}
+                        <button onclick="window.print()" class="btn btn-primary"><i class="fa-solid fa-print"></i> Print ID Card</button>
+                    </div>
+                \`);
+            } catch (err) { alert(err.message); }
         }
 
-        async function updateAppt(id, status) {
-            const res = await fetch('/api/appointments/status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ appointmentId: id, status })
-            });
-            const data = await res.json();
-            if (data.success) { alert(\`Appointment updated to \${status}\`); loadTab('appointments'); }
+        function toggleSelectAllIds(master) {
+            document.querySelectorAll('.id-select-cb').forEach(cb => cb.checked = master.checked);
         }
 
-        async function updateComplaint(id, status) {
-            const res = await fetch('/api/complaints/status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ complaintId: id, status })
-            });
-            const data = await res.json();
-            if (data.success) { alert(\`Complaint status updated to \${status}\`); loadTab('complaints'); }
+        async function printSelected8Ids() {
+            const selected = Array.from(document.querySelectorAll('.id-select-cb:checked')).map(cb => cb.value);
+            if (selected.length === 0) return alert("Please select at least 1 resident to generate the batch print sheet.");
+
+            try {
+                const res = await fetch('/api/print-batch-ids', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ residentIds: selected, paperSize: 'A4' })
+                });
+                const data = await res.json();
+                if (data.error) return alert(data.error);
+
+                const win = window.open('', '_blank');
+                win.document.write(data.html);
+                win.document.close();
+            } catch (err) { alert(err.message); }
         }
 
-        async function updateAssist(id, status) {
-            const res = await fetch('/api/assistance/status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ requestId: id, status })
-            });
-            const data = await res.json();
-            if (data.success) { alert(\`Assistance request updated to \${status}\`); loadTab('assistance'); }
+        function loadScanClaimQr() {
+            document.getElementById('pageTitle').innerText = "QR Code Certificate Claim Lookup";
+            const container = document.getElementById('mainContainer');
+            container.innerHTML = \`
+                <div class="content-card" style="max-width:600px; margin:0 auto;">
+                    <h3><i class="fa-solid fa-qrcode"></i> Scan/Paste Request Claim QR Token</h3>
+                    <p style="font-size:13px; color:var(--text-muted); margin-bottom:15px;">Scan the resident's claim QR code token to quickly verify and mark documents as RELEASED.</p>
+                    <div class="form-group">
+                        <label>Claim Token</label>
+                        <input type="text" id="claimTokenInput" class="form-control" placeholder="Paste Token UUID here...">
+                    </div>
+                    <button onclick="handleScanClaimLookup()" class="btn btn-primary" style="width:100%; justify-content:center;"><i class="fa-solid fa-search"></i> FETCH CLAIM DETAILS</button>
+                    <div id="claimResultContainer" style="margin-top:20px;"></div>
+                </div>
+            \`;
         }
 
-        async function postAnnouncement(e) {
-            e.preventDefault();
-            const res = await fetch('/api/announcements', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    title: document.getElementById('annTitle').value,
-                    category: document.getElementById('annCategory').value,
-                    description: document.getElementById('annDesc').value
-                })
-            });
-            const data = await res.json();
-            if (data.success) { alert('Announcement published!'); loadTab('announcements'); }
+        async function handleScanClaimLookup() {
+            const token = document.getElementById('claimTokenInput').value;
+            const resContainer = document.getElementById('claimResultContainer');
+            if (!token) return alert("Enter a token.");
+
+            try {
+                const res = await fetch(\`/api/certificates/claim-scan/\${token}\`);
+                const data = await res.json();
+                if (data.error) {
+                    resContainer.innerHTML = \`<div style="color:red; padding:15px; background:#fee2e2; border-radius:8px;">\${data.error}</div>\`;
+                    return;
+                }
+
+                resContainer.innerHTML = \`
+                    <div style="border:2px solid var(--primary-green); padding:20px; border-radius:8px; background:#f0fdf4;">
+                        <h4 style="color:var(--primary-green); margin-bottom:10px;"><i class="fa-solid fa-circle-check"></i> REQUEST FOUND</h4>
+                        <p><strong>Resident:</strong> \${data.residents.first_name} \${data.residents.last_name} (\${data.residents.resident_number})</p>
+                        <p><strong>Document:</strong> \${data.certificate_type}</p>
+                        <p><strong>Purpose:</strong> \${data.purpose}</p>
+                        <p><strong>Request Number:</strong> \${data.request_number}</p>
+                        <p><strong>Current Status:</strong> <span class="badge badge-pending">\${data.status}</span></p>
+                        <button onclick="markCertificateReleased('\${data.id}')" class="btn btn-primary" style="margin-top:15px; width:100%; justify-content:center;"><i class="fa-solid fa-box-archive"></i> MARK AS RELEASED</button>
+                    </div>
+                \`;
+            } catch (err) { alert(err.message); }
         }
 
-        async function addBusiness(e) {
-            e.preventDefault();
-            const res = await fetch('/api/businesses', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    businessName: document.getElementById('bizName').value,
-                    ownerName: document.getElementById('bizOwner').value,
-                    businessType: document.getElementById('bizType').value,
-                    address: document.getElementById('bizAddress').value,
-                    permitNumber: document.getElementById('bizPermit').value,
-                    expirationDate: document.getElementById('bizExp').value
-                })
-            });
-            const data = await res.json();
-            if (data.success) { alert('Business record saved!'); loadTab('businesses'); }
+        async function markCertificateReleased(id) {
+            try {
+                const res = await fetch(\`/api/certificates/update-status/\${id}\`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'RELEASED' })
+                });
+                const data = await res.json();
+                if (data.error) return alert(data.error);
+                alert("Certificate successfully marked as RELEASED!");
+                loadScanClaimQr();
+            } catch (err) { alert(err.message); }
         }
 
-        async function requestCert(e) {
-            e.preventDefault();
-            const res = await fetch('/api/certificates/request', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    certificateType: document.getElementById('certType').value,
-                    purpose: document.getElementById('certPurpose').value
-                })
-            });
-            const data = await res.json();
-            if (data.success) { alert('Certificate request submitted!'); loadTab('res-dashboard'); }
+        // ============================================================================
+        // RESIDENT PORTAL VIEWS
+        // ============================================================================
+
+        function renderResidentPortal() {
+            const app = document.getElementById('app');
+            app.innerHTML = \`
+                <div class="sidebar">
+                    <div class="sidebar-header">
+                        <i class="fa-solid fa-user-gear" style="font-size:24px;"></i>
+                        <div>
+                            <h2>Resident Portal</h2>
+                            <span style="font-size:10px; opacity:0.8;">\${currentSettings ? currentSettings.barangay_name : ''}</span>
+                        </div>
+                    </div>
+                    <ul class="sidebar-menu">
+                        <li><a href="#" onclick="loadResidentDashboard()" class="active"><i class="fa-solid fa-house-user"></i> My Dashboard</a></li>
+                        <li><a href="#" onclick="loadMyDigitalId()"><i class="fa-solid fa-id-card"></i> My Digital ID</a></li>
+                        <li><a href="#" onclick="loadMyCertificates()"><i class="fa-solid fa-file-contract"></i> Request Certificate</a></li>
+                        <li><a href="#" onclick="handleLogout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></li>
+                    </ul>
+                </div>
+                <div class="main-content">
+                    <div class="top-navbar">
+                        <h4 id="pageTitle">Resident Dashboard</h4>
+                        <div><span>Welcome, \${currentUser ? currentUser.name : 'Resident'}</span></div>
+                    </div>
+                    <div class="page-container" id="mainContainer"></div>
+                </div>
+            \`;
+            loadResidentDashboard();
         }
 
-        async function bookAppt(e) {
-            e.preventDefault();
-            const res = await fetch('/api/appointments', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    serviceType: document.getElementById('apptService').value,
-                    preferredDate: document.getElementById('apptDate').value,
-                    preferredTime: document.getElementById('apptTime').value,
-                    purpose: document.getElementById('apptPurpose').value
-                })
-            });
-            const data = await res.json();
-            if (data.success) { alert('Appointment booked!'); loadTab('res-dashboard'); }
+        async function loadResidentDashboard() {
+            document.getElementById('pageTitle').innerText = "Resident Portal Overview";
+            const container = document.getElementById('mainContainer');
+            container.innerHTML = \`
+                <div class="content-card">
+                    <h3>Welcome to the Barangay E-Services Portal</h3>
+                    <p style="margin-top:10px; color:var(--text-muted);">Access barangay services, view your digital ID card, and request official documents directly online.</p>
+                </div>
+            \`;
         }
 
-        async function submitComplaint(e) {
-            e.preventDefault();
-            const res = await fetch('/api/complaints', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    respondentName: document.getElementById('compRespondent').value,
-                    witnessNames: document.getElementById('compWitnesses').value,
-                    complaintType: document.getElementById('compType').value,
-                    incidentDate: document.getElementById('compDate').value,
-                    incidentLocation: document.getElementById('compLoc').value,
-                    description: document.getElementById('compDesc').value
-                })
-            });
-            const data = await res.json();
-            if (data.success) { alert('Complaint filed successfully!'); loadTab('res-dashboard'); }
-        }
-
-        async function requestAssist(e) {
-            e.preventDefault();
-            const res = await fetch('/api/assistance', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    assistanceType: document.getElementById('assistType').value,
-                    details: document.getElementById('assistDetails').value
-                })
-            });
-            const data = await res.json();
-            if (data.success) { alert('Assistance request submitted!'); loadTab('res-dashboard'); }
-        }
-
-        async function saveSettings(e) {
-            e.preventDefault();
-            const formData = new FormData();
-            formData.append('barangayName', document.getElementById('setBrgy').value);
-            formData.append('municipality', document.getElementById('setMuni').value);
-            formData.append('province', document.getElementById('setProv').value);
-            formData.append('captainName', document.getElementById('setCap').value);
-            
-            const logo = document.getElementById('setLogo').files[0];
-            if (logo) formData.append('logo', logo);
-
-            const res = await fetch('/api/settings', { method: 'POST', body: formData });
-            const data = await res.json();
-
-            if (data.success) {
-                alert('Barangay Settings updated!');
-                await fetchSettings();
-                renderPortal();
-            }
-        }
-
-        function triggerPrintBatch() {
-            const checked = Array.from(document.querySelectorAll('.id-print-checkbox:checked'));
-            if (checked.length === 0 || checked.length > 8) {
-                alert('Please select between 1 and 8 residents to print.');
+        async function loadMyDigitalId() {
+            document.getElementById('pageTitle').innerText = "Official Digital Resident ID";
+            const container = document.getElementById('mainContainer');
+            if (!currentUser || !currentUser.residentId) {
+                container.innerHTML = '<p style="color:red;">No resident ID linked to this account.</p>';
                 return;
             }
 
-            const printArea = document.getElementById('print-area');
-            printArea.innerHTML = \`<div class="print-grid" id="print-grid-target"></div>\`;
-            const grid = document.getElementById('print-grid-target');
+            try {
+                const res = await fetch(\`/api/resident-id-card/\${currentUser.residentId}\`);
+                const data = await res.json();
+                if (data.error) return container.innerHTML = \`<p style="color:red;">\${data.error}</p>\`;
 
-            checked.forEach((cb, idx) => {
-                const r = JSON.parse(cb.getAttribute('data-json'));
-                const card = document.createElement('div');
-                card.className = 'id-card';
-                card.innerHTML = \`
-                    <div class="id-card-header">
-                        <img src="\${systemSettings.logo_url || ''}" />
-                        <div>
-                            <div style="font-weight:700;">\${systemSettings.barangay_name}</div>
-                            <div style="font-size:0.6rem;">\${systemSettings.municipality}</div>
-                        </div>
+                container.innerHTML = \`
+                    <div class="content-card" style="display:flex; flex-direction:column; align-items:center; gap:20px;">
+                        \${data.html}
+                        <button onclick="window.print()" class="btn btn-primary"><i class="fa-solid fa-print"></i> Print ID Card</button>
                     </div>
-                    <div class="id-card-body">
-                        <img src="\${r.profile_photo || 'https://via.placeholder.com/80'}" class="id-card-photo" />
-                        <div class="id-card-details">
-                            <div style="font-weight:700;">\${r.first_name} \${r.last_name}</div>
-                            <div>ID: \${r.resident_id}</div>
-                            <div>DOB: \${r.date_of_birth}</div>
-                        </div>
-                    </div>
-                    <div class="id-card-qr" id="print-qr-\${idx}"></div>
                 \`;
-                grid.appendChild(card);
-
-                setTimeout(() => {
-                    QRCode.toCanvas(document.getElementById(\`print-qr-\${idx}\`), \`\${window.location.origin}/api/verify/resident/\${r.resident_id}\`, { width: 45 });
-                }, 50);
-            });
-
-            setTimeout(() => {
-                window.print();
-            }, 500);
+            } catch (err) { container.innerHTML = '<p style="color:red;">Error loading ID Card.</p>'; }
         }
 
-        function filterResidentTable(query) {
-            const q = query.toLowerCase();
-            const rows = document.querySelectorAll('#res-tbl tr');
-            rows.forEach(row => {
-                const text = row.innerText.toLowerCase();
-                row.style.display = text.includes(q) ? '' : 'none';
-            });
+        // Helpers & Modal Operations
+        function openModal(title, bodyHtml) {
+            document.getElementById('modalContent').innerHTML = \`
+                <div class="modal-header">
+                    <h3>\${title}</h3>
+                    <button onclick="closeModal()" style="border:none; background:none; font-size:20px; cursor:pointer;">&times;</button>
+                </div>
+                <div>\${bodyHtml}</div>
+            \`;
+            document.getElementById('modalOverlay').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('modalOverlay').classList.remove('active');
         }
 
         async function handleLogout() {
-            await fetch('/api/auth/logout', { method: 'POST' });
+            await fetch('/api/logout', { method: 'POST' });
             currentUser = null;
-            renderLogin();
+            renderLoginView();
         }
 
+        // Start Application
         window.onload = initApp;
     </script>
 </body>
-</html>
-    `);
+</html>`;
+}
+
+// Layout Helper Generators for Dynamic Cards & Batch Sheets
+function renderSingleIdCardHtml(settings, resData, qrDataUrl) {
+  return `
+    <div style="width: 330px; height: 210px; border: 2px solid #0d7a40; border-radius: 10px; background: #fff; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; font-family: sans-serif; position: relative; box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 8px; border-bottom: 2px solid #0d7a40; padding-bottom: 5px;">
+            <div style="width: 32px; height: 32px; background: #0d7a40; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: bold; font-size: 14px;">B</div>
+            <div>
+                <div style="font-size: 10px; font-weight: bold; color: #0d7a40; text-transform: uppercase;">${settings.barangay_name || 'BARANGAY'}</div>
+                <div style="font-size: 8px; color: #555;">${settings.municipality}, ${settings.province}</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center; margin: 5px 0;">
+            <div style="width: 70px; height: 70px; background: #e5e7eb; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 24px; border: 1px solid #ccc;">
+                <i class="fa-solid fa-user"></i>
+            </div>
+            <div style="flex-grow: 1; font-size: 10px; color: #111;">
+                <div style="font-size: 12px; font-weight: bold; color: #1e40af; border-bottom: 1px solid #ddd; padding-bottom: 2px;">${resData.first_name} ${resData.last_name}</div>
+                <div style="margin-top: 3px;"><strong>ID:</strong> ${resData.resident_number}</div>
+                <div><strong>DOB:</strong> ${resData.date_of_birth}</div>
+                <div><strong>Sex:</strong> ${resData.gender}</div>
+                <div><strong>Purok:</strong> ${resData.purok}</div>
+            </div>
+            <img src="${qrDataUrl}" style="width: 55px; height: 55px;" alt="QR" />
+        </div>
+        <div style="background: #0d7a40; color: #fff; text-align: center; font-size: 8px; padding: 3px; border-radius: 4px; font-weight: bold; letter-spacing: 0.5px;">
+            BARANGAY RESIDENT IDENTIFICATION CARD
+        </div>
+    </div>
+  `;
+}
+
+function render8IdPrintSheetHtml(cardsHtmlArray, paperSize) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+    <title>8-ID Print Sheet</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @page { size: ${paperSize || 'A4'}; margin: 10mm; }
+        body { font-family: sans-serif; background: #fff; margin: 0; padding: 0; }
+        .grid-sheet { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15mm 10mm; justify-items: center; align-items: center; padding: 10mm 0; }
+        @media print {
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="no-print" style="padding: 15px; background: #f3f4f6; text-align: center; border-bottom: 1px solid #ccc;">
+        <button onclick="window.print()" style="padding: 10px 20px; background: #0d7a40; color: #fff; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">PRINT 8-ID SHEET</button>
+    </div>
+    <div class="grid-sheet">
+        ${cardsHtmlArray.join('')}
+    </div>
+</body>
+</html>`;
+}
+
+function renderVerificationResultPage(settings, resident, isValid) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+    <title>Barangay ID Verification</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: sans-serif; background: #f3f4f6; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .card { background: #fff; border-radius: 12px; padding: 30px; width: 90%; max-width: 400px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); text-align: center; }
+        .badge { display: inline-block; padding: 6px 16px; border-radius: 50px; font-weight: bold; font-size: 14px; margin-bottom: 20px; }
+        .valid { background: #d1fae5; color: #059669; }
+        .invalid { background: #fee2e2; color: #dc2626; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>${settings ? settings.barangay_name : 'Barangay Verification'}</h2>
+        <p style="font-size: 12px; color: #6b7280; margin-bottom: 20px;">Official Identification Verification</p>
+        ${isValid ? `
+            <div class="badge valid"><i class="fa-solid fa-circle-check"></i> VALID RESIDENT ID</div>
+            <p style="text-align:left; margin-bottom:8px;"><strong>Name:</strong> ${resident.first_name}${resident.last_name}</p>
+            <p style="text-align:left; margin-bottom:8px;"><strong>ID Number:</strong> ${resident.resident_number}</p>
+            <p style="text-align:left; margin-bottom:8px;"><strong>Purok:</strong> ${resident.purok}</p>
+            <p style="text-align:left; margin-bottom:8px;"><strong>Status:</strong> ${resident.status}</p>
+        ` : `
+            <div class="badge invalid"><i class="fa-solid fa-triangle-exclamation"></i> INVALID / UNVERIFIED ID</div>
+            <p style="color:#6b7280; font-size:14px;">The scanned identification token does not correspond to an active record in our database.</p>
+        `}
+    </div>
+</body>
+</html>`;
+}
+
+function renderDbConfigErrorPage() {
+  return `<!DOCTYPE html>
+<html>
+<head><title>Database Configuration Required</title></head>
+<body style="font-family:sans-serif; background:#f3f4f6; display:flex; justify-content:center; align-items:center; height:100vh;">
+    <div style="background:#fff; padding:40px; border-radius:12px; box-shadow:0 10px 15px rgba(0,0,0,0.1); max-width:500px; text-align:center;">
+        <h2 style="color:#dc2626;">DATABASE NOT CONFIGURED</h2>
+        <p style="color:#4b5563; margin-top:10px; line-height:1.5;">Please configure <strong>SUPABASE_URL</strong> and <strong>SUPABASE_ANON_KEY</strong> inside <code>app.js</code> or as environment variables in Render to connect the database.</p>
+    </div>
+</body>
+</html>`;
+}
+
+// Single Entry-Point Route
+app.get('*', (req, res) => {
+  res.send(renderMainAppPage());
 });
 
-// START EXPRESS SERVER
+// ============================================================================
+// SERVER INITIALIZATION
+// ============================================================================
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Barangay Resident Management System running on port ${PORT}`);
+  console.log(`===================================================`);
+  console.log(`Barangay Resident Management System Running`);
+  console.log(`Server listening on port: ${PORT}`);
+  console.log(`===================================================`);
 });
