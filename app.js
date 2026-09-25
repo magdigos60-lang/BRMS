@@ -734,7 +734,7 @@ app.get('/verify/resident/:id', async (req, res) => {
         if (!resident || resident.status !== 'ACTIVE') {
             return res.send(`
                 <html><body style="font-family:sans-serif; text-align:center; padding:50px; background:#f8fafc;">
-                    <h1 style="color:#dc2626;">INVALID / UNVERIFIED BARANGAY ID</h1>
+                    <h1 style="color:#2563eb;">INVALID / UNVERIFIED BARANGAY ID</h1>
                     <p>The queried resident ID token does not exist or is currently inactive.</p>
                 </body></html>
             `);
@@ -755,7 +755,7 @@ app.get('/verify/resident/:id', async (req, res) => {
                     .photo { width: 110px; height: 110px; border-radius: 50%; object-fit: cover; border: 4px solid #059669; margin-bottom: 15px; }
                     .info-table { width:100%; text-align:left; margin-top:15px; border-collapse:collapse; }
                     .info-table td { padding: 8px; border-bottom: 1px solid #f1f5f9; }
-                    .info-table td.label { font-weight:bold; color:#475569; }
+                    .info-table td.label { font-weight:bold; color:#1e3a8a; }
                 </style>
             </head>
             <body>
@@ -849,7 +849,7 @@ app.get('*', (req, res) => {
         }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased font-sans">
+<body class="bg-white text-slate-800 antialiased font-sans">
 
     <!-- APP CONTAINER -->
     <div id="app" class="min-h-screen flex flex-col"></div>
@@ -922,7 +922,7 @@ app.get('*', (req, res) => {
                             <div class="inline-flex p-3 bg-emerald-100 rounded-full text-emerald-600 mb-3">
                                 <i class="fa-solid fa-user-shield fa-2x"></i>
                             </div>
-                            <h1 class="text-2xl font-bold text-slate-800">INITIAL ADMIN SETUP</h1>
+                            <h1 class="text-2xl font-bold text-blue-900">INITIAL ADMIN SETUP</h1>
                             <p class="text-xs text-slate-500 mt-1">Create the primary System Administrator account to start.</p>
                         </div>
                         <form id="adminSetupForm" class="space-y-4">
@@ -1008,7 +1008,7 @@ app.get('*', (req, res) => {
                         <div class="p-8 flex flex-col justify-center">
                             <div class="flex border-b border-slate-200 mb-6">
                                 <button id="btnPortalStaff" type="button" onclick="switchLoginPortal('staff')" class="flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600">Staff Login</button>
-                                <button id="btnPortalResident" type="button" onclick="switchLoginPortal('resident')" class="flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent">Resident Portal</button>
+                                <button id="btnPortalResident" type="button" onclick="switchLoginPortal('resident')" class="flex-1 py-2 text-sm font-bold text-blue-600 border-b-2 border-transparent">Resident Portal</button>
                             </div>
 
                             <form id="loginForm" class="space-y-4">
@@ -1069,11 +1069,11 @@ app.get('*', (req, res) => {
 
             if (type === 'staff') {
                 btnStaff.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
-                btnResident.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
+                btnResident.className = "flex-1 py-2 text-sm font-bold text-blue-600 border-b-2 border-transparent";
                 prompt.classList.add('hidden');
             } else {
-                btnResident.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
-                btnStaff.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
+                btnResident.className = "flex-1 py-2 text-sm font-bold text-blue-600 border-b-2 border-blue-600";
+                btnStaff.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-transparent";
                 prompt.classList.remove('hidden');
             }
         }
@@ -1084,10 +1084,10 @@ app.get('*', (req, res) => {
             let purokOptions = (puroks || []).map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('');
 
             const modalHtml = \`
-                <div id="regModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-                    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl my-8">
+                <div id="regModal" class="fixed inset-0 bg-blue-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl my-8 border border-emerald-500">
                         <div class="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
-                            <h3 class="text-lg font-bold text-slate-800">New Resident Registration</h3>
+                            <h3 class="text-lg font-bold text-blue-900">New Resident Registration</h3>
                             <button type="button" onclick="document.getElementById('regModal').remove()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
                         </div>
                         <form id="publicRegForm" class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
@@ -1187,7 +1187,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           3. STAFF PORTAL RENDER (BLUE & GREEN THEME)
+           3. STAFF PORTAL RENDER (BLUE, GREEN & WHITE)
            ========================================================================== */
         function renderStaffPortal() {
             const app = document.getElementById('app');
@@ -1195,54 +1195,54 @@ app.get('*', (req, res) => {
             const logo = state.settings.barangay_logo || '';
 
             app.innerHTML = \`
-                <div class="flex h-screen bg-slate-100 overflow-hidden">
+                <div class="flex h-screen bg-white overflow-hidden">
                     <!-- Sidebar -->
-                    <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col justify-between hidden md:flex border-r border-emerald-800">
+                    <aside class="w-64 bg-blue-950 text-slate-200 flex flex-col justify-between hidden md:flex border-r border-emerald-500">
                         <div>
-                            <div class="p-4 border-b border-slate-800 flex items-center gap-3 bg-gradient-to-r from-emerald-900 to-blue-900">
+                            <div class="p-4 border-b border-blue-900 flex items-center gap-3 bg-gradient-to-r from-emerald-800 to-blue-900">
                                 \${logo ? \`<img src="\${logo}" class="w-10 h-10 rounded-full bg-white p-0.5 shadow">\` : \`<i class="fa-solid fa-building-columns text-emerald-400 fa-lg"></i>\`}
                                 <div>
                                     <h1 class="font-bold text-white text-sm truncate">\${brgyName}</h1>
-                                    <span class="text-[10px] bg-emerald-700 text-white px-2 py-0.5 rounded-full uppercase font-bold">\${state.user.role}</span>
+                                    <span class="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full uppercase font-bold">\${state.user.role}</span>
                                 </div>
                             </div>
                             <nav class="p-3 space-y-1 text-xs">
-                                <button type="button" onclick="setStaffTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-chart-pie w-4"></i> Dashboard</button>
-                                <button type="button" onclick="setStaffTab('residents')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-users w-4"></i> Residents</button>
-                                <button type="button" onclick="setStaffTab('households')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-house w-4"></i> Households</button>
-                                <button type="button" onclick="setStaffTab('puroks')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-map-location-dot w-4"></i> Puroks (Resident Count)</button>
-                                <button type="button" onclick="setStaffTab('certificates')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-file-contract w-4"></i> Certificates</button>
-                                <button type="button" onclick="setStaffTab('qrscanner')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-qrcode w-4"></i> QR Claim Scanner</button>
-                                <button type="button" onclick="setStaffTab('blotter')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-gavel w-4"></i> Blotter Cases</button>
-                                <button type="button" onclick="setStaffTab('appointments')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-calendar-check w-4"></i> Appointments</button>
-                                <button type="button" onclick="setStaffTab('announcements')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-bullhorn w-4"></i> Announcements</button>
-                                <button type="button" onclick="setStaffTab('idprint')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-id-card w-4"></i> Batch Print Resident Cards</button>
+                                <button type="button" onclick="setStaffTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-chart-pie w-4"></i> Dashboard</button>
+                                <button type="button" onclick="setStaffTab('residents')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-users w-4"></i> Residents</button>
+                                <button type="button" onclick="setStaffTab('households')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-house w-4"></i> Households</button>
+                                <button type="button" onclick="setStaffTab('puroks')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-map-location-dot w-4"></i> Puroks (Resident Count)</button>
+                                <button type="button" onclick="setStaffTab('certificates')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-file-contract w-4"></i> Certificates</button>
+                                <button type="button" onclick="setStaffTab('qrscanner')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-qrcode w-4"></i> QR Claim Scanner</button>
+                                <button type="button" onclick="setStaffTab('blotter')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-gavel w-4"></i> Blotter Cases</button>
+                                <button type="button" onclick="setStaffTab('appointments')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-calendar-check w-4"></i> Appointments</button>
+                                <button type="button" onclick="setStaffTab('announcements')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-bullhorn w-4"></i> Announcements</button>
+                                <button type="button" onclick="setStaffTab('idprint')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-id-card w-4"></i> Batch Print Resident Cards</button>
                                 \${state.user.role === 'super_admin' ? \`
-                                    <button type="button" onclick="setStaffTab('settings')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-sliders w-4"></i> System Settings</button>
-                                    <button type="button" onclick="setStaffTab('logs')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-list-check w-4"></i> Activity Logs</button>
+                                    <button type="button" onclick="setStaffTab('settings')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-sliders w-4"></i> System Settings</button>
+                                    <button type="button" onclick="setStaffTab('logs')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-list-check w-4"></i> Activity Logs</button>
                                 \` : ''}
                             </nav>
                         </div>
-                        <div class="p-3 border-t border-slate-800">
-                            <button type="button" onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2.5 text-xs text-rose-400 hover:bg-slate-800 rounded-lg font-medium">
+                        <div class="p-3 border-t border-blue-900">
+                            <button type="button" onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2.5 text-xs text-blue-300 hover:bg-blue-900 rounded-lg font-medium">
                                 <i class="fa-solid fa-arrow-right-from-bracket w-4"></i> Logout
                             </button>
                         </div>
                     </aside>
 
                     <!-- Main Content Area -->
-                    <main class="flex-1 flex flex-col overflow-hidden">
-                        <header class="bg-gradient-to-r from-emerald-800 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
+                    <main class="flex-1 flex flex-col overflow-hidden bg-white">
+                        <header class="bg-gradient-to-r from-blue-900 to-emerald-700 text-white px-6 py-4 flex justify-between items-center shadow-md">
                             <h2 id="staffPageTitle" class="text-xl font-bold">Dashboard</h2>
                             <div class="flex items-center gap-3">
                                 <span class="text-xs font-semibold">\${state.user.fullName}</span>
-                                <div class="w-8 h-8 rounded-full bg-blue-600 text-white border-2 border-emerald-400 flex items-center justify-center font-bold text-xs">
+                                <div class="w-8 h-8 rounded-full bg-emerald-600 text-white border-2 border-white flex items-center justify-center font-bold text-xs">
                                     \${state.user.fullName.charAt(0)}
                                 </div>
                             </div>
                         </header>
 
-                        <div id="staffContent" class="flex-1 overflow-y-auto p-6">
+                        <div id="staffContent" class="flex-1 overflow-y-auto p-6 bg-white">
                             <!-- Dynamic Content Rendered Here -->
                         </div>
                     </main>
@@ -1262,60 +1262,60 @@ app.get('*', (req, res) => {
                 const stats = await api('/dashboard/stats');
                 content.innerHTML = \`
                     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                        <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm flex items-center gap-4">
+                        <div class="bg-white p-4 rounded-xl border border-emerald-500 shadow-sm flex items-center gap-4">
                             <div class="p-3 bg-emerald-100 text-emerald-600 rounded-lg"><i class="fa-solid fa-users fa-xl"></i></div>
                             <div>
                                 <p class="text-xs text-slate-500 font-medium">Active Residents</p>
-                                <h3 class="text-2xl font-bold text-slate-800">\${stats.totalResidents}</h3>
+                                <h3 class="text-2xl font-bold text-blue-900">\${stats.totalResidents}</h3>
                             </div>
                         </div>
-                        <div class="bg-white p-4 rounded-xl border border-blue-200 shadow-sm flex items-center gap-4">
+                        <div class="bg-white p-4 rounded-xl border border-blue-500 shadow-sm flex items-center gap-4">
                             <div class="p-3 bg-blue-100 text-blue-600 rounded-lg"><i class="fa-solid fa-house fa-xl"></i></div>
                             <div>
                                 <p class="text-xs text-slate-500 font-medium">Households</p>
-                                <h3 class="text-2xl font-bold text-slate-800">\${stats.totalHouseholds}</h3>
+                                <h3 class="text-2xl font-bold text-blue-900">\${stats.totalHouseholds}</h3>
                             </div>
                         </div>
-                        <div class="bg-white p-4 rounded-xl border border-amber-200 shadow-sm flex items-center gap-4">
-                            <div class="p-3 bg-amber-100 text-amber-600 rounded-lg"><i class="fa-solid fa-user-clock fa-xl"></i></div>
+                        <div class="bg-white p-4 rounded-xl border border-emerald-400 shadow-sm flex items-center gap-4">
+                            <div class="p-3 bg-emerald-50 text-emerald-600 rounded-lg"><i class="fa-solid fa-user-clock fa-xl"></i></div>
                             <div>
                                 <p class="text-xs text-slate-500 font-medium">Pending Approvals</p>
-                                <h3 class="text-2xl font-bold text-slate-800">\${stats.pendingApprovals}</h3>
+                                <h3 class="text-2xl font-bold text-blue-900">\${stats.pendingApprovals}</h3>
                             </div>
                         </div>
-                        <div class="bg-white p-4 rounded-xl border border-purple-200 shadow-sm flex items-center gap-4">
-                            <div class="p-3 bg-purple-100 text-purple-600 rounded-lg"><i class="fa-solid fa-file-invoice fa-xl"></i></div>
+                        <div class="bg-white p-4 rounded-xl border border-blue-400 shadow-sm flex items-center gap-4">
+                            <div class="p-3 bg-blue-50 text-blue-600 rounded-lg"><i class="fa-solid fa-file-invoice fa-xl"></i></div>
                             <div>
                                 <p class="text-xs text-slate-500 font-medium">Pending Certificates</p>
-                                <h3 class="text-2xl font-bold text-slate-800">\${stats.pendingCerts}</h3>
+                                <h3 class="text-2xl font-bold text-blue-900">\${stats.pendingCerts}</h3>
                             </div>
                         </div>
                     </div>
 
                     <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
-                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-center">
+                        <div class="bg-white p-3 rounded-lg border border-blue-200 text-center">
                             <span class="text-xs text-slate-500">Male</span>
-                            <p class="text-lg font-bold text-blue-700">\${stats.maleResidents}</p>
+                            <p class="text-lg font-bold text-blue-800">\${stats.maleResidents}</p>
                         </div>
-                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-center">
+                        <div class="bg-white p-3 rounded-lg border border-emerald-200 text-center">
                             <span class="text-xs text-slate-500">Female</span>
                             <p class="text-lg font-bold text-emerald-700">\${stats.femaleResidents}</p>
                         </div>
-                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-center">
+                        <div class="bg-white p-3 rounded-lg border border-blue-200 text-center">
                             <span class="text-xs text-slate-500">Seniors</span>
-                            <p class="text-lg font-bold text-slate-700">\${stats.seniorCitizens}</p>
+                            <p class="text-lg font-bold text-blue-900">\${stats.seniorCitizens}</p>
                         </div>
-                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-center">
+                        <div class="bg-white p-3 rounded-lg border border-emerald-200 text-center">
                             <span class="text-xs text-slate-500">PWD</span>
-                            <p class="text-lg font-bold text-slate-700">\${stats.pwdCount}</p>
+                            <p class="text-lg font-bold text-emerald-800">\${stats.pwdCount}</p>
                         </div>
-                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-center">
+                        <div class="bg-white p-3 rounded-lg border border-blue-200 text-center">
                             <span class="text-xs text-slate-500">Solo Parents</span>
-                            <p class="text-lg font-bold text-slate-700">\${stats.soloParents}</p>
+                            <p class="text-lg font-bold text-blue-900">\${stats.soloParents}</p>
                         </div>
-                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-center">
+                        <div class="bg-white p-3 rounded-lg border border-emerald-200 text-center">
                             <span class="text-xs text-slate-500">Voters</span>
-                            <p class="text-lg font-bold text-slate-700">\${stats.voters}</p>
+                            <p class="text-lg font-bold text-emerald-800">\${stats.voters}</p>
                         </div>
                     </div>
                 \`;
@@ -1364,8 +1364,8 @@ app.get('*', (req, res) => {
             const archived = await api('/residents?status=ARCHIVED');
 
             container.innerHTML = \`
-                <div class="bg-white rounded-xl shadow-sm border border-slate-200">
-                    <div class="border-b border-slate-200 px-6 py-4 flex gap-6 text-sm font-bold">
+                <div class="bg-white rounded-xl shadow-sm border border-blue-200">
+                    <div class="border-b border-blue-100 px-6 py-4 flex gap-6 text-sm font-bold">
                         <button type="button" onclick="switchResSubTab('active')" id="tabResActive" class="text-emerald-600 border-b-2 border-emerald-600 pb-2">Active (\${residents.length})</button>
                         <button type="button" onclick="switchResSubTab('pending')" id="tabResPending" class="text-slate-400 border-b-2 border-transparent pb-2">Pending (\${pendings.length})</button>
                         <button type="button" onclick="switchResSubTab('archived')" id="tabResArchived" class="text-slate-400 border-b-2 border-transparent pb-2">Archived (\${archived.length})</button>
@@ -1401,23 +1401,23 @@ app.get('*', (req, res) => {
             }
 
             let rows = data.map(r => \`
-                <tr class="border-b border-slate-100 hover:bg-slate-50 text-xs">
-                    <td class="py-3 px-2 font-mono font-bold text-emerald-700">\${r.resident_number || 'N/A'}</td>
+                <tr class="border-b border-slate-100 hover:bg-emerald-50/30 text-xs">
+                    <td class="py-3 px-2 font-mono font-bold text-blue-900">\${r.resident_number || 'N/A'}</td>
                     <td class="py-3 px-2 font-bold text-slate-800">\${r.first_name} \${r.last_name}</td>
                     <td class="py-3 px-2">\${r.gender}</td>
                     <td class="py-3 px-2">\${r.date_of_birth}</td>
                     <td class="py-3 px-2">\${r.contact_number || 'N/A'}</td>
-                    <td class="py-3 px-2 font-bold">\${r.status}</td>
+                    <td class="py-3 px-2 font-bold text-emerald-700">\${r.status}</td>
                     <td class="py-3 px-2 text-right space-x-1">
                         \${type === 'pending' ? \`
                             <button type="button" onclick="approveResident('\${r.id}')" class="px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">Approve</button>
-                            <button type="button" onclick="rejectResident('\${r.id}')" class="px-2 py-1 bg-rose-600 text-white rounded hover:bg-rose-700">Reject</button>
+                            <button type="button" onclick="rejectResident('\${r.id}')" class="px-2 py-1 bg-blue-800 text-white rounded hover:bg-blue-900">Reject</button>
                         \` : ''}
                         \${type === 'active' ? \`
-                            <button type="button" onclick="archiveResident('\${r.id}')" class="px-2 py-1 bg-slate-600 text-white rounded hover:bg-slate-700">Archive</button>
+                            <button type="button" onclick="archiveResident('\${r.id}')" class="px-2 py-1 bg-blue-900 text-white rounded hover:bg-blue-950">Archive</button>
                         \` : ''}
                         \${type === 'archived' ? \`
-                            <button type="button" onclick="restoreResident('\${r.id}')" class="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Restore</button>
+                            <button type="button" onclick="restoreResident('\${r.id}')" class="px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">Restore</button>
                         \` : ''}
                     </td>
                 </tr>
@@ -1427,7 +1427,7 @@ app.get('*', (req, res) => {
                 <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse">
                         <thead>
-                            <tr class="border-b border-slate-200 text-slate-400 text-[11px] uppercase tracking-wider">
+                            <tr class="border-b border-blue-200 text-blue-900 text-[11px] uppercase tracking-wider font-bold">
                                 <th class="py-2">Resident ID</th>
                                 <th class="py-2">Full Name</th>
                                 <th class="py-2">Gender</th>
@@ -1485,7 +1485,7 @@ app.get('*', (req, res) => {
 
             let rows = households.map(h => \`
                 <tr class="border-b border-slate-100 text-xs">
-                    <td class="py-3 px-2 font-bold text-emerald-700">\${h.household_number}</td>
+                    <td class="py-3 px-2 font-bold text-blue-900">\${h.household_number}</td>
                     <td class="py-3 px-2">\${h.puroks ? h.puroks.name : 'N/A'}</td>
                     <td class="py-3 px-2">\${h.head ? h.head.first_name + ' ' + h.head.last_name : 'N/A'}</td>
                     <td class="py-3 px-2">\${h.street_address || 'N/A'}</td>
@@ -1494,8 +1494,8 @@ app.get('*', (req, res) => {
 
             container.innerHTML = \`
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-white p-6 rounded-xl border shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Add New Household</h3>
+                    <div class="bg-white p-6 rounded-xl border border-emerald-500 shadow-sm">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4">Add New Household</h3>
                         <form id="addHouseholdForm" class="space-y-3 text-xs">
                             <div>
                                 <label class="font-bold">Household Number *</label>
@@ -1516,12 +1516,12 @@ app.get('*', (req, res) => {
                         </form>
                     </div>
 
-                    <div class="bg-white p-6 rounded-xl border shadow-sm md:col-span-2">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Household Records</h3>
+                    <div class="bg-white p-6 rounded-xl border border-blue-200 shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4">Household Records</h3>
                         <div class="overflow-x-auto">
                             <table class="w-full text-left border-collapse">
                                 <thead>
-                                    <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <tr class="border-b text-blue-900 text-[11px] uppercase font-bold">
                                         <th class="py-2">HH #</th>
                                         <th class="py-2">Purok</th>
                                         <th class="py-2">Head of Family</th>
@@ -1554,7 +1554,7 @@ app.get('*', (req, res) => {
             const puroks = await api('/puroks');
             let rows = puroks.map(p => \`
                 <tr class="border-b border-slate-100 text-xs">
-                    <td class="py-3 px-2 font-bold text-slate-800">\${p.name}</td>
+                    <td class="py-3 px-2 font-bold text-blue-900">\${p.name}</td>
                     <td class="py-3 px-2 font-bold text-emerald-700 text-sm"><i class="fa-solid fa-users text-blue-600 mr-1"></i> \${p.resident_count || 0} Residents</td>
                     <td class="py-3 px-2 text-slate-600">\${p.description || 'N/A'}</td>
                 </tr>
@@ -1562,8 +1562,8 @@ app.get('*', (req, res) => {
 
             container.innerHTML = \`
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-white p-6 rounded-xl border shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Add New Purok Zone</h3>
+                    <div class="bg-white p-6 rounded-xl border border-emerald-500 shadow-sm">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4">Add New Purok Zone</h3>
                         <form id="addPurokForm" class="space-y-3 text-xs">
                             <div>
                                 <label class="font-bold">Purok Name *</label>
@@ -1577,11 +1577,11 @@ app.get('*', (req, res) => {
                         </form>
                     </div>
 
-                    <div class="bg-white p-6 rounded-xl border shadow-sm md:col-span-2">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Purok List & Resident Population</h3>
+                    <div class="bg-white p-6 rounded-xl border border-blue-200 shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4">Purok List & Resident Population</h3>
                         <table class="w-full text-left border-collapse">
                             <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                <tr class="border-b text-blue-900 text-[11px] uppercase font-bold">
                                     <th class="py-2">Purok Name</th>
                                     <th class="py-2">Resident Count</th>
                                     <th class="py-2">Description</th>
@@ -1614,12 +1614,12 @@ app.get('*', (req, res) => {
             const requests = await api('/certificates/requests');
             
             let rows = requests.map(c => \`
-                <tr class="border-b border-slate-100 hover:bg-slate-50 text-xs">
-                    <td class="py-3 px-2 font-mono font-bold text-slate-600">\${c.request_number}</td>
+                <tr class="border-b border-slate-100 hover:bg-emerald-50/20 text-xs">
+                    <td class="py-3 px-2 font-mono font-bold text-blue-900">\${c.request_number}</td>
                     <td class="py-3 px-2 font-bold text-slate-800">\${c.residents ? c.residents.first_name + ' ' + c.residents.last_name : 'N/A'}</td>
                     <td class="py-3 px-2 font-bold text-emerald-700">\${c.certificate_type}</td>
                     <td class="py-3 px-2">\${c.purpose}</td>
-                    <td class="py-3 px-2 font-semibold">\${c.status}</td>
+                    <td class="py-3 px-2 font-semibold text-blue-800">\${c.status}</td>
                     <td class="py-3 px-2 text-right">
                         \${c.status === 'PENDING' ? \`
                             <button type="button" onclick="openCertUploadModal('\${c.id}')" class="px-3 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 font-bold">Approve & Upload File</button>
@@ -1629,12 +1629,12 @@ app.get('*', (req, res) => {
             \`).join('');
 
             container.innerHTML = \`
-                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">Pending & Approved Certificate Requests</h3>
+                <div class="bg-white rounded-xl shadow-sm border border-blue-200 p-6">
+                    <h3 class="text-sm font-bold text-blue-900 mb-4">Pending & Approved Certificate Requests</h3>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left border-collapse">
                             <thead>
-                                <tr class="border-b border-slate-200 text-slate-400 text-[11px] uppercase tracking-wider">
+                                <tr class="border-b border-blue-200 text-blue-900 text-[11px] uppercase font-bold tracking-wider">
                                     <th class="py-2">Req #</th>
                                     <th class="py-2">Resident</th>
                                     <th class="py-2">Certificate Type</th>
@@ -1652,9 +1652,9 @@ app.get('*', (req, res) => {
 
         function openCertUploadModal(requestId) {
             const modal = \`
-                <div id="certModal" class="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
-                    <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Upload Official Certificate Document</h3>
+                <div id="certModal" class="fixed inset-0 bg-blue-950/40 flex items-center justify-center p-4 z-50">
+                    <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-emerald-500">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4">Upload Official Certificate Document</h3>
                         <form id="certUploadForm" class="space-y-4 text-xs">
                             <input type="hidden" name="requestId" value="\${requestId}">
                             <div>
@@ -1662,7 +1662,7 @@ app.get('*', (req, res) => {
                                 <input type="file" name="certificate_file" required accept="application/pdf,image/*" class="w-full p-2 border rounded">
                             </div>
                             <div class="flex gap-2 pt-2">
-                                <button type="submit" class="flex-1 py-2 bg-emerald-600 text-white font-bold rounded">Upload & Approve</button>
+                                <button type="submit" class="flex-1 py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Upload & Approve</button>
                                 <button type="button" onclick="document.getElementById('certModal').remove()" class="px-4 py-2 bg-slate-200 text-slate-700 rounded font-bold">Cancel</button>
                             </div>
                         </form>
@@ -1684,12 +1684,12 @@ app.get('*', (req, res) => {
         function renderQRScanner(container) {
             container.innerHTML = \`
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="bg-white p-6 rounded-xl border shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-camera mr-2"></i> Scan Resident QR Code</h3>
-                        <div id="reader" class="w-full rounded-lg overflow-hidden border"></div>
+                    <div class="bg-white p-6 rounded-xl border border-emerald-500 shadow-sm">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4"><i class="fa-solid fa-camera mr-2 text-emerald-600"></i> Scan Resident QR Code</h3>
+                        <div id="reader" class="w-full rounded-lg overflow-hidden border border-blue-200"></div>
                     </div>
-                    <div class="bg-white p-6 rounded-xl border shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-box-archive mr-2"></i> Pending Claims for Release</h3>
+                    <div class="bg-white p-6 rounded-xl border border-blue-200 shadow-sm">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4"><i class="fa-solid fa-box-archive mr-2 text-blue-600"></i> Pending Claims for Release</h3>
                         <div id="claimResultArea" class="text-xs text-slate-500">
                             Scan a valid Resident QR code to display documents ready for release.
                         </div>
@@ -1716,7 +1716,7 @@ app.get('*', (req, res) => {
             const container = document.getElementById('claimResultArea');
             if (!data.claims || data.claims.length === 0) {
                 container.innerHTML = \`
-                    <div class="p-4 bg-emerald-50 text-emerald-800 rounded-lg">
+                    <div class="p-4 bg-emerald-50 text-emerald-900 border border-emerald-300 rounded-lg">
                         <p class="font-bold">\${data.resident.first_name} \${data.resident.last_name}</p>
                         <p>ID: \${data.resident.resident_number}</p>
                         <hr class="my-2 border-emerald-200">
@@ -1727,18 +1727,18 @@ app.get('*', (req, res) => {
             }
 
             let list = data.claims.map(c => \`
-                <div class="p-3 border rounded-lg flex justify-between items-center bg-slate-50 mb-2">
+                <div class="p-3 border rounded-lg flex justify-between items-center bg-white mb-2 border-blue-200">
                     <div>
-                        <p class="font-bold text-slate-800">\${c.certificate_type}</p>
+                        <p class="font-bold text-blue-900">\${c.certificate_type}</p>
                         <small class="text-slate-500">Req #: \${c.request_number}</small>
                     </div>
-                    <button type="button" onclick="releaseClaim('\${c.id}')" class="px-3 py-1 bg-blue-600 text-white rounded font-bold hover:bg-blue-700">Mark Released</button>
+                    <button type="button" onclick="releaseClaim('\${c.id}')" class="px-3 py-1 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700">Mark Released</button>
                 </div>
             \`).join('');
 
             container.innerHTML = \`
                 <div class="space-y-3">
-                    <div class="p-3 bg-emerald-100 text-emerald-900 rounded-lg font-bold">
+                    <div class="p-3 bg-blue-900 text-white rounded-lg font-bold">
                         Resident: \${data.resident.first_name} \${data.resident.last_name} (\${data.resident.resident_number})
                     </div>
                     \${list}
@@ -1759,8 +1759,8 @@ app.get('*', (req, res) => {
             const cases = await api('/blotter');
             let rows = cases.map(c => \`
                 <tr class="border-b text-xs">
-                    <td class="py-3 px-2 font-bold font-mono text-rose-600">\${c.case_number}</td>
-                    <td class="py-3 px-2 font-bold">\${c.complainant_name}</td>
+                    <td class="py-3 px-2 font-bold font-mono text-blue-800">\${c.case_number}</td>
+                    <td class="py-3 px-2 font-bold text-slate-800">\${c.complainant_name}</td>
                     <td class="py-3 px-2">\${c.respondent_name}</td>
                     <td class="py-3 px-2">\${c.incident_date} \${c.incident_time || ''}</td>
                     <td class="py-3 px-2">\${c.location || 'N/A'}</td>
@@ -1769,8 +1769,8 @@ app.get('*', (req, res) => {
 
             container.innerHTML = \`
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-white p-6 rounded-xl border shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Record Incident / Blotter</h3>
+                    <div class="bg-white p-6 rounded-xl border border-blue-500 shadow-sm">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4">Record Incident / Blotter</h3>
                         <form id="addBlotterForm" class="space-y-3 text-xs">
                             <div><label class="font-bold">Complainant Name *</label><input type="text" id="blComplainant" required class="w-full p-2 border rounded mt-1"></div>
                             <div><label class="font-bold">Respondent Name *</label><input type="text" id="blRespondent" required class="w-full p-2 border rounded mt-1"></div>
@@ -1781,16 +1781,16 @@ app.get('*', (req, res) => {
                             </div>
                             <div><label class="font-bold">Location *</label><input type="text" id="blLocation" required class="w-full p-2 border rounded mt-1"></div>
                             <div><label class="font-bold">Incident Description *</label><textarea id="blDesc" required class="w-full p-2 border rounded mt-1" rows="3"></textarea></div>
-                            <button type="submit" class="w-full py-2 bg-rose-600 text-white font-bold rounded hover:bg-rose-700">Save Blotter Record</button>
+                            <button type="submit" class="w-full py-2 bg-blue-900 text-white font-bold rounded hover:bg-blue-950">Save Blotter Record</button>
                         </form>
                     </div>
 
-                    <div class="bg-white p-6 rounded-xl border shadow-sm md:col-span-2">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Recorded Incidents</h3>
+                    <div class="bg-white p-6 rounded-xl border border-emerald-500 shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4">Recorded Incidents</h3>
                         <div class="overflow-x-auto">
                             <table class="w-full text-left border-collapse">
                                 <thead>
-                                    <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <tr class="border-b text-blue-900 text-[11px] uppercase font-bold">
                                         <th class="py-2">Case #</th>
                                         <th class="py-2">Complainant</th>
                                         <th class="py-2">Respondent</th>
@@ -1828,21 +1828,21 @@ app.get('*', (req, res) => {
             const appts = await api('/appointments');
             let rows = appts.map(a => \`
                 <tr class="border-b text-xs">
-                    <td class="py-3 px-2 font-mono font-bold text-blue-600">\${a.appointment_number}</td>
+                    <td class="py-3 px-2 font-mono font-bold text-blue-800">\${a.appointment_number}</td>
                     <td class="py-3 px-2 font-bold">\${a.residents ? a.residents.first_name + ' ' + a.residents.last_name : 'N/A'}</td>
-                    <td class="py-3 px-2">\${a.service_type}</td>
+                    <td class="py-3 px-2 font-semibold text-emerald-700">\${a.service_type}</td>
                     <td class="py-3 px-2">\${a.appointment_date} \${a.appointment_time || ''}</td>
                     <td class="py-3 px-2 font-bold">\${a.status}</td>
                 </tr>
             \`).join('');
 
             container.innerHTML = \`
-                <div class="bg-white p-6 rounded-xl border shadow-sm">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">Scheduled Resident Appointments</h3>
+                <div class="bg-white p-6 rounded-xl border border-blue-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-blue-900 mb-4">Scheduled Resident Appointments</h3>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left border-collapse">
                             <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                <tr class="border-b text-blue-900 text-[11px] uppercase font-bold">
                                     <th class="py-2">Appt #</th>
                                     <th class="py-2">Resident</th>
                                     <th class="py-2">Service Requested</th>
@@ -1862,15 +1862,15 @@ app.get('*', (req, res) => {
             let rows = list.map(a => \`
                 <tr class="border-b text-xs">
                     <td class="py-3 px-2 font-bold text-slate-800">\${a.title}</td>
-                    <td class="py-3 px-2">\${a.priority}</td>
+                    <td class="py-3 px-2 font-bold text-emerald-700">\${a.priority}</td>
                     <td class="py-3 px-2">\${new Date(a.created_at).toLocaleDateString()}</td>
                 </tr>
             \`).join('');
 
             container.innerHTML = \`
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-white p-6 rounded-xl border shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Post Announcement</h3>
+                    <div class="bg-white p-6 rounded-xl border border-emerald-500 shadow-sm">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4">Post Announcement</h3>
                         <form id="addAnnounceForm" class="space-y-3 text-xs">
                             <div><label class="font-bold">Title *</label><input type="text" name="title" required class="w-full p-2 border rounded mt-1"></div>
                             <div><label class="font-bold">Priority</label>
@@ -1886,11 +1886,11 @@ app.get('*', (req, res) => {
                         </form>
                     </div>
 
-                    <div class="bg-white p-6 rounded-xl border shadow-sm md:col-span-2">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Published Bulletins</h3>
+                    <div class="bg-white p-6 rounded-xl border border-blue-200 shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-blue-900 mb-4">Published Bulletins</h3>
                         <table class="w-full text-left border-collapse">
                             <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                <tr class="border-b text-blue-900 text-[11px] uppercase font-bold">
                                     <th class="py-2">Title</th>
                                     <th class="py-2">Priority</th>
                                     <th class="py-2">Date Published</th>
@@ -1917,18 +1917,18 @@ app.get('*', (req, res) => {
                 <tr class="border-b text-xs">
                     <td class="py-2 px-2 text-slate-500">\${new Date(l.created_at).toLocaleString()}</td>
                     <td class="py-2 px-2 font-bold text-slate-800">\${l.user_name || 'System'}</td>
-                    <td class="py-2 px-2 font-mono font-semibold text-blue-600">\${l.action}</td>
+                    <td class="py-2 px-2 font-mono font-semibold text-emerald-700">\${l.action}</td>
                     <td class="py-2 px-2 text-slate-600">\${l.details || ''}</td>
                 </tr>
             \`).join('');
 
             container.innerHTML = \`
-                <div class="bg-white p-6 rounded-xl border shadow-sm">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">System Activity Audit Trail</h3>
+                <div class="bg-white p-6 rounded-xl border border-blue-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-blue-900 mb-4">System Activity Audit Trail</h3>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left border-collapse">
                             <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                <tr class="border-b text-blue-900 text-[11px] uppercase font-bold">
                                     <th class="py-2">Timestamp</th>
                                     <th class="py-2">User</th>
                                     <th class="py-2">Action</th>
@@ -1943,7 +1943,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           7. ID BATCH PRINTING (NATIONAL ID STYLE - FULL SPACE UTILIZATION)
+           7. ID BATCH PRINTING (NATIONAL ID STYLE - WITH CUSTOM BG IMAGE)
            ========================================================================== */
         async function renderIDBatchPrint(container) {
             const residents = await api('/residents?status=ACTIVE');
@@ -1969,7 +1969,7 @@ app.get('*', (req, res) => {
                     <div class="grid grid-cols-12 gap-1.5 items-center my-0.5">
                         <!-- Left Resident Photo -->
                         <div class="col-span-4 flex flex-col items-center">
-                            <img src="\${r.photo_url || 'https://via.placeholder.com/100'}" class="w-16 h-16 object-cover rounded border-2 border-emerald-600 shadow-sm">
+                            <img src="\${r.photo_url || 'https://via.placeholder.com/100'}" class="w-16 h-16 object-cover rounded border-2 border-emerald-600 shadow-sm bg-white">
                             <span class="text-[5pt] font-mono font-extrabold text-blue-900 mt-0.5 bg-blue-50 px-1 rounded border border-blue-200">\${r.resident_number || 'BRGY-2026-0000'}</span>
                         </div>
 
@@ -2005,10 +2005,10 @@ app.get('*', (req, res) => {
             \`).join('');
 
             container.innerHTML = \`
-                <div class="mb-4 no-print flex justify-between items-center bg-white p-4 rounded-xl border">
+                <div class="mb-4 no-print flex justify-between items-center bg-white p-4 rounded-xl border border-blue-200">
                     <div>
-                        <h4 class="font-bold text-slate-800">National ID Style Layout Batch Printing</h4>
-                        <p class="text-xs text-slate-500">Prints 8 high-density Resident Cards per Letter-size page.</p>
+                        <h4 class="font-bold text-blue-900">National ID Style Layout Batch Printing</h4>
+                        <p class="text-xs text-slate-500">Prints high-density Resident Cards using custom requested image background.</p>
                     </div>
                     <button type="button" onclick="window.print()" class="px-5 py-2.5 bg-emerald-600 text-white font-bold rounded-lg shadow hover:bg-emerald-700">
                         <i class="fa-solid fa-print mr-2"></i> Print Layout
@@ -2028,33 +2028,31 @@ app.get('*', (req, res) => {
         function renderSystemSettings(container) {
             const s = state.settings;
             container.innerHTML = \`
-                <div class="bg-white p-6 rounded-xl border max-w-2xl shadow-sm">
+                <div class="bg-white p-6 rounded-xl border border-blue-200 max-w-2xl shadow-sm">
                     <form id="settingsForm" class="space-y-4 text-xs">
                         <div>
-                            <label class="font-bold text-slate-700">Barangay Name</label>
+                            <label class="font-bold text-blue-900">Barangay Name</label>
                             <input type="text" name="barangay_name" value="\${s.barangay_name || ''}" class="w-full p-2 border rounded mt-1">
                         </div>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
-                                <label class="font-bold text-slate-700">Municipality</label>
+                                <label class="font-bold text-blue-900">Municipality</label>
                                 <input type="text" name="municipality" value="\${s.municipality || ''}" class="w-full p-2 border rounded mt-1">
                             </div>
                             <div>
-                                <label class="font-bold text-slate-700">Province</label>
+                                <label class="font-bold text-blue-900">Province</label>
                                 <input type="text" name="province" value="\${s.province || ''}" class="w-full p-2 border rounded mt-1">
                             </div>
                         </div>
                         <div>
-                            <label class="font-bold text-slate-700">Barangay Captain</label>
+                            <label class="font-bold text-blue-900">Barangay Captain</label>
                             <input type="text" name="barangay_captain" value="\${s.barangay_captain || ''}" class="w-full p-2 border rounded mt-1">
                         </div>
                         <div>
-                            <label class="font-bold text-slate-700">Upload Official Barangay Logo</label>
+                            <label class="font-bold text-blue-900">Barangay Logo</label>
                             <input type="file" name="barangay_logo" accept="image/*" class="w-full p-2 border rounded mt-1">
                         </div>
-                        <button type="submit" class="py-2.5 px-6 bg-emerald-600 text-white font-bold rounded shadow hover:bg-emerald-700">
-                            Save System Settings
-                        </button>
+                        <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Save System Settings</button>
                     </form>
                 </div>
             \`;
@@ -2064,68 +2062,45 @@ app.get('*', (req, res) => {
                 const formData = new FormData(e.target);
                 const res = await api('/settings', { method: 'POST', body: formData });
                 alert(res.message);
-                location.reload();
+                initApp();
             };
         }
 
         /* ==========================================================================
-           9. RESIDENT PORTAL RENDER (FULL SIDEBAR NAVIGATION & COMPLETE FEATURES)
+           9. RESIDENT PORTAL RENDER
            ========================================================================== */
         function renderResidentPortal() {
             const app = document.getElementById('app');
-            const res = state.resident || {};
+            const res = state.resident;
             const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
-            const logo = state.settings.barangay_logo || '';
 
             app.innerHTML = \`
-                <div class="flex h-screen bg-slate-100 overflow-hidden">
-                    <!-- Resident Sidebar -->
-                    <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col justify-between hidden md:flex border-r border-emerald-800">
-                        <div>
-                            <div class="p-4 border-b border-slate-800 flex items-center gap-3 bg-gradient-to-r from-emerald-900 to-blue-900">
-                                \${logo ? \`<img src="\${logo}" class="w-10 h-10 rounded-full bg-white p-0.5 shadow">\` : \`<i class="fa-solid fa-building-columns text-emerald-400 fa-lg"></i>\`}
-                                <div>
-                                    <h1 class="font-bold text-white text-sm truncate">\${brgyName}</h1>
-                                    <span class="text-[10px] bg-blue-700 text-white px-2 py-0.5 rounded-full uppercase font-bold">RESIDENT PORTAL</span>
-                                </div>
-                            </div>
-                            <nav class="p-3 space-y-1 text-xs">
-                                <button type="button" onclick="setResTab('profile')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-id-card-clip w-4"></i> My Profile & Card</button>
-                                <button type="button" onclick="setResTab('editProfile')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-user-pen w-4"></i> Edit Profile Request</button>
-                                <button type="button" onclick="setResTab('certRequest')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-file-signature w-4"></i> Certificate Request</button>
-                                <button type="button" onclick="setResTab('reqTracking')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-route w-4"></i> Request Tracking</button>
-                                <button type="button" onclick="setResTab('appointment')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-calendar-days w-4"></i> Appointment Booking</button>
-                                <button type="button" onclick="setResTab('myDocuments')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-folder-open w-4"></i> My Documents</button>
-                                <button type="button" onclick="setResTab('complaints')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-circle-exclamation w-4"></i> Complaints & Reports</button>
-                                <button type="button" onclick="setResTab('assistance')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-hand-holding-hand w-4"></i> Assistance Request</button>
-                                <button type="button" onclick="setResTab('announcements')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-bullhorn w-4"></i> Announcements</button>
-                                <button type="button" onclick="setResTab('notifications')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-bell w-4"></i> Notifications</button>
-                                <button type="button" onclick="setResTab('feedback')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-comments w-4"></i> Feedback</button>
-                                <button type="button" onclick="setResTab('emergency')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-phone-volume w-4 text-rose-400"></i> Emergency Contacts</button>
-                                <button type="button" onclick="setResTab('security')" class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-shield-halved w-4"></i> Account Security</button>
-                            </nav>
+                <div class="min-h-screen bg-white text-slate-800 flex flex-col">
+                    <header class="bg-gradient-to-r from-blue-900 to-emerald-700 text-white px-6 py-4 flex justify-between items-center shadow-md">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-house-user text-emerald-400"></i>
+                            <h1 class="font-bold text-lg">\${brgyName} - Resident Portal</h1>
                         </div>
-                        <div class="p-3 border-t border-slate-800">
-                            <button type="button" onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2.5 text-xs text-rose-400 hover:bg-slate-800 rounded-lg font-medium">
-                                <i class="fa-solid fa-arrow-right-from-bracket w-4"></i> Logout
-                            </button>
-                        </div>
-                    </aside>
+                        <button type="button" onclick="logout()" class="text-xs bg-emerald-800 hover:bg-emerald-900 px-3 py-1.5 rounded font-bold">Logout</button>
+                    </header>
 
-                    <!-- Resident Main Content -->
-                    <main class="flex-1 flex flex-col overflow-hidden">
-                        <header class="bg-gradient-to-r from-emerald-800 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
-                            <h2 id="resPageTitle" class="text-xl font-bold">My Profile</h2>
-                            <div class="flex items-center gap-3">
-                                <span class="text-xs font-semibold">\${res.first_name || ''} \${res.last_name || ''}</span>
-                                <img src="\${res.photo_url || 'https://via.placeholder.com/80'}" class="w-8 h-8 rounded-full border-2 border-emerald-400 object-cover">
+                    <div class="max-w-4xl w-full mx-auto p-6 flex-1">
+                        <div class="bg-white border border-blue-200 rounded-xl shadow-sm p-6 mb-6 flex items-center gap-4">
+                            <img src="\${res ? res.photo_url : ''}" class="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 bg-white shadow">
+                            <div>
+                                <h2 class="text-xl font-bold text-blue-900">\${state.user.fullName}</h2>
+                                <p class="text-xs text-emerald-700 font-mono font-bold">ID: \${res ? res.resident_number : 'N/A'}</p>
                             </div>
-                        </header>
-
-                        <div id="resContent" class="flex-1 overflow-y-auto p-6 max-w-5xl">
-                            <!-- Dynamic Content Rendered Here -->
                         </div>
-                    </main>
+
+                        <div class="flex border-b border-blue-200 mb-6 font-bold text-sm">
+                            <button type="button" onclick="setResTab('profile')" id="btnResTabProf" class="py-2 px-4 text-emerald-600 border-b-2 border-emerald-600">My Profile</button>
+                            <button type="button" onclick="setResTab('request')" id="btnResTabReq" class="py-2 px-4 text-slate-400 border-b-2 border-transparent">Request Clearance</button>
+                            <button type="button" onclick="setResTab('appointment')" id="btnResTabAppt" class="py-2 px-4 text-slate-400 border-b-2 border-transparent">Schedule Appointment</button>
+                        </div>
+
+                        <div id="resPortalContent"></div>
+                    </div>
                 </div>
             \`;
 
@@ -2134,181 +2109,78 @@ app.get('*', (req, res) => {
 
         async function setResTab(tab) {
             state.resActiveTab = tab;
-            const content = document.getElementById('resContent');
-            const title = document.getElementById('resPageTitle');
-            const res = state.resident || {};
-            const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
-            const captain = state.settings.barangay_captain || 'BARANGAY CAPTAIN';
-            const logo = state.settings.barangay_logo || '';
+            const container = document.getElementById('resPortalContent');
+            const res = state.resident;
 
             if (tab === 'profile') {
-                title.innerText = 'My Digital Resident Card & Profile';
-                content.innerHTML = \`
-                    <!-- Digital National ID Style Card -->
-                    <div class="max-w-md mx-auto bg-gradient-to-br from-emerald-600 to-blue-700 rounded-2xl p-6 text-white shadow-2xl relative overflow-hidden border-2 border-emerald-300 mb-6">
-                        <div class="flex justify-between items-center border-b border-white/30 pb-2 mb-3">
-                            <div class="flex items-center gap-2">
-                                \${logo ? \`<img src="\${logo}" class="w-8 h-8 rounded-full bg-white p-0.5">\` : \`<i class="fa-solid fa-building-columns text-emerald-200"></i>\`}
-                                <div>
-                                    <h3 class="font-black text-sm uppercase tracking-wide">\${brgyName}</h3>
-                                    <span class="text-[8px] bg-white/20 px-2 py-0.5 rounded-full uppercase font-bold">Resident Card / Brgy ID</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-12 gap-2 items-center">
-                            <div class="col-span-4 text-center">
-                                <img src="\${res.photo_url || 'https://via.placeholder.com/150'}" class="w-20 h-20 object-cover rounded-xl border-2 border-white shadow mx-auto">
-                                <span class="text-[8px] font-mono font-bold bg-white/20 px-1.5 py-0.5 rounded mt-1 block">\${res.resident_number || 'PENDING'}</span>
-                            </div>
-                            <div class="col-span-8 text-xs space-y-1">
-                                <p class="font-extrabold text-base leading-tight">\${res.first_name || ''} \${res.middle_name || ''} \${res.last_name || ''}</p>
-                                <p class="text-emerald-100"><i class="fa-solid fa-cake-candles mr-1"></i> DOB: \${res.date_of_birth || 'N/A'}</p>
-                                <p class="text-emerald-100"><i class="fa-solid fa-venus-mars mr-1"></i> Gender: \${res.gender || 'N/A'}</p>
-                                <p class="text-emerald-100 truncate"><i class="fa-solid fa-location-dot mr-1"></i> Address: \${res.address || 'N/A'}</p>
-                            </div>
-                        </div>
-
-                        <div class="mt-4 pt-3 border-t border-white/30 flex justify-between items-center">
-                            <div class="text-[9px] text-emerald-100">
-                                <span>Status: <strong class="text-white">\${res.status || 'ACTIVE'}</strong></span>
-                            </div>
-                            \${res.qr_code_url ? \`<img src="\${res.qr_code_url}" class="w-12 h-12 bg-white p-1 rounded-lg shadow">\` : ''}
-                        </div>
-                    </div>
-
-                    <!-- Details Table -->
-                    <div class="bg-white p-6 rounded-xl border shadow-sm text-xs space-y-3">
-                        <h4 class="font-bold text-slate-800 text-sm border-b pb-2">Personal Information Details</h4>
+                container.innerHTML = \`
+                    <div class="bg-white border border-blue-200 rounded-xl p-6 shadow-sm space-y-3 text-xs">
+                        <h3 class="font-bold text-sm text-blue-900 border-b pb-2">Resident Record Details</h3>
                         <div class="grid grid-cols-2 gap-4">
-                            <div><span class="text-slate-400">Contact Number:</span> <p class="font-semibold text-slate-800">\${res.contact_number || 'N/A'}</p></div>
-                            <div><span class="text-slate-400">Email Address:</span> <p class="font-semibold text-slate-800">\${res.email || 'N/A'}</p></div>
-                            <div><span class="text-slate-400">Civil Status:</span> <p class="font-semibold text-slate-800">\${res.civil_status || 'Single'}</p></div>
-                            <div><span class="text-slate-400">Voter Status:</span> <p class="font-semibold text-slate-800">\${res.voter_status || 'No'}</p></div>
+                            <div><span class="text-slate-500 font-semibold">Civil Status:</span> <p class="font-bold">\${res ? res.civil_status : 'N/A'}</p></div>
+                            <div><span class="text-slate-500 font-semibold">Voter Status:</span> <p class="font-bold">\${res ? res.voter_status : 'N/A'}</p></div>
+                            <div><span class="text-slate-500 font-semibold">Address:</span> <p class="font-bold">\${res ? res.address : 'N/A'}</p></div>
+                            <div><span class="text-slate-500 font-semibold">Contact:</span> <p class="font-bold">\${res ? res.contact_number : 'N/A'}</p></div>
                         </div>
                     </div>
                 \`;
-            } else if (tab === 'editProfile') {
-                title.innerText = 'Edit Profile & Update Picture Request';
-                content.innerHTML = \`
-                    <div class="bg-white p-6 rounded-xl border shadow-sm max-w-xl">
-                        <form id="updateResProfileForm" class="space-y-4 text-xs">
+            } else if (tab === 'request') {
+                container.innerHTML = \`
+                    <div class="bg-white border border-emerald-500 rounded-xl p-6 shadow-sm max-w-md mx-auto">
+                        <h3 class="font-bold text-sm text-blue-900 mb-4">Request Official Barangay Document</h3>
+                        <form id="resReqForm" class="space-y-3 text-xs">
                             <div>
-                                <label class="font-bold text-slate-700">Update Resident Photo</label>
-                                <input type="file" name="photo" accept="image/*" class="w-full p-2 border rounded mt-1">
-                            </div>
-                            <div>
-                                <label class="font-bold text-slate-700">Contact Number</label>
-                                <input type="text" name="contactNumber" value="\${res.contact_number || ''}" class="w-full p-2 border rounded mt-1">
-                            </div>
-                            <div>
-                                <label class="font-bold text-slate-700">Email Address</label>
-                                <input type="email" name="email" value="\${res.email || ''}" class="w-full p-2 border rounded mt-1">
-                            </div>
-                            <div>
-                                <label class="font-bold text-slate-700">Street Address</label>
-                                <input type="text" name="address" value="\${res.address || ''}" class="w-full p-2 border rounded mt-1">
-                            </div>
-                            <div>
-                                <label class="font-bold text-slate-700">Civil Status</label>
-                                <select name="civilStatus" class="w-full p-2 border rounded mt-1">
-                                    <option value="Single" \${res.civil_status === 'Single' ? 'selected':''}>Single</option>
-                                    <option value="Married" \${res.civil_status === 'Married' ? 'selected':''}>Married</option>
-                                    <option value="Widowed" \${res.civil_status === 'Widowed' ? 'selected':''}>Widowed</option>
-                                </select>
-                            </div>
-                            <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">
-                                Save Profile Changes
-                            </button>
-                        </form>
-                    </div>
-                \`;
-
-                document.getElementById('updateResProfileForm').onsubmit = async (e) => {
-                    e.preventDefault();
-                    const formData = new FormData(e.target);
-                    const response = await api('/resident/profile/update', { method: 'POST', body: formData });
-                    alert(response.message);
-                    if (response.resident) {
-                        state.resident = response.resident;
-                        localStorage.setItem('brms_resident', JSON.stringify(response.resident));
-                    }
-                    setResTab('profile');
-                };
-            } else if (tab === 'certRequest') {
-                title.innerText = 'Request Official Barangay Certificate';
-                content.innerHTML = \`
-                    <div class="bg-white p-6 rounded-xl border shadow-sm max-w-lg">
-                        <form id="resCertReqForm" class="space-y-4 text-xs">
-                            <div>
-                                <label class="font-bold text-slate-700">Select Certificate Type *</label>
-                                <select id="reqCertType" required class="w-full p-2.5 border rounded mt-1">
+                                <label class="font-bold">Document Type *</label>
+                                <select id="certType" required class="w-full p-2 border rounded mt-1">
                                     <option value="Barangay Clearance">Barangay Clearance</option>
                                     <option value="Certificate of Residency">Certificate of Residency</option>
                                     <option value="Certificate of Indigency">Certificate of Indigency</option>
-                                    <option value="Certificate of Good Moral">Certificate of Good Moral</option>
+                                    <option value="First Time Job Seeker">First Time Job Seeker Clearance</option>
                                 </select>
                             </div>
                             <div>
-                                <label class="font-bold text-slate-700">Purpose of Request *</label>
-                                <input type="text" id="reqCertPurpose" placeholder="e.g. Employment / Local Application" required class="w-full p-2.5 border rounded mt-1">
+                                <label class="font-bold">Purpose *</label>
+                                <textarea id="certPurpose" required class="w-full p-2 border rounded mt-1" rows="3"></textarea>
                             </div>
-                            <button type="submit" class="w-full py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">
-                                Submit Certificate Application
-                            </button>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Submit Clearance Request</button>
                         </form>
                     </div>
                 \`;
 
-                document.getElementById('resCertReqForm').onsubmit = async (e) => {
+                document.getElementById('resReqForm').onsubmit = async (e) => {
                     e.preventDefault();
                     const response = await api('/certificates/request', {
                         method: 'POST',
                         body: JSON.stringify({
-                            certificateType: document.getElementById('reqCertType').value,
-                            purpose: document.getElementById('reqCertPurpose').value
+                            certificateType: document.getElementById('certType').value,
+                            purpose: document.getElementById('certPurpose').value
                         })
                     });
                     alert(response.message);
-                    setResTab('reqTracking');
+                    setResTab('profile');
                 };
-            } else if (tab === 'reqTracking') {
-                title.innerText = 'Request Tracking Status';
-                const requests = await api('/certificates/requests');
-                let rows = requests.map(r => \`
-                    <tr class="border-b text-xs">
-                        <td class="py-3 px-2 font-mono font-bold text-slate-700">\${r.request_number}</td>
-                        <td class="py-3 px-2 font-bold text-emerald-700">\${r.certificate_type}</td>
-                        <td class="py-3 px-2">\${r.purpose}</td>
-                        <td class="py-3 px-2 font-bold">\${r.status}</td>
-                    </tr>
-                \`).join('');
-
-                content.innerHTML = \`
-                    <div class="bg-white p-6 rounded-xl border shadow-sm">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                    <th class="py-2">Req #</th>
-                                    <th class="py-2">Type</th>
-                                    <th class="py-2">Purpose</th>
-                                    <th class="py-2">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No active certificate requests.</td></tr>'}</tbody>
-                        </table>
-                    </div>
-                \`;
             } else if (tab === 'appointment') {
-                title.innerText = 'Appointment Booking';
-                content.innerHTML = \`
-                    <div class="bg-white p-6 rounded-xl border shadow-sm max-w-lg">
+                container.innerHTML = \`
+                    <div class="bg-white border border-emerald-500 rounded-xl p-6 shadow-sm max-w-md mx-auto">
+                        <h3 class="font-bold text-sm text-blue-900 mb-4">Schedule Desk Appointment</h3>
                         <form id="resApptForm" class="space-y-3 text-xs">
-                            <div><label class="font-bold">Service Type *</label><input type="text" id="aptService" placeholder="e.g. Consultation / Certificate Claim" required class="w-full p-2 border rounded mt-1"></div>
-                            <div><label class="font-bold">Preferred Date *</label><input type="date" id="aptDate" required class="w-full p-2 border rounded mt-1"></div>
-                            <div><label class="font-bold">Preferred Time *</label><input type="time" id="aptTime" required class="w-full p-2 border rounded mt-1"></div>
-                            <div><label class="font-bold">Purpose / Details</label><textarea id="aptPurpose" class="w-full p-2 border rounded mt-1" rows="3"></textarea></div>
-                            <button type="submit" class="w-full py-2.5 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">Book Appointment</button>
+                            <div>
+                                <label class="font-bold">Service Category *</label>
+                                <select id="aptType" required class="w-full p-2 border rounded mt-1">
+                                    <option value="Barangay Consultation">Barangay Consultation</option>
+                                    <option value="Lupong Tagapamayapa Inquiry">Lupong Tagapamayapa Inquiry</option>
+                                    <option value="Financial Assistance Application">Financial Assistance Application</option>
+                                </select>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div><label class="font-bold">Date *</label><input type="date" id="aptDate" required class="w-full p-2 border rounded mt-1"></div>
+                                <div><label class="font-bold">Time *</label><input type="time" id="aptTime" required class="w-full p-2 border rounded mt-1"></div>
+                            </div>
+                            <div>
+                                <label class="font-bold">Purpose Details *</label>
+                                <textarea id="aptPurpose" required class="w-full p-2 border rounded mt-1" rows="3"></textarea>
+                            </div>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Submit Appointment Schedule</button>
                         </form>
                     </div>
                 \`;
@@ -2318,62 +2190,19 @@ app.get('*', (req, res) => {
                     const response = await api('/appointments', {
                         method: 'POST',
                         body: JSON.stringify({
-                            serviceType: document.getElementById('aptService').value,
+                            serviceType: document.getElementById('aptType').value,
                             appointmentDate: document.getElementById('aptDate').value,
                             appointmentTime: document.getElementById('aptTime').value,
                             purpose: document.getElementById('aptPurpose').value
                         })
                     });
                     alert(response.message);
+                    setResTab('profile');
                 };
-            } else if (tab === 'myDocuments') {
-                title.innerText = 'My Issued Barangay Documents';
-                content.innerHTML = \`<div class="bg-white p-6 rounded-xl border text-xs text-slate-500">No issued digital documents available for instant download yet. Contact staff once requests are marked released.</div>\`;
-            } else if (tab === 'complaints') {
-                title.innerText = 'Complaints & Incident Reports';
-                content.innerHTML = \`<div class="bg-white p-6 rounded-xl border text-xs text-slate-500">Submit confidential community complaints or incident feedback directly to Barangay Administration.</div>\`;
-            } else if (tab === 'assistance') {
-                title.innerText = 'Assistance Request (Financial / Medical)';
-                content.innerHTML = \`<div class="bg-white p-6 rounded-xl border text-xs text-slate-500">Barangay Social Welfare Assistance portal. Apply for educational, medical, or emergency relief.</div>\`;
-            } else if (tab === 'announcements') {
-                title.innerText = 'Barangay Announcements Bulletin';
-                const ann = await api('/announcements');
-                let list = ann.map(a => \`
-                    <div class="bg-white p-4 rounded-xl border shadow-sm space-y-2">
-                        <div class="flex justify-between items-center">
-                            <h4 class="font-bold text-slate-800 text-sm">\${a.title}</h4>
-                            <span class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">\${a.priority}</span>
-                        </div>
-                        <p class="text-xs text-slate-600 leading-relaxed">\${a.content}</p>
-                    </div>
-                \`).join('');
-                content.innerHTML = \`<div class="space-y-4">\${list || '<p class="text-xs text-slate-400">No current announcements.</p>'}</div>\`;
-            } else if (tab === 'notifications') {
-                title.innerText = 'System Notifications';
-                content.innerHTML = \`<div class="bg-white p-6 rounded-xl border text-xs text-slate-500">All application status changes and release notifications will appear here.</div>\`;
-            } else if (tab === 'feedback') {
-                title.innerText = 'Barangay Feedback & Suggestions';
-                content.innerHTML = \`<div class="bg-white p-6 rounded-xl border text-xs text-slate-500">Help improve community services by leaving constructive feedback.</div>\`;
-            } else if (tab === 'emergency') {
-                title.innerText = 'Emergency Hotlines & Contacts';
-                content.innerHTML = \`
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        <div class="bg-rose-50 border border-rose-200 p-4 rounded-xl text-rose-900">
-                            <h4 class="font-bold text-sm"><i class="fa-solid fa-truck-medical mr-2"></i> Barangay Disaster Risk Reduction Office</h4>
-                            <p class="text-base font-extrabold mt-1">911 / (02) 8999-0000</p>
-                        </div>
-                        <div class="bg-blue-50 border border-blue-200 p-4 rounded-xl text-blue-900">
-                            <h4 class="font-bold text-sm"><i class="fa-solid fa-shield-cat mr-2"></i> Local Police Desk</h4>
-                            <p class="text-base font-extrabold mt-1">(02) 8888-1122</p>
-                        </div>
-                    </div>
-                \`;
-            } else if (tab === 'security') {
-                title.innerText = 'Account Security';
-                content.innerHTML = \`<div class="bg-white p-6 rounded-xl border text-xs text-slate-500">Update account password and manage authorized login sessions.</div>\`;
             }
         }
 
+        // Global Logout Function
         function logout() {
             localStorage.clear();
             state.token = null;
@@ -2382,7 +2211,7 @@ app.get('*', (req, res) => {
             renderLogin();
         }
 
-        // Run application
+        // App Entrypoint Launch
         window.onload = initApp;
     </script>
 </body>
@@ -2394,8 +2223,8 @@ app.get('*', (req, res) => {
    SERVER INITIALIZATION
    ========================================================================== */
 app.listen(PORT, () => {
-    console.log(`===================================================`);
-    console.log(`Barangay Resident Management System running on PORT ${PORT}`);
-    console.log(`Ready for deployment on Render Web Services.`);
-    console.log(`===================================================`);
+    console.log(`===========================================================`);
+    console.log(`BRMS System running actively on http://localhost:${PORT}`);
+    console.log(`System color scheme tuned to Blue, Green, & White.`);
+    console.log(`===========================================================`);
 });
