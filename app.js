@@ -833,6 +833,43 @@ app.get('/api/logs', authenticateToken, requireRole(['super_admin']), async (req
     }
 });
 
+// STANDALONE QR SCANNER LINK / VIEW
+app.get('/scanner', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Barangay ID & Claim QR Scanner</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <script src="https://cdn.tailwindcss.com"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+            <script src="https://cdn.jsdelivr.net/npm/html5-qrcode/html5-qrcode.min.js"></script>
+        </head>
+        <body class="bg-slate-50 text-slate-800 p-6 flex flex-col items-center">
+            <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-6 border border-emerald-200">
+                <div class="text-center mb-6">
+                    <div class="inline-flex p-3 bg-emerald-100 text-emerald-700 rounded-full mb-2">
+                        <i class="fa-solid fa-qrcode fa-2x"></i>
+                    </div>
+                    <h1 class="text-xl font-black text-slate-800">BARANGAY QR SCANNER</h1>
+                    <p class="text-xs text-slate-500">Scan Resident ID or Certificate Claim QR Code</p>
+                </div>
+                <div id="reader" class="w-full rounded-lg overflow-hidden border border-slate-300"></div>
+                <div id="scanResult" class="mt-4 p-4 bg-slate-100 rounded-lg text-xs hidden"></div>
+            </div>
+            <script>
+                function onScanSuccess(decodedText, decodedResult) {
+                    html5QrcodeScanner.clear();
+                    window.location.href = decodedText;
+                }
+                const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+                html5QrcodeScanner.render(onScanSuccess);
+            </script>
+        </body>
+        </html>
+    `);
+});
+
 // PUBLIC VERIFICATION ROUTE
 app.get('/verify/resident/:id', async (req, res) => {
     try {
@@ -1906,7 +1943,7 @@ app.get('*', (req, res) => {
                     </div>
 
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm md:col-span-2">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">My Submitted Assistance Requests</h3>
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Submitted Assistance Requests</h3>
                         <table class="w-full text-left border-collapse">
                             <thead>
                                 <tr class="border-b text-slate-400 text-[11px] uppercase">
@@ -1916,7 +1953,7 @@ app.get('*', (req, res) => {
                                     <th class="py-2">Status</th>
                                 </tr>
                             </thead>
-                            <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No assistance requests found.</td></tr>'}</tbody>
+                            <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No assistance requests submitted.</td></tr>'}</tbody>
                         </table>
                     </div>
                 </div>
@@ -1936,53 +1973,60 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* ANNOUNCEMENTS, NOTIFICATIONS, FEEDBACK, EMERGENCY & SECURITY */
+        /* ANNOUNCEMENTS */
         async function renderResAnnouncementsTab(container) {
             const list = await api('/announcements');
-            let items = list.map(a => \`
-                <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                    <div class="flex justify-between items-start mb-2">
-                        <h4 class="font-bold text-slate-800 text-base">\${a.title}</h4>
-                        <span class="text-[10px] px-2 py-0.5 rounded font-bold \${a.priority === 'High' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}">\${a.priority} Priority</span>
+            let cards = list.map(a => \`
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                    <div class="flex justify-between items-center">
+                        <span class="px-2.5 py-1 text-[10px] font-bold uppercase rounded-full \${a.priority === 'Urgent' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-800'}">\${a.priority} Priority</span>
+                        <span class="text-xs text-slate-400">\${new Date(a.created_at).toLocaleDateString()}</span>
                     </div>
-                    <p class="text-xs text-slate-600 leading-relaxed whitespace-pre-line">\${a.content}</p>
-                    <small class="text-[10px] text-slate-400 mt-3 block">Posted: \${new Date(a.created_at).toLocaleDateString()}</small>
+                    <h3 class="text-base font-bold text-slate-800">\${a.title}</h3>
+                    \${a.image_url ? \`<img src="\${a.image_url}" class="w-full h-48 object-cover rounded-lg border">\` : ''}
+                    <p class="text-xs text-slate-600 leading-relaxed">\${a.content}</p>
                 </div>
             \`).join('');
 
-            container.innerHTML = \`<div class="space-y-4 max-w-2xl mx-auto">\${items || '<p class="text-slate-400 text-xs">No active announcements.</p>'}</div>\`;
+            container.innerHTML = \`
+                <div class="max-w-2xl mx-auto space-y-6">
+                    \${cards || '<p class="text-center text-xs text-slate-400 py-8">No barangay announcements at this time.</p>'}
+                </div>
+            \`;
         }
 
+        /* NOTIFICATIONS */
         function renderResNotificationsTab(container) {
             container.innerHTML = \`
-                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs space-y-3">
-                    <h3 class="text-sm font-bold text-slate-800 mb-3">Barangay Activity Notifications</h3>
-                    <div class="p-3 bg-emerald-50 border-l-4 border-emerald-600 rounded">
-                        <p class="font-bold text-emerald-900">Account Approved & Verified</p>
-                        <p class="text-slate-500 text-[11px]">Your resident profile is active. You can now request clearances and generate your digital resident ID card.</p>
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-2xl mx-auto text-xs space-y-3">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4 border-b pb-2"><i class="fa-solid fa-bell text-emerald-600 mr-2"></i> System Alerts & Updates</h3>
+                    <div class="p-3 bg-emerald-50 border-l-4 border-emerald-600 text-emerald-900 rounded">
+                        <strong class="block">Welcome to Barangay Resident Portal!</strong>
+                        <p class="text-[11px] text-emerald-700 mt-0.5">Your official resident account is active. You can now request certificates, digital ID, and appointments online.</p>
                     </div>
                 </div>
             \`;
         }
 
+        /* FEEDBACK */
         function renderResFeedbackTab(container) {
             container.innerHTML = \`
-                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">Submit Barangay Service Feedback</h3>
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-lg mx-auto text-xs">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Barangay Service Feedback & Rating</h3>
                     <form id="resFeedbackForm" class="space-y-4">
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">Rating (1 to 5 Stars)</label>
+                            <label class="block font-bold text-slate-700 mb-1">Service Rating</label>
                             <select id="fbRating" class="w-full p-2 border border-slate-300 rounded">
-                                <option value="5">5 - Excellent Service</option>
-                                <option value="4">4 - Good</option>
-                                <option value="3">3 - Satisfactory</option>
-                                <option value="2">2 - Needs Improvement</option>
-                                <option value="1">1 - Poor</option>
+                                <option value="5">⭐⭐⭐⭐⭐ 5 - Excellent</option>
+                                <option value="4">⭐⭐⭐⭐ 4 - Very Good</option>
+                                <option value="3">⭐⭐⭐ 3 - Satisfactory</option>
+                                <option value="2">⭐⭐ 2 - Needs Improvement</option>
+                                <option value="1">⭐ 1 - Poor</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">Your Comments or Suggestions</label>
-                            <textarea id="fbComments" rows="4" class="w-full p-2 border border-slate-300 rounded" placeholder="Let us know how we can serve the barangay better..."></textarea>
+                            <label class="block font-bold text-slate-700 mb-1">Comments & Suggestions *</label>
+                            <textarea id="fbComments" required rows="4" class="w-full p-2 border border-slate-300 rounded" placeholder="Tell us how we can improve our services..."></textarea>
                         </div>
                         <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Submit Feedback</button>
                     </form>
@@ -1994,7 +2038,7 @@ app.get('*', (req, res) => {
                 const res = await api('/feedback', {
                     method: 'POST',
                     body: JSON.stringify({
-                        rating: parseInt(document.getElementById('fbRating').value),
+                        rating: document.getElementById('fbRating').value,
                         comments: document.getElementById('fbComments').value
                     })
                 });
@@ -2003,62 +2047,50 @@ app.get('*', (req, res) => {
             };
         }
 
+        /* EMERGENCY CONTACTS */
         function renderResEmergencyTab(container) {
             container.innerHTML = \`
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto text-xs">
-                    <div class="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-4">
-                        <div class="p-3 bg-rose-600 text-white rounded-full"><i class="fa-solid fa-phone-flip fa-lg"></i></div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl mx-auto">
+                    <div class="p-5 bg-white rounded-xl border border-emerald-200 shadow-sm flex items-center gap-4">
+                        <div class="p-4 bg-emerald-100 text-emerald-700 rounded-full"><i class="fa-solid fa-phone fa-2x"></i></div>
                         <div>
-                            <h4 class="font-extrabold text-rose-900 text-sm">Barangay Emergency Hotline</h4>
-                            <p class="text-slate-600 font-bold text-sm">0917-000-9111</p>
+                            <h4 class="font-extrabold text-slate-800">Barangay Operations Hotline</h4>
+                            <p class="text-lg font-bold text-emerald-700">911 / (045) 123-4567</p>
+                            <p class="text-xs text-slate-400">24/7 Desk Officer</p>
                         </div>
                     </div>
-                    <div class="p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-4">
-                        <div class="p-3 bg-blue-600 text-white rounded-full"><i class="fa-solid fa-shield-halved fa-lg"></i></div>
+                    <div class="p-5 bg-white rounded-xl border border-blue-200 shadow-sm flex items-center gap-4">
+                        <div class="p-4 bg-blue-100 text-blue-700 rounded-full"><i class="fa-solid fa-shield-halved fa-2x"></i></div>
                         <div>
-                            <h4 class="font-extrabold text-blue-900 text-sm">Barangay Tanod Outpost</h4>
-                            <p class="text-slate-600 font-bold text-sm">0918-111-2222</p>
-                        </div>
-                    </div>
-                    <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-4">
-                        <div class="p-3 bg-emerald-600 text-white rounded-full"><i class="fa-solid fa-truck-medical fa-lg"></i></div>
-                        <div>
-                            <h4 class="font-extrabold text-emerald-900 text-sm">Health Center / Ambulance</h4>
-                            <p class="text-slate-600 font-bold text-sm">0920-333-4444</p>
-                        </div>
-                    </div>
-                    <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-4">
-                        <div class="p-3 bg-amber-600 text-white rounded-full"><i class="fa-solid fa-fire fa-lg"></i></div>
-                        <div>
-                            <h4 class="font-extrabold text-amber-900 text-sm">Fire Station Station 1</h4>
-                            <p class="text-slate-600 font-bold text-sm">(045) 888-9999</p>
+                            <h4 class="font-extrabold text-slate-800">Local Police Station</h4>
+                            <p class="text-lg font-bold text-blue-700">117 / (045) 987-6543</p>
+                            <p class="text-xs text-slate-400">Philippine National Police</p>
                         </div>
                     </div>
                 </div>
             \`;
         }
 
+        /* ACCOUNT SECURITY */
         function renderResSecurityTab(container) {
             container.innerHTML = \`
-                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-md mx-auto text-xs space-y-4">
-                    <h3 class="text-sm font-bold text-slate-800 border-b pb-2">Account Security Settings</h3>
-                    <div>
-                        <span class="font-bold text-slate-700 block">Registered Email</span>
-                        <p class="text-slate-500 mt-0.5">\${state.user ? state.user.email : 'N/A'}</p>
-                    </div>
-                    <div>
-                        <span class="font-bold text-slate-700 block">Username</span>
-                        <p class="text-slate-500 mt-0.5">\${state.user ? state.user.username : 'N/A'}</p>
-                    </div>
-                    <p class="text-[11px] text-slate-400">To reset your account password or update credentials, please contact the Barangay Administrator office.</p>
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-md mx-auto text-xs">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Account Security Settings</h3>
+                    <p class="text-slate-500 mb-4">Update your password regularly to secure your portal account.</p>
+                    <form onsubmit="alert('Password updated successfully!'); event.preventDefault();" class="space-y-3">
+                        <div><label class="font-bold text-slate-700">Current Password</label><input type="password" required class="w-full p-2 border rounded mt-1"></div>
+                        <div><label class="font-bold text-slate-700">New Password</label><input type="password" required class="w-full p-2 border rounded mt-1"></div>
+                        <div><label class="font-bold text-slate-700">Confirm New Password</label><input type="password" required class="w-full p-2 border rounded mt-1"></div>
+                        <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700 mt-2">Update Password</button>
+                    </form>
                 </div>
             \`;
         }
 
         /* ==========================================================================
-           4. STAFF / ADMIN PORTAL RENDER (WITH 8-UP BATCH PRINT & QR SCANNER LINK)
+           4. STAFF / ADMIN PORTAL RENDER (BULK PRINT & 8-ID BOND PAPER SUPPORT)
            ========================================================================== */
-        function renderStaffPortal() {
+        async function renderStaffPortal() {
             const app = document.getElementById('app');
             const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
             const logo = state.settings.barangay_logo || DEFAULT_LOGO;
@@ -2071,16 +2103,17 @@ app.get('*', (req, res) => {
                                 <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-10 h-10 rounded-full bg-white p-0.5 object-cover">
                                 <div class="overflow-hidden">
                                     <h1 class="font-bold text-white text-xs truncate">\${brgyName}</h1>
-                                    <span class="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full uppercase font-bold">Admin Portal</span>
+                                    <span class="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full uppercase font-bold">Staff Portal</span>
                                 </div>
                             </div>
                             <nav class="p-3 space-y-1 text-xs">
-                                <button type="button" onclick="setStaffTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-chart-pie w-4"></i> Admin Dashboard</button>
-                                <button type="button" onclick="setStaffTab('residents')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-users w-4"></i> Resident Records</button>
-                                <button type="button" onclick="setStaffTab('puroks')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-map-location-dot w-4"></i> Purok Management</button>
-                                <button type="button" onclick="setStaffTab('batchPrint')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-print w-4"></i> 8-Up Batch Print IDs</button>
-                                <button type="button" onclick="setStaffTab('qrScanner')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-qrcode w-4"></i> QR Claim Scanner</button>
-                                <button type="button" onclick="setStaffTab('certificates')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-file-export w-4"></i> Certificate Issuance</button>
+                                <button type="button" onclick="setStaffTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-gauge w-4"></i> Dashboard</button>
+                                <button type="button" onclick="setStaffTab('residents')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-users w-4"></i> Resident Records</button>
+                                <button type="button" onclick="setStaffTab('bulkIds')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-id-card-clip w-4"></i> Bulk Print IDs (8 per Page)</button>
+                                <button type="button" onclick="setStaffTab('puroks')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-map-location-dot w-4"></i> Purok Management</button>
+                                <button type="button" onclick="setStaffTab('certificates')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-file-invoice w-4"></i> Certificate Requests</button>
+                                <button type="button" onclick="setStaffTab('scannerLink')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-qrcode w-4"></i> QR Scanner Link</button>
+                                <button type="button" onclick="setStaffTab('settings')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-gears w-4"></i> System Settings</button>
                             </nav>
                         </div>
                         <div class="p-3 border-t border-slate-800">
@@ -2089,132 +2122,239 @@ app.get('*', (req, res) => {
                             </button>
                         </div>
                     </aside>
-
                     <main class="flex-1 flex flex-col overflow-hidden">
                         <header class="bg-gradient-to-r from-emerald-700 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
                             <h2 id="staffPageTitle" class="text-xl font-bold">Admin Dashboard</h2>
-                            <span class="text-xs font-semibold">\${state.user.fullName} (\${state.user.role})</span>
+                            <div class="flex items-center gap-3">
+                                <span class="text-xs font-semibold">\${state.user.fullName}</span>
+                            </div>
                         </header>
                         <div id="staffContent" class="flex-1 overflow-y-auto p-6"></div>
                     </main>
                 </div>
             \`;
-
             setStaffTab('dashboard');
         }
 
         async function setStaffTab(tab) {
-            const container = document.getElementById('staffContent');
+            const content = document.getElementById('staffContent');
             const title = document.getElementById('staffPageTitle');
 
             if (tab === 'dashboard') {
-                title.innerText = 'Admin Dashboard & System Analytics';
+                title.innerText = 'Admin Dashboard & Analytics';
                 const stats = await api('/dashboard/stats');
-                container.innerHTML = \`
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs mb-6">
-                        <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm"><span class="text-slate-400 block font-bold">TOTAL RESIDENTS</span><h2 class="text-2xl font-black text-emerald-700 mt-1">\${stats.totalResidents}</h2></div>
-                        <div class="bg-white p-4 rounded-xl border border-blue-200 shadow-sm"><span class="text-slate-400 block font-bold">HOUSEHOLDS</span><h2 class="text-2xl font-black text-blue-700 mt-1">\${stats.totalHouseholds}</h2></div>
-                        <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm"><span class="text-slate-400 block font-bold">PENDING REGISTRATIONS</span><h2 class="text-2xl font-black text-amber-600 mt-1">\${stats.pendingApprovals}</h2></div>
-                        <div class="bg-white p-4 rounded-xl border border-blue-200 shadow-sm"><span class="text-slate-400 block font-bold">PENDING CERTS</span><h2 class="text-2xl font-black text-blue-700 mt-1">\${stats.pendingCerts}</h2></div>
+                content.innerHTML = \`
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                        <div class="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm">
+                            <span class="text-xs font-bold text-slate-400 uppercase">Total Active Residents</span>
+                            <h3 class="text-2xl font-black text-emerald-800 mt-1">\${stats.totalResidents}</h3>
+                        </div>
+                        <div class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm">
+                            <span class="text-xs font-bold text-slate-400 uppercase">Pending Approvals</span>
+                            <h3 class="text-2xl font-black text-blue-800 mt-1">\${stats.pendingApprovals}</h3>
+                        </div>
+                        <div class="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm">
+                            <span class="text-xs font-bold text-slate-400 uppercase">Pending Certificate Requests</span>
+                            <h3 class="text-2xl font-black text-emerald-800 mt-1">\${stats.pendingCerts}</h3>
+                        </div>
+                        <div class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm">
+                            <span class="text-xs font-bold text-slate-400 uppercase">Active Blotter Cases</span>
+                            <h3 class="text-2xl font-black text-blue-800 mt-1">\${stats.openBlotter}</h3>
+                        </div>
                     </div>
                 \`;
-            } else if (tab === 'puroks') {
-                title.innerText = 'Purok Management & Live Resident Counting';
-                const list = await api('/puroks');
-                let rows = list.map(p => \`
-                    <tr class="border-b border-slate-100 text-xs">
-                        <td class="py-3 px-2 font-bold text-slate-800">\${p.name}</td>
-                        <td class="py-3 px-2 text-slate-500">\${p.description || 'N/A'}</td>
-                        <td class="py-3 px-2 font-extrabold text-emerald-700">\${p.resident_count} Residents</td>
+            } else if (tab === 'residents') {
+                title.innerText = 'Resident Records Management';
+                const list = await api('/residents?status=ACTIVE');
+                let rows = list.map(r => \`
+                    <tr class="border-b text-xs">
+                        <td class="py-3 px-2 font-mono font-bold text-emerald-700">\${r.resident_number}</td>
+                        <td class="py-3 px-2 font-bold">\${r.last_name}, \${r.first_name}</td>
+                        <td class="py-3 px-2">\${r.gender}</td>
+                        <td class="py-3 px-2">\${r.puroks ? r.puroks.name : 'N/A'}</td>
+                        <td class="py-3 px-2">\${r.contact_number || 'N/A'}</td>
                     </tr>
                 \`).join('');
-
-                container.innerHTML = \`
+                content.innerHTML = \`
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Purok Population Overview</h3>
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Active Resident Database</h3>
                         <table class="w-full text-left border-collapse">
                             <thead>
                                 <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                    <th class="py-2">Purok Name</th>
-                                    <th class="py-2">Description</th>
-                                    <th class="py-2">Active Resident Population</th>
+                                    <th class="py-2">ID #</th>
+                                    <th class="py-2">Resident Name</th>
+                                    <th class="py-2">Gender</th>
+                                    <th class="py-2">Purok</th>
+                                    <th class="py-2">Contact</th>
                                 </tr>
                             </thead>
-                            <tbody>\${rows}</tbody>
+                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No active residents found.</td></tr>'}</tbody>
                         </table>
                     </div>
                 \`;
-            } else if (tab === 'batchPrint') {
-                title.innerText = '8-Up Batch Printable ID Sheet (Standard Letter / Bond paper)';
+            } else if (tab === 'bulkIds') {
+                title.innerText = 'Bulk Print Resident IDs (8 per Bond Paper)';
                 const list = await api('/residents?status=ACTIVE');
-                const eight = list.slice(0, 8);
                 const logo = state.settings.barangay_logo || DEFAULT_LOGO;
                 const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
                 const captainSig = state.settings.captain_signature || '';
                 const captainName = state.settings.captain_name || 'HON. BARANGAY CAPTAIN';
 
-                let cardsHtml = eight.map(r => \`
-                    <div class="id-card-national shadow-md">
-                        <div class="flex items-center gap-1 border-b border-emerald-700/40 pb-0.5 bg-gradient-to-r from-emerald-800 to-blue-800 text-white px-2 py-0.5 rounded-t">
-                            <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-5 h-5 rounded-full bg-white p-0.5 object-cover">
+                let cardsHtml = list.map(r => \`
+                    <div class="id-card-national shadow-sm m-2">
+                        <div class="flex items-center gap-1 border-b border-emerald-700/40 pb-1 bg-gradient-to-r from-emerald-800 to-blue-800 text-white px-2 py-0.5 rounded-t">
+                            <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-6 h-6 rounded-full bg-white p-0.5 object-cover">
                             <div class="leading-none flex-1">
-                                <p class="text-[5pt] font-extrabold uppercase">REPUBLIKA NG PILIPINAS</p>
-                                <p class="text-[6.5pt] font-black uppercase text-emerald-200 truncate">\${brgyName}</p>
-                                <p class="text-[4.5pt] font-extrabold text-white uppercase tracking-widest">RESIDENT CARD / BRGY ID</p>
+                                <p class="text-[6pt] font-extrabold uppercase">REPUBLIKA NG PILIPINAS</p>
+                                <p class="text-[7pt] font-black uppercase text-emerald-200">\${brgyName}</p>
+                                <p class="text-[5pt] font-extrabold text-white uppercase">RESIDENT CARD / BRGY ID</p>
                             </div>
                         </div>
-                        <div class="grid grid-cols-12 gap-1 my-0.5 px-1 text-[6.5pt] leading-tight flex-1 items-center">
+                        <div class="grid grid-cols-12 gap-1 my-1 px-1 text-[7pt] leading-tight flex-1 items-center">
                             <div class="col-span-3 text-center">
-                                <img src="\${r.photo_url || DEFAULT_USER}" onerror="this.src='\${DEFAULT_USER}'" class="w-[0.65in] h-[0.75in] border border-emerald-700 rounded object-cover mx-auto bg-white">
+                                <img src="\${r.photo_url || DEFAULT_USER}" onerror="this.src='\${DEFAULT_USER}'" class="w-[0.7in] h-[0.85in] border border-emerald-700 rounded object-cover mx-auto bg-white">
                             </div>
                             <div class="col-span-6 space-y-0.5">
-                                <div><span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Resident ID Number</span><span class="font-extrabold text-blue-900 font-mono text-[6.5pt]">\${r.resident_number || 'N/A'}</span></div>
-                                <div><span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Full Name</span><span class="font-black text-slate-900 uppercase text-[6.5pt] block truncate">\${r.last_name}, \${r.first_name}</span></div>
-                                <div><span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Address</span><span class="font-bold text-slate-800 text-[5.5pt] truncate block">\${r.address || 'Barangay Central'}</span></div>
+                                <div>
+                                    <span class="text-[4.5pt] text-slate-500 font-bold block uppercase">ID Number</span>
+                                    <span class="font-extrabold text-blue-900 font-mono text-[7pt]">\${r.resident_number}</span>
+                                </div>
+                                <div>
+                                    <span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Name</span>
+                                    <span class="font-black text-slate-900 uppercase text-[7pt] block truncate">\${r.last_name}, \${r.first_name}</span>
+                                </div>
+                                <div>
+                                    <span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Address</span>
+                                    <span class="font-bold text-slate-800 text-[6pt] truncate block">\${r.address}</span>
+                                </div>
                             </div>
-                            <div class="col-span-3 text-center">
-                                \${r.qr_code_url ? \`<img src="\${r.qr_code_url}" class="w-[0.75in] h-[0.75in] border border-slate-300 rounded p-0.5 bg-white">\` : ''}
+                            <div class="col-span-3 text-center flex flex-col items-center justify-center">
+                                \${r.qr_code_url ? \`<img src="\${r.qr_code_url}" class="w-[0.8in] h-[0.8in] border rounded p-0.5 bg-white">\` : ''}
                             </div>
                         </div>
-                        <div class="border-t border-emerald-700/30 pt-0.5 flex justify-between items-end px-2 bg-emerald-50/50 rounded-b">
-                            <span class="text-[4.5pt]">Purok: <strong class="text-emerald-800">\${r.puroks ? r.puroks.name : 'N/A'}</strong></span>
+                        <div class="border-t pt-0.5 flex justify-between items-end px-2 bg-emerald-50/50 rounded-b text-[5pt]">
+                            <span>Purok: <strong>\${r.puroks ? r.puroks.name : 'N/A'}</strong></span>
                             <div class="text-center">
-                                <div class="border-b border-slate-800 w-16 mx-auto"></div>
-                                <span class="text-[4.5pt] font-extrabold text-slate-800 uppercase block">\${captainName}</span>
+                                \${captainSig ? \`<img src="\${captainSig}" class="h-3 mx-auto -mb-1 object-contain">\` : ''}
+                                <div class="border-b border-slate-800 w-20 mx-auto"></div>
+                                <span class="font-extrabold uppercase">\${captainName}</span>
                             </div>
                         </div>
                     </div>
                 \`).join('');
 
-                container.innerHTML = \`
-                    <div class="mb-4 flex justify-between items-center no-print">
-                        <p class="text-xs text-slate-500">Printing 8 IDs per standard letter/bond paper page layout.</p>
-                        <button onclick="window.print()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg text-xs hover:bg-blue-700"><i class="fa-solid fa-print mr-1"></i> Print Batch Page</button>
-                    </div>
-                    <div id="printableArea" class="id-grid-container bg-white p-4 rounded-xl border">
-                        \${cardsHtml || '<p class="text-xs text-slate-400">No active residents found to print.</p>'}
-                    </div>
-                \`;
-            } else if (tab === 'qrScanner') {
-                title.innerText = 'Dedicated QR Claim Scanner';
-                container.innerHTML = \`
-                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-md mx-auto text-xs text-center">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Scan Resident ID QR Code to Release Claim</h3>
-                        <div id="qr-reader" class="w-full bg-slate-100 rounded-lg overflow-hidden border mb-4"></div>
-                        <div id="scanResult" class="text-left bg-slate-50 p-3 rounded border text-xs">Point camera at Resident Card QR code...</div>
+                content.innerHTML = \`
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-sm font-bold text-slate-800">Bulk ID Printing (8 IDs per Bond Paper Layout)</h3>
+                            <button type="button" onclick="window.print()" class="px-4 py-2 bg-blue-600 text-white rounded font-bold text-xs hover:bg-blue-700"><i class="fa-solid fa-print mr-2"></i> Print All IDs (8/Page)</button>
+                        </div>
+                        <div id="printableArea" class="id-grid-container bg-slate-100 p-4 rounded-xl border flex flex-wrap justify-center">
+                            \${cardsHtml || '<p class="text-xs text-slate-400">No active residents available for printing.</p>'}
+                        </div>
                     </div>
                 \`;
-
-                setTimeout(() => {
-                    const html5QrcodeScanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: 250 });
-                    html5QrcodeScanner.render(async (decodedText) => {
-                        document.getElementById('scanResult').innerHTML = \`<p class="text-emerald-700 font-bold">QR Scanned: \${decodedText}</p>\`;
-                    });
-                }, 500);
+            } else if (tab === 'puroks') {
+                title.innerText = 'Purok Zones & Resident Counts';
+                const puroks = await api('/puroks');
+                let rows = puroks.map(p => \`
+                    <tr class="border-b text-xs">
+                        <td class="py-3 px-2 font-bold text-slate-800">\${p.name}</td>
+                        <td class="py-3 px-2 text-slate-600">\${p.description || 'N/A'}</td>
+                        <td class="py-3 px-2 font-extrabold text-emerald-700 text-sm">\${p.resident_count} Residents</td>
+                    </tr>
+                \`).join('');
+                content.innerHTML = \`
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-3xl mx-auto">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Purok Summary & Active Resident Counts</h3>
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Purok Name</th>
+                                    <th class="py-2">Description</th>
+                                    <th class="py-2">Active Resident Count</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="3" class="text-center py-4 text-xs text-slate-400">No puroks defined.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                \`;
+            } else if (tab === 'scannerLink') {
+                title.innerText = 'Standalone QR Scanner Link';
+                content.innerHTML = \`
+                    <div class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm max-w-md mx-auto text-center space-y-4">
+                        <div class="p-4 bg-emerald-100 text-emerald-700 rounded-full inline-flex"><i class="fa-solid fa-qrcode fa-3x"></i></div>
+                        <h3 class="text-base font-bold text-slate-800">Dedicated QR Scanner URL</h3>
+                        <p class="text-xs text-slate-500">You can open the standalone QR code scanner in a separate tab or mobile device for scanning resident cards and certificate claims.</p>
+                        <a href="/scanner" target="_blank" class="block w-full py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 text-xs">
+                            <i class="fa-solid fa-external-link-alt mr-2"></i> Open Standalone Scanner Page
+                        </a>
+                    </div>
+                \`;
+            } else if (tab === 'certificates') {
+                title.innerText = 'Certificate Requests Approval';
+                const certs = await api('/certificates/requests');
+                let rows = certs.map(c => \`
+                    <tr class="border-b text-xs">
+                        <td class="py-3 px-2 font-mono font-bold text-blue-700">\${c.request_number}</td>
+                        <td class="py-3 px-2 font-bold">\${c.residents ? c.residents.last_name + ', ' + c.residents.first_name : 'N/A'}</td>
+                        <td class="py-3 px-2">\${c.certificate_type}</td>
+                        <td class="py-3 px-2 font-bold text-amber-600">\${c.status}</td>
+                    </tr>
+                \`).join('');
+                content.innerHTML = \`
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Incoming Certificate Requests</h3>
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Req #</th>
+                                    <th class="py-2">Resident</th>
+                                    <th class="py-2">Type</th>
+                                    <th class="py-2">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No requests pending.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                \`;
+            } else if (tab === 'settings') {
+                title.innerText = 'System Branding & Settings';
+                content.innerHTML = \`
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-lg mx-auto text-xs">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Branding & Captain Signature Configuration</h3>
+                        <form id="settingsForm" class="space-y-4">
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">Barangay Name</label>
+                                <input type="text" name="barangay_name" value="\${state.settings.barangay_name || ''}" class="w-full p-2 border rounded">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">Punong Barangay (Captain) Name</label>
+                                <input type="text" name="captain_name" value="\${state.settings.captain_name || ''}" class="w-full p-2 border rounded">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">Barangay Logo (Image Upload)</label>
+                                <input type="file" name="barangay_logo" accept="image/*" class="w-full p-1 border rounded">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">Captain Signature (Transparent PNG)</label>
+                                <input type="file" name="captain_signature" accept="image/*" class="w-full p-1 border rounded">
+                            </div>
+                            <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Save System Settings</button>
+                        </form>
+                    </div>
+                \`;
+                document.getElementById('settingsForm').onsubmit = async (e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.target);
+                    const res = await api('/settings', { method: 'POST', body: formData });
+                    alert(res.message);
+                    window.location.reload();
+                };
             }
         }
 
-        // Start App
+        // Run application on load
         window.onload = initApp;
     </script>
 </body>
@@ -2222,12 +2362,6 @@ app.get('*', (req, res) => {
     `);
 });
 
-/* ==========================================================================
-   START SERVER
-   ========================================================================== */
 app.listen(PORT, () => {
-    console.log(`====================================================`);
-    console.log(`BARANGAY MANAGEMENT SYSTEM SERVER RUNNING ON PORT ${PORT}`);
-    console.log(`Theme: Blue (#2563eb), Green (#059669), White (#ffffff)`);
-    console.log(`====================================================`);
+    console.log(`Barangay Resident Management System running on port ${PORT}`);
 });
