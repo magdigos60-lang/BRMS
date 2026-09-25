@@ -1,7 +1,7 @@
 {
   "name": "barangay-resident-management-system",
   "version": "1.0.0",
-  "description": "Production-Ready Multi-Tenant Barangay Resident Management System",
+  "description": "Complete Barangay Resident Management System with Supabase and Express",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
@@ -10,16 +10,13 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.39.8",
     "bcryptjs": "^2.4.3",
-    "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "express-fileupload": "^1.5.0",
+    "express-rate-limit": "^7.2.0",
+    "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
-    "qrcode": "^1.5.3"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.0"
+    "qrcode": "^1.5.3",
+    "uuid": "^9.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
