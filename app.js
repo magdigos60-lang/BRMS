@@ -102,7 +102,6 @@ async function logActivity(userId, userName, action, details, ip) {
    API ENDPOINTS
    ========================================================================== */
 
-// SETUP / INIT CHECK
 app.get('/api/setup/status', async (req, res) => {
     try {
         if (!supabase) return res.json({ configured: false, needsAdmin: true });
@@ -146,7 +145,6 @@ app.post('/api/setup/admin', async (req, res) => {
     }
 });
 
-// AUTHENTICATION (LOGIN)
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { username, password, portalType } = req.body;
@@ -206,7 +204,6 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// UPDATE RESIDENT PROFILE PICTURE & DETAILS
 app.post('/api/resident/profile/update', authenticateToken, upload.single('photo'), async (req, res) => {
     try {
         const { contactNumber, email, address, civilStatus } = req.body;
@@ -234,7 +231,6 @@ app.post('/api/resident/profile/update', authenticateToken, upload.single('photo
     }
 });
 
-// PUBLIC RESIDENT REGISTRATION
 app.post('/api/public/register', upload.single('photo'), async (req, res) => {
     try {
         const {
@@ -299,7 +295,6 @@ app.post('/api/public/register', upload.single('photo'), async (req, res) => {
     }
 });
 
-// SYSTEM SETTINGS
 app.get('/api/settings', async (req, res) => {
     try {
         const { data, error } = await supabase.from('system_settings').select('*');
@@ -345,7 +340,6 @@ app.post('/api/settings', authenticateToken, requireRole(['super_admin']), uploa
     }
 });
 
-// DASHBOARD STATS
 app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
     try {
         const { count: totalResidents } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE');
@@ -380,7 +374,6 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
     }
 });
 
-// RESIDENTS MANAGEMENT
 app.get('/api/residents', authenticateToken, async (req, res) => {
     try {
         const { status = 'ACTIVE', search = '', purokId = '' } = req.query;
@@ -439,29 +432,6 @@ app.post('/api/residents/:id/reject', authenticateToken, requireRole(['super_adm
     }
 });
 
-app.post('/api/residents/:id/archive', authenticateToken, requireRole(['super_admin', 'captain', 'secretary']), async (req, res) => {
-    try {
-        const { error } = await supabase.from('residents').update({ status: 'ARCHIVED', updated_at: new Date() }).eq('id', req.params.id);
-        if (error) throw error;
-        await logActivity(req.user.id, req.user.fullName, 'ARCHIVE_RESIDENT', `Archived resident ${req.params.id}`, req.ip);
-        res.json({ success: true, message: 'Resident archived.' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.post('/api/residents/:id/restore', authenticateToken, requireRole(['super_admin', 'captain', 'secretary']), async (req, res) => {
-    try {
-        const { error } = await supabase.from('residents').update({ status: 'ACTIVE', updated_at: new Date() }).eq('id', req.params.id);
-        if (error) throw error;
-        await logActivity(req.user.id, req.user.fullName, 'RESTORE_RESIDENT', `Restored resident ${req.params.id}`, req.ip);
-        res.json({ success: true, message: 'Resident restored to Active status.' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// PUROKS WITH RESIDENT COUNT
 app.get('/api/puroks', async (req, res) => {
     try {
         const { data: puroks, error } = await supabase.from('puroks').select('*').order('name');
@@ -499,7 +469,6 @@ app.post('/api/puroks', authenticateToken, requireRole(['super_admin', 'captain'
     }
 });
 
-// HOUSEHOLDS
 app.get('/api/households', authenticateToken, async (req, res) => {
     try {
         const { data, error } = await supabase.from('households').select('*, puroks(name), head:residents(first_name, last_name)').order('household_number');
@@ -525,7 +494,6 @@ app.post('/api/households', authenticateToken, requireRole(['super_admin', 'capt
     }
 });
 
-// CERTIFICATE REQUESTS & ISSUANCE
 app.get('/api/certificates/requests', authenticateToken, async (req, res) => {
     try {
         let query = supabase.from('certificate_requests').select('*, residents(first_name, last_name, resident_number, address)');
@@ -564,40 +532,6 @@ app.post('/api/certificates/request', authenticateToken, async (req, res) => {
     }
 });
 
-app.post('/api/certificates/approve', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), upload.single('certificate_file'), async (req, res) => {
-    try {
-        const { requestId } = req.body;
-        if (!req.file) return res.status(400).json({ error: 'Official certificate file (PDF/Image) is required.' });
-
-        const { data: reqData } = await supabase.from('certificate_requests').select('*').eq('id', requestId).single();
-        if (!reqData) return res.status(404).json({ error: 'Request not found.' });
-
-        const certNum = 'CERT-' + new Date().getFullYear() + '-' + Math.floor(10000 + Math.random() * 90000);
-        const fileUrl = `/uploads/${req.file.filename}`;
-
-        await supabase.from('certificates').insert([{
-            request_id: requestId,
-            resident_id: reqData.resident_id,
-            certificate_number: certNum,
-            certificate_type: reqData.certificate_type,
-            file_url: fileUrl,
-            issued_by: req.user.id
-        }]);
-
-        await supabase.from('certificate_requests').update({
-            status: 'READY_FOR_RELEASE',
-            processed_by: req.user.id,
-            updated_at: new Date()
-        }).eq('id', requestId);
-
-        await logActivity(req.user.id, req.user.fullName, 'APPROVE_CERTIFICATE', `Approved & uploaded ${certNum}`, req.ip);
-        res.json({ success: true, message: 'Certificate file uploaded and marked Ready For Release.' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// ASSISTANCE REQUESTS
 app.get('/api/assistance', authenticateToken, async (req, res) => {
     try {
         let query = supabase.from('assistance_requests').select('*, residents(first_name, last_name, contact_number)');
@@ -635,7 +569,6 @@ app.post('/api/assistance', authenticateToken, async (req, res) => {
     }
 });
 
-// PROFILE EDIT REQUESTS
 app.post('/api/resident/edit-request', authenticateToken, async (req, res) => {
     try {
         const { requestedChanges } = req.body;
@@ -655,7 +588,6 @@ app.post('/api/resident/edit-request', authenticateToken, async (req, res) => {
     }
 });
 
-// FEEDBACK & COMPLAINTS
 app.get('/api/feedback', authenticateToken, async (req, res) => {
     try {
         const { data, error } = await supabase.from('feedback').select('*, residents(first_name, last_name)').order('created_at', { ascending: false });
@@ -684,43 +616,6 @@ app.post('/api/feedback', authenticateToken, async (req, res) => {
     }
 });
 
-// QR CLAIM SCANNING & RELEASE
-app.get('/api/qr/claim-info/:residentId', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { residentId } = req.params;
-        const { data: resident, error: rErr } = await supabase.from('residents').select('*').eq('id', residentId).single();
-        if (rErr || !resident) return res.status(404).json({ error: 'Resident record not found.' });
-
-        const { data: claims } = await supabase.from('certificate_requests')
-            .select('*')
-            .eq('resident_id', residentId)
-            .in('status', ['READY_FOR_RELEASE', 'APPROVED']);
-
-        res.json({ resident, claims: claims || [] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.post('/api/qr/release-claim', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), async (req, res) => {
-    try {
-        const { requestId } = req.body;
-        const { data, error } = await supabase.from('certificate_requests').update({
-            status: 'RELEASED',
-            released_by: req.user.id,
-            released_at: new Date(),
-            updated_at: new Date()
-        }).eq('id', requestId).select();
-
-        if (error) throw error;
-        await logActivity(req.user.id, req.user.fullName, 'RELEASE_CLAIM', `Released request ID ${requestId}`, req.ip);
-        res.json({ success: true, message: 'Item marked as RELEASED successfully.', data: data[0] });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// ANNOUNCEMENTS
 app.get('/api/announcements', async (req, res) => {
     try {
         const { data, error } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
@@ -747,7 +642,6 @@ app.post('/api/announcements', authenticateToken, requireRole(['super_admin', 'c
     }
 });
 
-// BLOTTER CASES
 app.get('/api/blotter', authenticateToken, async (req, res) => {
     try {
         const { data, error } = await supabase.from('blotter_cases').select('*').order('created_at', { ascending: false });
@@ -782,7 +676,6 @@ app.post('/api/blotter', authenticateToken, async (req, res) => {
     }
 });
 
-// APPOINTMENTS
 app.get('/api/appointments', authenticateToken, async (req, res) => {
     try {
         let query = supabase.from('appointments').select('*, residents(first_name, last_name, contact_number)');
@@ -822,73 +715,12 @@ app.post('/api/appointments', authenticateToken, async (req, res) => {
     }
 });
 
-// ACTIVITY LOGS
-app.get('/api/logs', authenticateToken, requireRole(['super_admin']), async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(200);
-        if (error) throw error;
-        res.json(data || []);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// PUBLIC SCANNER PAGE (DEDICATED STANDALONE LINK /scanner)
-app.get('/scanner', (req, res) => {
-    res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Barangay QR Code Scanner & Release Terminal</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <script src="https://cdn.tailwindcss.com"></script>
-            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-            <script src="https://cdn.jsdelivr.net/npm/html5-qrcode/html5-qrcode.min.js"></script>
-            <style>
-                body { background: #f0fdf4; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-            </style>
-        </head>
-        <body class="p-6">
-            <div class="max-w-xl mx-auto bg-white rounded-2xl shadow-xl p-6 border border-emerald-200">
-                <div class="text-center mb-6">
-                    <div class="inline-flex p-3 bg-emerald-100 text-emerald-700 rounded-full mb-2">
-                        <i class="fa-solid fa-qrcode fa-2x"></i>
-                    </div>
-                    <h1 class="text-xl font-bold text-slate-800">Barangay ID Scanner & Document Release</h1>
-                    <p class="text-xs text-slate-500">Scan resident QR code to verify ID and release approved documents.</p>
-                </div>
-
-                <div id="reader" class="w-full rounded-xl overflow-hidden border-2 border-emerald-600 mb-4"></div>
-                <div id="scanResult" class="mt-4"></div>
-            </div>
-
-            <script>
-                function onScanSuccess(decodedText, decodedResult) {
-                    html5QrcodeScanner.clear();
-                    document.getElementById('scanResult').innerHTML = \`<div class="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-center text-xs text-emerald-800 font-bold">QR Code Scanned! Redirecting to Verification...</div>\`;
-                    setTimeout(() => {
-                        window.location.href = decodedText;
-                    }, 1000);
-                }
-
-                const html5QrcodeScanner = new Html5QrcodeScanner(
-                    "reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
-                html5QrcodeScanner.render(onScanSuccess);
-            </script>
-        </body>
-        </html>
-    `);
-});
-
-// PUBLIC VERIFICATION ROUTE
 app.get('/verify/resident/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', id).single();
         const { data: settings } = await supabase.from('system_settings').select('*');
-        const brgy = {
-            barangay_logo: DEFAULT_LOGO_SVG
-        };
+        const brgy = { barangay_logo: DEFAULT_LOGO_SVG };
         if (settings) settings.forEach(s => brgy[s.setting_key] = s.setting_value);
 
         if (!resident || resident.status !== 'ACTIVE') {
@@ -969,7 +801,6 @@ app.get('*', (req, res) => {
             --primary-blue: #2563eb;
         }
         
-        /* STRICT BLUE, GREEN & WHITE THEME CUSTOM STYLES */
         .bg-login-custom {
             background-image: linear-gradient(rgba(5, 150, 105, 0.88), rgba(37, 99, 235, 0.88)), 
                               url('${CUSTOM_BG_URL}');
@@ -1016,24 +847,21 @@ app.get('*', (req, res) => {
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased font-sans">
 
-    <!-- APP CONTAINER -->
     <div id="app" class="min-h-screen flex flex-col"></div>
 
     <script>
         const DEFAULT_LOGO = "${DEFAULT_LOGO_SVG}";
         const DEFAULT_USER = "${DEFAULT_USER_SVG}";
 
-        // Global State
         let state = {
             token: localStorage.getItem('brms_token') || null,
             user: JSON.parse(localStorage.getItem('brms_user')) || null,
             resident: JSON.parse(localStorage.getItem('brms_resident')) || null,
             settings: {},
             activeTab: 'dashboard',
-            resActiveTab: 'profile'
+            resActiveTab: 'dashboard'
         };
 
-        // API Helper
         async function api(endpoint, options = {}) {
             const headers = options.headers || {};
             if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
@@ -1051,7 +879,6 @@ app.get('*', (req, res) => {
             }
         }
 
-        // Initialize App
         async function initApp() {
             try {
                 const settings = await fetch('/api/settings').then(r => r.json());
@@ -1060,6 +887,12 @@ app.get('*', (req, res) => {
                 const setupStatus = await fetch('/api/setup/status').then(r => r.json());
                 if (setupStatus.needsAdmin) {
                     renderSetupAdmin();
+                    return;
+                }
+
+                // Handle direct QR scanner link URL route
+                if (window.location.pathname.startsWith('/scanner')) {
+                    renderScannerPage();
                     return;
                 }
 
@@ -1083,9 +916,6 @@ app.get('*', (req, res) => {
             renderLogin();
         }
 
-        /* ==========================================================================
-           1. INITIAL ADMIN SETUP RENDER
-           ========================================================================== */
         function renderSetupAdmin() {
             const app = document.getElementById('app');
             app.innerHTML = \`
@@ -1146,9 +976,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* ==========================================================================
-           2. LOGIN & REGISTRATION RENDER
-           ========================================================================== */
         function renderLogin() {
             const app = document.getElementById('app');
             const logo = state.settings.barangay_logo || DEFAULT_LOGO;
@@ -1159,7 +986,6 @@ app.get('*', (req, res) => {
             app.innerHTML = \`
                 <div class="min-h-screen bg-login-custom flex items-center justify-center p-4">
                     <div class="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 border border-white/20">
-                        <!-- Left Info Banner -->
                         <div class="bg-gradient-to-br from-emerald-700 to-blue-800 p-8 text-white flex flex-col justify-between">
                             <div class="text-center md:text-left">
                                 <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-20 h-20 mx-auto md:mx-0 rounded-full bg-white p-1 mb-4 shadow-md object-cover">
@@ -1172,12 +998,12 @@ app.get('*', (req, res) => {
                                     Access online barangay clearances, digital ID cards, schedule appointments, and submit community requests fast & efficiently.
                                 </p>
                             </div>
-                            <div class="text-xs text-emerald-200 text-center md:text-left">
-                                &copy; 2026 Official Barangay Portal. All rights reserved.
+                            <div class="flex justify-between items-center text-xs text-emerald-200">
+                                <span>&copy; 2026 Official Barangay Portal</span>
+                                <a href="/scanner" class="text-white underline font-bold hover:text-emerald-300">QR Scanner Link</a>
                             </div>
                         </div>
 
-                        <!-- Right Login Form -->
                         <div class="p-8 flex flex-col justify-center bg-white">
                             <div class="flex border-b border-slate-200 mb-6">
                                 <button id="btnPortalStaff" type="button" onclick="switchLoginPortal('staff')" class="flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600">Staff Login</button>
@@ -1254,7 +1080,7 @@ app.get('*', (req, res) => {
         async function renderRegisterModal() {
             let puroks = [];
             try { puroks = await fetch('/api/puroks').then(r => r.json()); } catch(e){}
-            let purokOptions = (puroks || []).map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('');
+            let purokOptions = (puroks || []).map(p => \`<option value="\${p.id}">\${p.name} (\${p.resident_count || 0} residents)</option>\`).join('');
 
             const modalHtml = \`
                 <div id="regModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -1359,8 +1185,39 @@ app.get('*', (req, res) => {
             };
         }
 
+        /* DEDICATED SCANNER PAGE LINK */
+        function renderScannerPage() {
+            const app = document.getElementById('app');
+            app.innerHTML = \`
+                <div class="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6">
+                    <div class="bg-slate-800 p-8 rounded-2xl max-w-lg w-full border border-emerald-500/40 text-center shadow-2xl">
+                        <div class="inline-flex p-3 bg-emerald-600/20 rounded-full text-emerald-400 mb-3">
+                            <i class="fa-solid fa-qrcode fa-3x"></i>
+                        </div>
+                        <h2 class="text-xl font-black mb-1">Barangay QR Code Scanner</h2>
+                        <p class="text-xs text-slate-400 mb-6">Scan resident ID codes to verify clearance validity or release claimed documents.</p>
+                        
+                        <div id="reader" class="w-full bg-slate-900 rounded-lg overflow-hidden border border-slate-700 mb-4 min-h-[250px]"></div>
+                        <div id="scanResult" class="text-xs font-mono text-emerald-400 mb-4"></div>
+                        
+                        <a href="/" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 block">Back to System Home</a>
+                    </div>
+                </div>
+            \`;
+
+            try {
+                const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+                scanner.render((decodedText) => {
+                    document.getElementById('scanResult').innerText = "Scanned: " + decodedText;
+                    if (decodedText.startsWith('http')) {
+                        window.location.href = decodedText;
+                    }
+                }, (error) => {});
+            } catch(e) {}
+        }
+
         /* ==========================================================================
-           3. RESIDENT PORTAL RENDER (BLUE, GREEN & WHITE THEME + ALL 13 FEATURES)
+           RESIDENT PORTAL RENDER (BLUE, GREEN & WHITE THEME + ALL 13 FEATURES)
            ========================================================================== */
         function renderResidentPortal() {
             const app = document.getElementById('app');
@@ -1370,7 +1227,6 @@ app.get('*', (req, res) => {
 
             app.innerHTML = \`
                 <div class="flex h-screen bg-slate-50 overflow-hidden">
-                    <!-- Resident Sidebar -->
                     <aside class="w-64 bg-slate-900 text-slate-200 flex flex-col justify-between hidden md:flex border-r border-emerald-700">
                         <div>
                             <div class="p-4 border-b border-slate-800 flex items-center gap-3 bg-gradient-to-r from-emerald-800 to-blue-800">
@@ -1382,7 +1238,7 @@ app.get('*', (req, res) => {
                             </div>
                             <nav class="p-3 space-y-1 text-xs overflow-y-auto max-h-[calc(100vh-140px)]">
                                 <button type="button" onclick="setResTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-gauge w-4"></i> Dashboard</button>
-                                <button type="button" onclick="setResTab('profile')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-id-card w-4"></i> My Profile & Brgy ID</button>
+                                <button type="button" onclick="setResTab('profile')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-id-card w-4"></i> My Profile</button>
                                 <button type="button" onclick="setResTab('editProfile')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-user-pen w-4"></i> Edit Profile Request</button>
                                 <button type="button" onclick="setResTab('certRequest')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-file-signature w-4"></i> Certificate Request</button>
                                 <button type="button" onclick="setResTab('tracking')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-magnifying-glass-location w-4"></i> Request Tracking</button>
@@ -1404,7 +1260,6 @@ app.get('*', (req, res) => {
                         </div>
                     </aside>
 
-                    <!-- Main Resident Content Area -->
                     <main class="flex-1 flex flex-col overflow-hidden">
                         <header class="bg-gradient-to-r from-emerald-700 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
                             <h2 id="resPageTitle" class="text-xl font-bold">Resident Dashboard</h2>
@@ -1414,9 +1269,7 @@ app.get('*', (req, res) => {
                             </div>
                         </header>
 
-                        <div id="resContent" class="flex-1 overflow-y-auto p-6">
-                            <!-- Dynamic Resident Content -->
-                        </div>
+                        <div id="resContent" class="flex-1 overflow-y-auto p-6"></div>
                     </main>
                 </div>
             \`;
@@ -1474,7 +1327,6 @@ app.get('*', (req, res) => {
             }
         }
 
-        /* RESIDENT TAB IMPLEMENTATIONS */
         function renderResDashboardTab(container) {
             const res = state.resident || {};
             container.innerHTML = \`
@@ -1538,7 +1390,6 @@ app.get('*', (req, res) => {
             });
         }
 
-        /* RESIDENT PROFILE & NATIONAL ID STYLE ID CARD */
         function renderResProfileTab(container) {
             const r = state.resident || {};
             const photo = r.photo_url || DEFAULT_USER;
@@ -1549,7 +1400,6 @@ app.get('*', (req, res) => {
 
             container.innerHTML = \`
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <!-- Left: Profile Details & Photo Update -->
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm lg:col-span-1 text-xs">
                         <div class="text-center mb-4">
                             <img src="\${photo}" onerror="this.src='\${DEFAULT_USER}'" class="w-28 h-28 mx-auto rounded-full object-cover border-4 border-emerald-600 shadow-md">
@@ -1588,17 +1438,15 @@ app.get('*', (req, res) => {
                         </form>
                     </div>
 
-                    <!-- Right: NATIONAL ID STYLE BARANGAY RESIDENT CARD -->
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
                         <div class="flex justify-between items-center mb-4">
                             <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-id-card text-emerald-600 mr-2"></i> Official Barangay Resident Card (National ID Layout)</h3>
                             <button type="button" onclick="window.print()" class="px-3 py-1 bg-blue-600 text-white rounded text-xs font-bold hover:bg-blue-700 no-print"><i class="fa-solid fa-print mr-1"></i> Print ID</button>
                         </div>
 
-                        <!-- ID CARD CONTAINER (PHILIPPINE NATIONAL ID SPECIFICATION: 3.375" x 2.125", ZERO WASTED SPACE) -->
+                        <!-- ID CARD CONTAINER (NATIONAL ID SPECIFICATION: 3.375" x 2.125", ZERO WASTED SPACE) -->
                         <div id="printableArea" class="flex justify-center p-4 bg-slate-100 rounded-xl">
                             <div class="id-card-national shadow-lg">
-                                <!-- Top Bar / Header -->
                                 <div class="flex items-center gap-1.5 border-b border-emerald-700/40 pb-1 bg-gradient-to-r from-emerald-800 to-blue-800 text-white px-2 py-1 rounded-t">
                                     <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-7 h-7 rounded-full bg-white p-0.5 object-cover">
                                     <div class="leading-none flex-1">
@@ -1608,15 +1456,12 @@ app.get('*', (req, res) => {
                                     </div>
                                 </div>
 
-                                <!-- Body Grid: Dense Photo, Data, and Large QR Code -->
                                 <div class="grid grid-cols-12 gap-1 my-1 px-1 text-[7pt] leading-tight flex-1 items-center">
-                                    <!-- Photo Left -->
                                     <div class="col-span-3 text-center">
                                         <img src="\${photo}" onerror="this.src='\${DEFAULT_USER}'" class="w-[0.75in] h-[0.9in] border-2 border-emerald-700 rounded object-cover mx-auto bg-white">
                                         <span class="text-[5pt] font-bold text-emerald-800 block mt-0.5">REGISTERED</span>
                                     </div>
 
-                                    <!-- Personal Details Middle -->
                                     <div class="col-span-6 space-y-0.5">
                                         <div>
                                             <span class="text-[5pt] text-slate-500 font-bold block uppercase">Resident ID Number</span>
@@ -1642,14 +1487,12 @@ app.get('*', (req, res) => {
                                         </div>
                                     </div>
 
-                                    <!-- LARGE QR Code Right -->
                                     <div class="col-span-3 text-center flex flex-col items-center justify-center">
                                         \${r.qr_code_url ? \`<img src="\${r.qr_code_url}" class="w-[0.9in] h-[0.9in] border border-slate-300 rounded p-0.5 bg-white shadow-sm">\` : \`<div class="w-[0.9in] h-[0.9in] border border-dashed text-[6pt] flex items-center justify-center text-slate-400">QR Code</div>\`}
                                         <span class="text-[4.5pt] text-slate-400 font-mono mt-0.5">SCAN TO VERIFY</span>
                                     </div>
                                 </div>
 
-                                <!-- Bottom Signature & Official Seal Line -->
                                 <div class="border-t border-emerald-700/30 pt-0.5 flex justify-between items-end px-2 bg-emerald-50/50 rounded-b">
                                     <div class="text-[5.5pt]">
                                         <span class="text-slate-500">Purok:</span> <strong class="text-emerald-800">\${r.puroks ? r.puroks.name : 'N/A'}</strong>
@@ -1678,7 +1521,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* EDIT PROFILE REQUEST */
         function renderResEditProfileTab(container) {
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
@@ -1706,7 +1548,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* CERTIFICATE REQUEST */
         function renderResCertRequestTab(container) {
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
@@ -1745,7 +1586,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* REQUEST TRACKING */
         async function renderResTrackingTab(container) {
             const requests = await api('/certificates/requests');
             let rows = requests.map(r => \`
@@ -1779,7 +1619,6 @@ app.get('*', (req, res) => {
             \`;
         }
 
-        /* APPOINTMENT BOOKING */
         async function renderResAppointmentsTab(container) {
             const appts = await api('/appointments');
             let rows = appts.map(a => \`
@@ -1814,26 +1653,28 @@ app.get('*', (req, res) => {
                                 <input type="time" id="aptTime" class="w-full p-2 border border-slate-300 rounded mt-1">
                             </div>
                             <div>
-                                <label class="font-bold text-slate-700">Purpose / Details</label>
-                                <textarea id="aptPurpose" class="w-full p-2 border border-slate-300 rounded mt-1" rows="3"></textarea>
+                                <label class="font-bold text-slate-700">Purpose / Details *</label>
+                                <textarea id="aptPurpose" required rows="3" class="w-full p-2 border border-slate-300 rounded mt-1" placeholder="Reason for booking..."></textarea>
                             </div>
-                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Schedule Appointment</button>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Submit Appointment Request</button>
                         </form>
                     </div>
 
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm md:col-span-2">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Scheduled Appointments</h3>
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                    <th class="py-2">Appt #</th>
-                                    <th class="py-2">Service</th>
-                                    <th class="py-2">Date & Time</th>
-                                    <th class="py-2">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No appointments scheduled.</td></tr>'}</tbody>
-                        </table>
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">My Appointments Schedule</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                        <th class="py-2">Appt #</th>
+                                        <th class="py-2">Service</th>
+                                        <th class="py-2">Date & Time</th>
+                                        <th class="py-2">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No appointments scheduled.</td></tr>'}</tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             \`;
@@ -1850,66 +1691,72 @@ app.get('*', (req, res) => {
                     })
                 });
                 alert(res.message);
-                setResTab('appointments');
+                renderResAppointmentsTab(container);
             };
         }
 
-        /* MY DOCUMENTS */
         async function renderResDocumentsTab(container) {
             const requests = await api('/certificates/requests');
-            const readyDocs = requests.filter(r => r.status === 'READY_FOR_RELEASE' || r.status === 'RELEASED');
-
-            let list = readyDocs.map(d => \`
-                <div class="p-4 bg-white rounded-xl border border-emerald-200 shadow-sm flex justify-between items-center">
-                    <div>
-                        <h4 class="font-bold text-slate-800 text-sm">\${d.certificate_type}</h4>
-                        <p class="text-xs text-slate-500">Ref #: \${d.request_number} | Status: <span class="text-emerald-700 font-bold">\${d.status}</span></p>
-                    </div>
-                    <div class="flex gap-2">
-                        <span class="px-3 py-1 bg-emerald-100 text-emerald-800 font-bold rounded-lg text-xs"><i class="fa-solid fa-check mr-1"></i> Ready at Brgy Office</span>
-                    </div>
-                </div>
-            \`).join('');
+            const ready = requests.filter(r => r.status === 'READY_FOR_RELEASE' || r.status === 'RELEASED');
 
             container.innerHTML = \`
-                <div class="space-y-4">
-                    <h3 class="text-sm font-bold text-slate-800 mb-2">Issued & Approved Official Documents</h3>
-                    \${list || '<div class="bg-white p-8 rounded-xl text-center text-xs text-slate-400 border">No ready or released documents found yet.</div>'}
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">My Issued Documents & Certificates</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        \${ready.length === 0 ? '<p class="text-slate-400 text-xs">No approved or released documents available for download yet.</p>' : ready.map(r => \`
+                            <div class="p-4 border border-emerald-200 rounded-lg bg-emerald-50/40 flex justify-between items-center text-xs">
+                                <div>
+                                    <span class="font-mono text-blue-700 font-bold">\${r.request_number}</span>
+                                    <h4 class="font-bold text-slate-800 text-sm mt-0.5">\${r.certificate_type}</h4>
+                                    <p class="text-slate-500 mt-1">Status: <strong class="text-emerald-700">\${r.status}</strong></p>
+                                </div>
+                                <span class="px-3 py-1.5 bg-emerald-600 text-white rounded font-bold">Verified</span>
+                            </div>
+                        \`).join('')}
+                    </div>
                 </div>
             \`;
         }
 
-        /* COMPLAINTS & REPORTS */
         function renderResComplaintsTab(container) {
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">Submit Complaint or Incident Report</h3>
+                    <h3 class="text-sm font-bold text-slate-800 mb-2">Submit Blotter Complaint or Incident Report</h3>
+                    <p class="text-slate-500 mb-4">File confidential complaints or report neighborhood disturbances to the Barangay Lupon.</p>
                     <form id="resBlotterForm" class="space-y-3">
-                        <div><label class="font-bold text-slate-700">Respondent / Person Involved *</label><input type="text" id="compRespondent" required class="w-full p-2 border border-slate-300 rounded mt-1"></div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div><label class="font-bold text-slate-700">Incident Date *</label><input type="date" id="compDate" required class="w-full p-2 border border-slate-300 rounded mt-1"></div>
-                            <div><label class="font-bold text-slate-700">Incident Time</label><input type="time" id="compTime" class="w-full p-2 border border-slate-300 rounded mt-1"></div>
+                        <div>
+                            <label class="font-bold text-slate-700">Respondent / Against Who *</label>
+                            <input type="text" id="blotRespondent" required class="w-full p-2 border rounded mt-1" placeholder="Name of respondent or incident party">
                         </div>
-                        <div><label class="font-bold text-slate-700">Location of Incident *</label><input type="text" id="compLoc" required class="w-full p-2 border border-slate-300 rounded mt-1"></div>
-                        <div><label class="font-bold text-slate-700">Detailed Report Description *</label><textarea id="compDesc" required rows="4" class="w-full p-2 border border-slate-300 rounded mt-1"></textarea></div>
-                        <button type="submit" class="w-full py-2.5 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">File Incident Report</button>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="font-bold text-slate-700">Incident Date *</label>
+                                <input type="date" id="blotDate" required class="w-full p-2 border rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold text-slate-700">Location *</label>
+                                <input type="text" id="blotLoc" required class="w-full p-2 border rounded mt-1" placeholder="Street / Purok">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="font-bold text-slate-700">Incident Description & Narrative *</label>
+                            <textarea id="blotDesc" required rows="4" class="w-full p-2 border rounded mt-1" placeholder="Describe what happened in detail..."></textarea>
+                        </div>
+                        <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Submit Complaint Report</button>
                     </form>
                 </div>
             \`;
 
             document.getElementById('resBlotterForm').onsubmit = async (e) => {
                 e.preventDefault();
-                const rName = state.resident ? \`\${state.resident.first_name} \${state.resident.last_name}\` : state.user.fullName;
                 const res = await api('/blotter', {
                     method: 'POST',
                     body: JSON.stringify({
-                        complainantName: rName,
-                        respondentName: document.getElementById('compRespondent').value,
-                        witnessName: '',
-                        incidentDate: document.getElementById('compDate').value,
-                        incidentTime: document.getElementById('compTime').value,
-                        location: document.getElementById('compLoc').value,
-                        description: document.getElementById('compDesc').value
+                        complainantName: (state.resident ? \`\${state.resident.first_name} \${state.resident.last_name}\` : state.user.fullName),
+                        respondentName: document.getElementById('blotRespondent').value,
+                        incidentDate: document.getElementById('blotDate').value,
+                        location: document.getElementById('blotLoc').value,
+                        description: document.getElementById('blotDesc').value
                     })
                 });
                 alert(res.message);
@@ -1917,54 +1764,54 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* ASSISTANCE REQUEST */
         async function renderResAssistanceTab(container) {
             const list = await api('/assistance');
             let rows = list.map(a => \`
-                <tr class="border-b border-slate-100 text-xs">
+                <tr class="border-b text-xs">
                     <td class="py-3 px-2 font-mono font-bold text-blue-700">\${a.request_number}</td>
                     <td class="py-3 px-2 font-bold text-slate-800">\${a.assistance_type}</td>
-                    <td class="py-3 px-2">\${a.details}</td>
-                    <td class="py-3 px-2 font-bold text-amber-600">\${a.status}</td>
+                    <td class="py-3 px-2 text-slate-600">\${a.details}</td>
+                    <td class="py-3 px-2 font-bold text-emerald-600">\${a.status}</td>
                 </tr>
             \`).join('');
 
             container.innerHTML = \`
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Request Financial / Medical Assistance</h3>
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Request Ayuda / Assistance</h3>
                         <form id="resAstForm" class="space-y-3 text-xs">
                             <div>
                                 <label class="font-bold text-slate-700">Assistance Category *</label>
-                                <select id="astType" required class="w-full p-2 border border-slate-300 rounded mt-1">
-                                    <option value="Medical & Medicine Aid">Medical & Medicine Aid</option>
-                                    <option value="Financial / AICS Aid">Financial / AICS Aid</option>
+                                <select id="astType" required class="w-full p-2 border rounded mt-1">
+                                    <option value="Medical Financial Assistance">Medical Financial Assistance</option>
                                     <option value="Burial Assistance">Burial Assistance</option>
-                                    <option value="Food & Disaster Relief">Food & Disaster Relief</option>
-                                    <option value="Educational Cash Aid">Educational Cash Aid</option>
+                                    <option value="Food Relief / Ayuda Pack">Food Relief / Ayuda Pack</option>
+                                    <option value="Educational Support">Educational Support</option>
                                 </select>
                             </div>
                             <div>
-                                <label class="font-bold text-slate-700">Reason & Details *</label>
-                                <textarea id="astDetails" required rows="4" class="w-full p-2 border border-slate-300 rounded mt-1"></textarea>
+                                <label class="font-bold text-slate-700">Details / Reason *</label>
+                                <textarea id="astDetails" required rows="4" class="w-full p-2 border rounded mt-1" placeholder="State your immediate need..."></textarea>
                             </div>
-                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Submit Ayuda Request</button>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Submit Assistance Request</button>
                         </form>
                     </div>
 
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm md:col-span-2">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Submitted Assistance Requests</h3>
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                    <th class="py-2">Req #</th>
-                                    <th class="py-2">Category</th>
-                                    <th class="py-2">Details</th>
-                                    <th class="py-2">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No assistance requests submitted.</td></tr>'}</tbody>
-                        </table>
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">My Assistance Requests History</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                        <th class="py-2">Reference #</th>
+                                        <th class="py-2">Category</th>
+                                        <th class="py-2">Details</th>
+                                        <th class="py-2">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No assistance requests submitted.</td></tr>'}</tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             \`;
@@ -1979,66 +1826,64 @@ app.get('*', (req, res) => {
                     })
                 });
                 alert(res.message);
-                setResTab('assistance');
+                renderResAssistanceTab(container);
             };
         }
 
-        /* ANNOUNCEMENTS */
         async function renderResAnnouncementsTab(container) {
             const list = await api('/announcements');
-            let cards = list.map(a => \`
-                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-3">
-                    <div class="flex justify-between items-center">
-                        <span class="px-2.5 py-1 text-[10px] font-bold uppercase rounded-full \${a.priority === 'Urgent' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-800'}">\${a.priority} Priority</span>
-                        <span class="text-xs text-slate-400">\${new Date(a.created_at).toLocaleDateString()}</span>
-                    </div>
-                    <h3 class="text-base font-bold text-slate-800">\${a.title}</h3>
-                    \${a.image_url ? \`<img src="\${a.image_url}" class="w-full h-48 object-cover rounded-lg border">\` : ''}
-                    <p class="text-xs text-slate-600 leading-relaxed">\${a.content}</p>
-                </div>
-            \`).join('');
-
             container.innerHTML = \`
-                <div class="max-w-2xl mx-auto space-y-6">
-                    \${cards || '<p class="text-center text-xs text-slate-400 py-8">No barangay announcements at this time.</p>'}
+                <div class="space-y-4 max-w-2xl mx-auto">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Barangay Announcements & News Bulletin</h3>
+                    \${list.length === 0 ? '<p class="text-slate-400 text-xs">No announcements at this time.</p>' : list.map(a => \`
+                        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm text-xs">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded">\${a.priority} Priority</span>
+                                <span class="text-slate-400">\${new Date(a.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <h4 class="text-sm font-extrabold text-slate-800 mb-2">\${a.title}</h4>
+                            <p class="text-slate-600 leading-relaxed">\${a.content}</p>
+                        </div>
+                    \`).join('')}
                 </div>
             \`;
         }
 
-        /* NOTIFICATIONS */
         function renderResNotificationsTab(container) {
             container.innerHTML = \`
-                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-2xl mx-auto text-xs space-y-3">
-                    <h3 class="text-sm font-bold text-slate-800 mb-2">System Notifications</h3>
-                    <div class="p-3 bg-emerald-50 border-l-4 border-emerald-600 rounded">
-                        <span class="font-bold text-emerald-900 block">Account Active & Verified</span>
-                        <p class="text-[11px] text-emerald-700 mt-0.5">Your resident profile is fully approved. You can now request documents and print your digital ID.</p>
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">System Notifications</h3>
+                    <div class="space-y-3">
+                        <div class="p-3 bg-blue-50 border-l-4 border-blue-600 rounded text-slate-700">
+                            <span class="font-bold block">Welcome to the Resident Portal!</span>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Your official resident card is available under My Profile.</p>
+                        </div>
                     </div>
                 </div>
             \`;
         }
 
-        /* FEEDBACK */
         function renderResFeedbackTab(container) {
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">Send Feedback to Barangay Office</h3>
-                    <form id="resFeedbackForm" class="space-y-4">
+                    <h3 class="text-sm font-bold text-slate-800 mb-2">Barangay Service Feedback</h3>
+                    <p class="text-slate-500 mb-4">Help us improve our community services by sharing your ratings and comments.</p>
+                    <form id="resFeedbackForm" class="space-y-3">
                         <div>
-                            <label class="font-bold text-slate-700 block mb-1">Rating *</label>
-                            <select id="fbRating" class="w-full p-2 border border-slate-300 rounded">
-                                <option value="5">★★★★★ (5/5 - Excellent Service)</option>
-                                <option value="4">★★★★☆ (4/5 - Good)</option>
-                                <option value="3">★★★☆☆ (3/5 - Satisfactory)</option>
-                                <option value="2">★★☆☆☆ (2/5 - Needs Improvement)</option>
-                                <option value="1">★☆☆☆☆ (1/5 - Poor)</option>
+                            <label class="font-bold text-slate-700">Overall Rating *</label>
+                            <select id="fbRating" required class="w-full p-2 border rounded mt-1">
+                                <option value="5">5 - Excellent Service</option>
+                                <option value="4">4 - Very Good</option>
+                                <option value="3">3 - Satisfactory</option>
+                                <option value="2">2 - Needs Improvement</option>
+                                <option value="1">1 - Poor</option>
                             </select>
                         </div>
                         <div>
-                            <label class="font-bold text-slate-700 block mb-1">Comments & Suggestions *</label>
-                            <textarea id="fbComments" required rows="4" class="w-full p-2 border border-slate-300 rounded" placeholder="Tell us how we can improve our services..."></textarea>
+                            <label class="font-bold text-slate-700">Comments & Suggestions *</label>
+                            <textarea id="fbComments" required rows="4" class="w-full p-2 border rounded mt-1" placeholder="Write your feedback here..."></textarea>
                         </div>
-                        <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Submit Feedback</button>
+                        <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Submit Feedback</button>
                     </form>
                 </div>
             \`;
@@ -2057,64 +1902,45 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* EMERGENCY CONTACTS */
         function renderResEmergencyTab(container) {
             container.innerHTML = \`
-                <div class="max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                    <div class="bg-white p-5 rounded-xl border border-rose-200 shadow-sm">
-                        <div class="flex items-center gap-3 mb-2 text-rose-600">
-                            <i class="fa-solid fa-phone-volume fa-lg"></i>
-                            <h4 class="font-bold text-slate-800 text-sm">Barangay Hall Hotline</h4>
+                <div class="max-w-2xl mx-auto space-y-4 text-xs">
+                    <h3 class="text-sm font-bold text-slate-800 mb-2">Barangay & National Emergency Hotlines</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-white p-5 rounded-xl border border-rose-200 shadow-sm">
+                            <span class="text-rose-600 font-bold uppercase text-[10px]">Emergency Hotline</span>
+                            <h4 class="text-base font-extrabold text-slate-800 mt-1">Barangay Response Desk</h4>
+                            <p class="text-slate-600 font-mono mt-1 font-bold text-sm">📞 (02) 8123-4567 / 0917-123-4567</p>
                         </div>
-                        <p class="text-lg font-black text-rose-700 font-mono">(045) 123-4567 / 0912-345-6789</p>
-                        <span class="text-[11px] text-slate-400 block mt-1">Available 24/7 for community emergencies</span>
-                    </div>
-                    <div class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm">
-                        <div class="flex items-center gap-3 mb-2 text-blue-600">
-                            <i class="fa-solid fa-shield-halved fa-lg"></i>
-                            <h4 class="font-bold text-slate-800 text-sm">Barangay Tanod Outpost</h4>
+                        <div class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm">
+                            <span class="text-blue-600 font-bold uppercase text-[10px]">National Emergency</span>
+                            <h4 class="text-base font-extrabold text-slate-800 mt-1">Emergency 911</h4>
+                            <p class="text-slate-600 font-mono mt-1 font-bold text-sm">📞 911 (Police, Fire, Medical)</p>
                         </div>
-                        <p class="text-lg font-black text-blue-700 font-mono">0998-765-4321</p>
-                        <span class="text-[11px] text-slate-400 block mt-1">For peace and order concerns</span>
-                    </div>
-                    <div class="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm">
-                        <div class="flex items-center gap-3 mb-2 text-emerald-600">
-                            <i class="fa-solid fa-truck-medical fa-lg"></i>
-                            <h4 class="font-bold text-slate-800 text-sm">Emergency Medical / Ambulance</h4>
-                        </div>
-                        <p class="text-lg font-black text-emerald-700 font-mono">911 / 0922-111-2222</p>
-                        <span class="text-[11px] text-slate-400 block mt-1">Medical dispatch & rescue</span>
-                    </div>
-                    <div class="bg-white p-5 rounded-xl border border-amber-200 shadow-sm">
-                        <div class="flex items-center gap-3 mb-2 text-amber-600">
-                            <i class="fa-solid fa-fire-extinguisher fa-lg"></i>
-                            <h4 class="font-bold text-slate-800 text-sm">Fire Station Response</h4>
-                        </div>
-                        <p class="text-lg font-black text-amber-700 font-mono">(045) 987-6543</p>
-                        <span class="text-[11px] text-slate-400 block mt-1">Fire protection dispatch</span>
                     </div>
                 </div>
             \`;
         }
 
-        /* ACCOUNT SECURITY */
         function renderResSecurityTab(container) {
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
-                    <h3 class="text-sm font-bold text-slate-800 mb-2">Change Password</h3>
-                    <p class="text-slate-500 mb-4">Ensure your account is secure by using a strong password.</p>
-                    <form onsubmit="event.preventDefault(); alert('Password updated successfully!');" class="space-y-4">
-                        <div><label class="block font-bold text-slate-700 mb-1">Current Password</label><input type="password" required class="w-full p-2 border rounded"></div>
-                        <div><label class="block font-bold text-slate-700 mb-1">New Password</label><input type="password" required class="w-full p-2 border rounded"></div>
-                        <div><label class="block font-bold text-slate-700 mb-1">Confirm New Password</label><input type="password" required class="w-full p-2 border rounded"></div>
-                        <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Update Password</button>
-                    </form>
+                    <h3 class="text-sm font-bold text-slate-800 mb-2">Account Security Settings</h3>
+                    <p class="text-slate-500 mb-4">Manage login credentials and review security details.</p>
+                    <div class="p-3 bg-slate-50 rounded border mb-4">
+                        <span class="font-bold text-slate-700 block">Username:</span>
+                        <span class="font-mono text-slate-600">\${state.user.username}</span>
+                    </div>
+                    <div class="p-3 bg-slate-50 rounded border">
+                        <span class="font-bold text-slate-700 block">Email Address:</span>
+                        <span class="font-mono text-slate-600">\${state.user.email}</span>
+                    </div>
                 </div>
             \`;
         }
 
         /* ==========================================================================
-           4. STAFF / ADMIN PORTAL RENDER (BATCH 8-ID PRINTING, PUROK COUNTS & MORE)
+           4. STAFF / ADMIN PORTAL RENDER (BLUE, GREEN & WHITE THEME + BATCH PRINT 8 IDS)
            ========================================================================== */
         function renderStaffPortal() {
             const app = document.getElementById('app');
@@ -2123,237 +1949,215 @@ app.get('*', (req, res) => {
 
             app.innerHTML = \`
                 <div class="flex h-screen bg-slate-50 overflow-hidden">
-                    <!-- Staff Sidebar -->
                     <aside class="w-64 bg-slate-900 text-slate-200 flex flex-col justify-between hidden md:flex border-r border-emerald-700">
                         <div>
                             <div class="p-4 border-b border-slate-800 flex items-center gap-3 bg-gradient-to-r from-emerald-800 to-blue-800">
                                 <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-10 h-10 rounded-full bg-white p-0.5 object-cover">
                                 <div class="overflow-hidden">
                                     <h1 class="font-bold text-white text-xs truncate">\${brgyName}</h1>
-                                    <span class="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full uppercase font-bold">\${state.user.role}</span>
+                                    <span class="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full uppercase font-bold">Staff Portal</span>
                                 </div>
                             </div>
                             <nav class="p-3 space-y-1 text-xs overflow-y-auto max-h-[calc(100vh-140px)]">
-                                <button type="button" onclick="setStaffTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-gauge w-4"></i> Dashboard</button>
-                                <button type="button" onclick="setStaffTab('residents')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-users w-4"></i> Resident Management</button>
-                                <button type="button" onclick="setStaffTab('batchIds')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium text-emerald-400"><i class="fa-solid fa-id-card-clip w-4"></i> Batch ID Printing (8/Page)</button>
-                                <button type="button" onclick="setStaffTab('puroks')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-map-location-dot w-4"></i> Purok Management</button>
-                                <button type="button" onclick="setStaffTab('certificates')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-file-contract w-4"></i> Document Issuance</button>
-                                <button type="button" onclick="setStaffTab('scannerLink')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-qrcode w-4"></i> QR Scanner Terminal</button>
-                                <button type="button" onclick="setStaffTab('blotter')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-scale-balanced w-4"></i> Blotter Management</button>
-                                <button type="button" onclick="setStaffTab('announcements')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-bullhorn w-4"></i> Announcements</button>
-                                <button type="button" onclick="setStaffTab('settings')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium"><i class="fa-solid fa-gear w-4"></i> System Settings</button>
+                                <button type="button" onclick="setAdminTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-gauge w-4"></i> Dashboard</button>
+                                <button type="button" onclick="setAdminTab('residents')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-users w-4"></i> Resident Management</button>
+                                <button type="button" onclick="setAdminTab('batchPrint')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-id-card-clip w-4"></i> Batch ID Printing (8/Page)</button>
+                                <button type="button" onclick="setAdminTab('puroks')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-map-location-dot w-4"></i> Purok Management</button>
+                                <button type="button" onclick="setAdminTab('households')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-house-chimney w-4"></i> Household Management</button>
+                                <button type="button" onclick="setAdminTab('certificates')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-file-contract w-4"></i> Document Approval</button>
+                                <button type="button" onclick="setAdminTab('appointments')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-calendar-check w-4"></i> Appointments</button>
+                                <button type="button" onclick="setAdminTab('blotter')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-scale-balanced w-4"></i> Blotter Management</button>
+                                <button type="button" onclick="setAdminTab('announcements')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-bullhorn w-4"></i> Announcements</button>
+                                <button type="button" onclick="setAdminTab('settings')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-emerald-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-gears w-4"></i> System Settings</button>
                             </nav>
                         </div>
-                        <div class="p-3 border-t border-slate-800">
-                            <button type="button" onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2 text-xs text-rose-400 hover:bg-slate-800 rounded-lg font-medium">
-                                <i class="fa-solid fa-arrow-right-from-bracket w-4"></i> Sign Out
-                            </button>
+                        <div class="p-3 border-t border-slate-800 flex items-center justify-between">
+                            <a href="/scanner" target="_blank" class="text-xs text-emerald-400 font-bold hover:underline"><i class="fa-solid fa-qrcode mr-1"></i> QR Scanner</a>
+                            <button type="button" onclick="logout()" class="text-xs text-rose-400 hover:bg-slate-800 p-2 rounded font-medium"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
                         </div>
                     </aside>
 
-                    <!-- Main Staff Content Area -->
                     <main class="flex-1 flex flex-col overflow-hidden">
                         <header class="bg-gradient-to-r from-emerald-700 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
-                            <h2 id="staffPageTitle" class="text-xl font-bold">Admin Dashboard</h2>
+                            <h2 id="adminPageTitle" class="text-xl font-bold">Admin Dashboard</h2>
                             <div class="flex items-center gap-3">
                                 <span class="text-xs font-semibold">\${state.user.fullName}</span>
-                                <span class="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-bold uppercase">\${state.user.role}</span>
+                                <span class="px-2 py-0.5 bg-white/20 rounded text-[10px] uppercase font-bold">\${state.user.role}</span>
                             </div>
                         </header>
 
-                        <div id="staffContent" class="flex-1 overflow-y-auto p-6">
-                            <!-- Dynamic Staff Content -->
-                        </div>
+                        <div id="adminContent" class="flex-1 overflow-y-auto p-6"></div>
                     </main>
                 </div>
             \`;
 
-            setStaffTab('dashboard');
+            setAdminTab('dashboard');
         }
 
-        async function setStaffTab(tab) {
-            const content = document.getElementById('staffContent');
-            const title = document.getElementById('staffPageTitle');
+        async function setAdminTab(tab) {
+            const content = document.getElementById('adminContent');
+            const title = document.getElementById('adminPageTitle');
 
             if (tab === 'dashboard') {
-                title.innerText = 'Admin & Staff Dashboard';
-                renderStaffDashboardTab(content);
+                title.innerText = 'Admin Dashboard Overview';
+                renderAdminDashboard(content);
             } else if (tab === 'residents') {
                 title.innerText = 'Resident Management & Approvals';
-                renderStaffResidentsTab(content);
-            } else if (tab === 'batchIds') {
+                renderAdminResidents(content);
+            } else if (tab === 'batchPrint') {
                 title.innerText = 'Batch ID Printing (8 IDs per Bond Paper)';
-                renderStaffBatchIdsTab(content);
+                renderAdminBatchPrint(content);
             } else if (tab === 'puroks') {
-                title.innerText = 'Purok Management & Resident Counts';
-                renderStaffPuroksTab(content);
+                title.innerText = 'Purok Zone Management';
+                renderAdminPuroks(content);
+            } else if (tab === 'households') {
+                title.innerText = 'Household Management';
+                renderAdminHouseholds(content);
             } else if (tab === 'certificates') {
-                title.innerText = 'Document Approvals & Issuance History';
-                renderStaffCertificatesTab(content);
-            } else if (tab === 'scannerLink') {
-                title.innerText = 'QR Code Scanner Terminal Link';
-                content.innerHTML = \`
-                    <div class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-center space-y-4">
-                        <div class="inline-flex p-4 bg-emerald-100 text-emerald-700 rounded-full mb-2">
-                            <i class="fa-solid fa-qrcode fa-3x"></i>
-                        </div>
-                        <h3 class="text-lg font-bold text-slate-800">Dedicated QR Scanner Terminal</h3>
-                        <p class="text-xs text-slate-500">Open the dedicated scanner link on any mobile device or webcam terminal to scan resident IDs and release approved documents instantly.</p>
-                        <a href="/scanner" target="_blank" class="inline-block px-6 py-3 bg-emerald-600 text-white font-bold rounded-lg shadow-md hover:bg-emerald-700 text-xs">
-                            <i class="fa-solid fa-external-link mr-2"></i> Open Dedicated Scanner Link
-                        </a>
-                    </div>
-                \`;
+                title.innerText = 'Document Issuance & Approval';
+                renderAdminCertificates(content);
+            } else if (tab === 'appointments') {
+                title.innerText = 'Appointment Requests';
+                renderAdminAppointments(content);
             } else if (tab === 'blotter') {
-                title.innerText = 'Blotter Case Management';
-                renderStaffBlotterTab(content);
+                title.innerText = 'Blotter Cases & Incident Reports';
+                renderAdminBlotter(content);
             } else if (tab === 'announcements') {
                 title.innerText = 'Announcements Management';
-                renderStaffAnnouncementsTab(content);
+                renderAdminAnnouncements(content);
             } else if (tab === 'settings') {
-                title.innerText = 'System Settings & Branding';
-                renderStaffSettingsTab(content);
+                title.innerText = 'System Branding & Settings';
+                renderAdminSettings(content);
             }
         }
 
-        /* STAFF DASHBOARD */
-        async function renderStaffDashboardTab(container) {
+        async function renderAdminDashboard(container) {
             const stats = await api('/dashboard/stats');
             container.innerHTML = \`
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 text-xs">
-                    <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm">
-                        <span class="text-slate-400 font-bold uppercase">Total Residents</span>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                    <div class="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm">
+                        <span class="text-xs text-slate-500 font-bold uppercase">Total Residents</span>
                         <h3 class="text-2xl font-black text-emerald-800 mt-1">\${stats.totalResidents}</h3>
+                        <p class="text-[11px] text-slate-400 mt-1">Active verified profiles</p>
                     </div>
-                    <div class="bg-white p-4 rounded-xl border border-blue-200 shadow-sm">
-                        <span class="text-slate-400 font-bold uppercase">Pending Approvals</span>
-                        <h3 class="text-2xl font-black text-amber-600 mt-1">\${stats.pendingApprovals}</h3>
+                    <div class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm">
+                        <span class="text-xs text-slate-500 font-bold uppercase">Pending Approvals</span>
+                        <h3 class="text-2xl font-black text-blue-800 mt-1">\${stats.pendingApprovals}</h3>
+                        <p class="text-[11px] text-slate-400 mt-1">New resident accounts</p>
                     </div>
-                    <div class="bg-white p-4 rounded-xl border border-blue-200 shadow-sm">
-                        <span class="text-slate-400 font-bold uppercase">Pending Cert Requests</span>
-                        <h3 class="text-2xl font-black text-blue-700 mt-1">\${stats.pendingCerts}</h3>
+                    <div class="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm">
+                        <span class="text-xs text-slate-500 font-bold uppercase">Pending Certificates</span>
+                        <h3 class="text-2xl font-black text-emerald-800 mt-1">\${stats.pendingCerts}</h3>
+                        <p class="text-[11px] text-slate-400 mt-1">Document requests</p>
                     </div>
-                    <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm">
-                        <span class="text-slate-400 font-bold uppercase">Active Blotter Cases</span>
-                        <h3 class="text-2xl font-black text-rose-600 mt-1">\${stats.openBlotter}</h3>
-                    </div>
-                </div>
-
-                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-chart-pie text-emerald-600 mr-2"></i> Barangay Demographics Summary</h3>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                        <div class="p-3 bg-slate-50 rounded border">Male Residents: <strong class="text-emerald-700">\${stats.maleResidents}</strong></div>
-                        <div class="p-3 bg-slate-50 rounded border">Female Residents: <strong class="text-emerald-700">\${stats.femaleResidents}</strong></div>
-                        <div class="p-3 bg-slate-50 rounded border">Senior Citizens: <strong class="text-blue-700">\${stats.seniorCitizens}</strong></div>
-                        <div class="p-3 bg-slate-50 rounded border">Registered Voters: <strong class="text-blue-700">\${stats.voters}</strong></div>
+                    <div class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm">
+                        <span class="text-xs text-slate-500 font-bold uppercase">Open Blotter Cases</span>
+                        <h3 class="text-2xl font-black text-blue-800 mt-1">\${stats.openBlotter}</h3>
+                        <p class="text-[11px] text-slate-400 mt-1">Active incidents</p>
                     </div>
                 </div>
             \`;
         }
 
-        /* RESIDENT MANAGEMENT & APPROVALS */
-        async function renderStaffResidentsTab(container) {
+        async function renderAdminResidents(container) {
             const residents = await api('/residents?status=PENDING');
             let rows = residents.map(r => \`
-                <tr class="border-b border-slate-100 text-xs">
-                    <td class="py-3 px-2 font-bold text-slate-800">\${r.first_name} \${r.last_name}</td>
+                <tr class="border-b text-xs">
+                    <td class="py-3 px-2">\${r.first_name} \${r.last_name}</td>
                     <td class="py-3 px-2">\${r.gender}</td>
-                    <td class="py-3 px-2">\${r.contact_number || 'N/A'}</td>
-                    <td class="py-3 px-2 font-bold text-amber-600">PENDING</td>
+                    <td class="py-3 px-2">\${r.address}</td>
+                    <td class="py-3 px-2 font-bold text-amber-600">\${r.status}</td>
                     <td class="py-3 px-2 flex gap-2">
-                        <button onclick="approveResident('\${r.id}')" class="px-3 py-1 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700">Approve ID</button>
-                        <button onclick="rejectResident('\${r.id}')" class="px-3 py-1 bg-rose-600 text-white rounded font-bold hover:bg-rose-700">Reject</button>
+                        <button onclick="approveResident('\${r.id}')" class="px-2.5 py-1 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700">Approve ID</button>
+                        <button onclick="rejectResident('\${r.id}')" class="px-2.5 py-1 bg-rose-600 text-white rounded font-bold hover:bg-rose-700">Reject</button>
                     </td>
                 </tr>
             \`).join('');
 
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">Pending Resident Approvals</h3>
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                <th class="py-2">Full Name</th>
-                                <th class="py-2">Gender</th>
-                                <th class="py-2">Contact</th>
-                                <th class="py-2">Status</th>
-                                <th class="py-2">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No pending resident approvals.</td></tr>'}</tbody>
-                    </table>
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Pending Resident Registrations</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Full Name</th>
+                                    <th class="py-2">Gender</th>
+                                    <th class="py-2">Address</th>
+                                    <th class="py-2">Status</th>
+                                    <th class="py-2">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No pending resident approvals.</td></tr>'}</tbody>
+                        </table>
+                    </div>
                 </div>
             \`;
         }
 
-        async function approveResident(id) {
-            const res = await api(\`/residents/\${id}/approve\`, { method: 'POST' });
+        window.approveResident = async (id) => {
+            const res = await api('/residents/' + id + '/approve', { method: 'POST' });
             alert(res.message);
-            renderStaffResidentsTab(document.getElementById('staffContent'));
-        }
+            renderAdminResidents(document.getElementById('adminContent'));
+        };
 
-        async function rejectResident(id) {
+        window.rejectResident = async (id) => {
             const reason = prompt("Enter rejection reason:");
             if (!reason) return;
-            const res = await api(\`/residents/\${id}/reject\`, {
+            const res = await api('/residents/' + id + '/reject', {
                 method: 'POST',
                 body: JSON.stringify({ reason })
             });
             alert(res.message);
-            renderStaffResidentsTab(document.getElementById('staffContent'));
-        }
+            renderAdminResidents(document.getElementById('adminContent'));
+        };
 
-        /* BATCH ID PRINTING (8 IDS ON A SINGLE BOND PAPER) */
-        async function renderStaffBatchIdsTab(container) {
-            const activeResidents = await api('/residents?status=ACTIVE');
+        /* BATCH ID PRINTING (8 IDS PER BOND PAPER) */
+        async function renderAdminBatchPrint(container) {
+            const residents = await api('/residents?status=ACTIVE');
             const logo = state.settings.barangay_logo || DEFAULT_LOGO;
             const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
             const captainSig = state.settings.captain_signature || '';
             const captainName = state.settings.captain_name || 'HON. BARANGAY CAPTAIN';
 
-            let idCards = activeResidents.map(r => \`
-                <div class="id-card-national shadow-sm mb-4 inline-block">
+            let cardsHtml = residents.map(r => \`
+                <div class="id-card-national shadow-sm">
                     <div class="flex items-center gap-1.5 border-b border-emerald-700/40 pb-1 bg-gradient-to-r from-emerald-800 to-blue-800 text-white px-2 py-1 rounded-t">
-                        <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-7 h-7 rounded-full bg-white p-0.5 object-cover">
+                        <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-6 h-6 rounded-full bg-white p-0.5 object-cover">
                         <div class="leading-none flex-1">
-                            <p class="text-[7pt] font-extrabold uppercase tracking-tight">REPUBLIKA NG PILIPINAS</p>
-                            <p class="text-[8pt] font-black uppercase text-emerald-200 tracking-wider">\${brgyName}</p>
-                            <p class="text-[6pt] font-extrabold text-white uppercase tracking-widest mt-0.5">RESIDENT CARD / BRGY ID</p>
+                            <p class="text-[6pt] font-extrabold uppercase tracking-tight">REPUBLIKA NG PILIPINAS</p>
+                            <p class="text-[7pt] font-black uppercase text-emerald-200 tracking-wider">\${brgyName}</p>
+                            <p class="text-[5pt] font-extrabold text-white uppercase tracking-widest mt-0.5">RESIDENT CARD</p>
                         </div>
                     </div>
                     <div class="grid grid-cols-12 gap-1 my-1 px-1 text-[7pt] leading-tight flex-1 items-center">
                         <div class="col-span-3 text-center">
-                            <img src="\${r.photo_url || DEFAULT_USER}" onerror="this.src='\${DEFAULT_USER}'" class="w-[0.75in] h-[0.9in] border-2 border-emerald-700 rounded object-cover mx-auto bg-white">
+                            <img src="\${r.photo_url || DEFAULT_USER}" onerror="this.src='\${DEFAULT_USER}'" class="w-[0.7in] h-[0.85in] border border-emerald-700 rounded object-cover mx-auto bg-white">
                         </div>
                         <div class="col-span-6 space-y-0.5">
                             <div>
-                                <span class="text-[5pt] text-slate-500 font-bold block uppercase">ID Number</span>
-                                <span class="font-extrabold text-blue-900 font-mono text-[7.5pt]">\${r.resident_number}</span>
+                                <span class="text-[4.5pt] text-slate-500 font-bold block uppercase">ID Number</span>
+                                <span class="font-extrabold text-blue-950 font-mono text-[7pt]">\${r.resident_number}</span>
                             </div>
                             <div>
-                                <span class="text-[5pt] text-slate-500 font-bold block uppercase">Full Name</span>
-                                <span class="font-black text-slate-900 uppercase text-[7.5pt] block truncate">\${r.last_name}, \${r.first_name}</span>
+                                <span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Full Name</span>
+                                <span class="font-black text-slate-900 uppercase text-[7pt] block truncate">\${r.last_name}, \${r.first_name}</span>
                             </div>
                             <div>
-                                <span class="text-[5pt] text-slate-500 font-bold block uppercase">Birth & Status</span>
-                                <span class="font-bold text-slate-800 text-[6.5pt]">\${r.date_of_birth} / \${r.civil_status}</span>
-                            </div>
-                            <div>
-                                <span class="text-[5pt] text-slate-500 font-bold block uppercase">Address</span>
-                                <span class="font-bold text-slate-800 text-[6pt] truncate block">\${r.address}</span>
+                                <span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Address</span>
+                                <span class="font-bold text-slate-800 text-[5.5pt] truncate block">\${r.address}</span>
                             </div>
                         </div>
                         <div class="col-span-3 text-center flex flex-col items-center justify-center">
-                            \${r.qr_code_url ? \`<img src="\${r.qr_code_url}" class="w-[0.9in] h-[0.9in] border border-slate-300 rounded p-0.5 bg-white">\` : ''}
+                            \${r.qr_code_url ? \`<img src="\${r.qr_code_url}" class="w-[0.8in] h-[0.8in] border rounded p-0.5 bg-white">\` : ''}
                         </div>
                     </div>
                     <div class="border-t border-emerald-700/30 pt-0.5 flex justify-between items-end px-2 bg-emerald-50/50 rounded-b">
-                        <div class="text-[5.5pt]">Purok: <strong class="text-emerald-800">\${r.puroks ? r.puroks.name : 'N/A'}</strong></div>
+                        <div class="text-[5pt]">Purok: <strong>\${r.puroks ? r.puroks.name : 'N/A'}</strong></div>
                         <div class="text-center">
-                            \${captainSig ? \`<img src="\${captainSig}" class="h-4 mx-auto -mb-1 object-contain">\` : ''}
-                            <div class="border-b border-slate-800 w-24 mx-auto"></div>
-                            <span class="text-[5pt] font-extrabold text-slate-800 uppercase block">\${captainName}</span>
+                            \${captainSig ? \`<img src="\${captainSig}" class="h-3 mx-auto -mb-1 object-contain">\` : ''}
+                            <div class="border-b border-slate-800 w-20 mx-auto"></div>
+                            <span class="text-[4.5pt] font-extrabold text-slate-800 uppercase block">\${captainName}</span>
                         </div>
                     </div>
                 </div>
@@ -2362,232 +2166,312 @@ app.get('*', (req, res) => {
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-sm font-bold text-slate-800">Batch ID Printing (8 IDs per page layout)</h3>
-                        <button onclick="window.print()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded text-xs hover:bg-blue-700 no-print">
-                            <i class="fa-solid fa-print mr-1"></i> Print All Active IDs (8 per Bond Paper)
-                        </button>
+                        <h3 class="text-sm font-bold text-slate-800">Batch Print Resident Cards (8 IDs per Page Format)</h3>
+                        <button type="button" onclick="window.print()" class="px-4 py-2 bg-blue-600 text-white rounded text-xs font-bold hover:bg-blue-700 no-print"><i class="fa-solid fa-print mr-1"></i> Print All Active IDs</button>
                     </div>
-                    <div id="printableArea" class="id-grid-container bg-slate-100 p-4 rounded-xl flex flex-wrap gap-4 justify-center">
-                        \${idCards || '<p class="text-xs text-slate-400">No active residents available for ID printing.</p>'}
+                    <div id="printableArea" class="id-grid-container bg-slate-100 p-4 rounded-xl">
+                        \${cardsHtml || '<p class="text-slate-400 text-xs">No active residents found for batch printing.</p>'}
                     </div>
                 </div>
             \`;
         }
 
-        /* PUROK MANAGEMENT WITH RESIDENT COUNTS */
-        async function renderStaffPuroksTab(container) {
+        async function renderAdminPuroks(container) {
             const puroks = await api('/puroks');
             let rows = puroks.map(p => \`
-                <tr class="border-b border-slate-100 text-xs">
+                <tr class="border-b text-xs">
                     <td class="py-3 px-2 font-bold text-slate-800">\${p.name}</td>
                     <td class="py-3 px-2 text-slate-600">\${p.description || 'N/A'}</td>
-                    <td class="py-3 px-2 font-black text-emerald-700 text-sm">\${p.resident_count} Residents</td>
+                    <td class="py-3 px-2 font-extrabold text-emerald-700">\${p.resident_count} Active Residents</td>
                 </tr>
             \`).join('');
 
             container.innerHTML = \`
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Add New Purok Zone</h3>
-                        <form id="addPurokForm" class="space-y-3 text-xs">
-                            <div><label class="font-bold text-slate-700">Purok Name *</label><input type="text" id="pName" required class="w-full p-2 border rounded mt-1"></div>
-                            <div><label class="font-bold text-slate-700">Description / Area</label><input type="text" id="pDesc" class="w-full p-2 border rounded mt-1"></div>
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Add Purok Zone</h3>
+                        <form id="purokForm" class="space-y-3 text-xs">
+                            <div>
+                                <label class="font-bold text-slate-700">Purok Name *</label>
+                                <input type="text" id="purokName" required class="w-full p-2 border rounded mt-1" placeholder="E.g. Purok 1 - Centro">
+                            </div>
+                            <div>
+                                <label class="font-bold text-slate-700">Description</label>
+                                <textarea id="purokDesc" rows="3" class="w-full p-2 border rounded mt-1" placeholder="Zone details..."></textarea>
+                            </div>
                             <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Save Purok</button>
                         </form>
                     </div>
 
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm md:col-span-2">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Purok Zones & Live Resident Counts</h3>
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                    <th class="py-2">Purok Name</th>
-                                    <th class="py-2">Description</th>
-                                    <th class="py-2">Resident Count</th>
-                                </tr>
-                            </thead>
-                            <tbody>\${rows || '<tr><td colspan="3" class="text-center py-4 text-xs text-slate-400">No puroks added yet.</td></tr>'}</tbody>
-                        </table>
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Purok List & Resident Population Counts</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                        <th class="py-2">Purok Name</th>
+                                        <th class="py-2">Description</th>
+                                        <th class="py-2">Resident Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody>\${rows || '<tr><td colspan="3" class="text-center py-4 text-xs text-slate-400">No puroks added.</td></tr>'}</tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             \`;
 
-            document.getElementById('addPurokForm').onsubmit = async (e) => {
+            document.getElementById('purokForm').onsubmit = async (e) => {
                 e.preventDefault();
                 const res = await api('/puroks', {
                     method: 'POST',
                     body: JSON.stringify({
-                        name: document.getElementById('pName').value,
-                        description: document.getElementById('pDesc').value
+                        name: document.getElementById('purokName').value,
+                        description: document.getElementById('purokDesc').value
                     })
                 });
                 alert(res.message);
-                renderStaffPuroksTab(container);
+                renderAdminPuroks(container);
             };
         }
 
-        /* DOCUMENT ISSUANCE */
-        async function renderStaffCertificatesTab(container) {
+        async function renderAdminHouseholds(container) {
+            const households = await api('/households');
+            let rows = households.map(h => \`
+                <tr class="border-b text-xs">
+                    <td class="py-3 px-2 font-mono font-bold text-blue-700">\${h.household_number}</td>
+                    <td class="py-3 px-2 font-bold">\${h.puroks ? h.puroks.name : 'N/A'}</td>
+                    <td class="py-3 px-2 text-slate-600">\${h.street_address}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Household Registry</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Household #</th>
+                                    <th class="py-2">Purok Zone</th>
+                                    <th class="py-2">Street Address</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="3" class="text-center py-4 text-xs text-slate-400">No households registered.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            \`;
+        }
+
+        async function renderAdminCertificates(container) {
             const requests = await api('/certificates/requests');
             let rows = requests.map(r => \`
-                <tr class="border-b border-slate-100 text-xs">
+                <tr class="border-b text-xs">
                     <td class="py-3 px-2 font-mono font-bold text-blue-700">\${r.request_number}</td>
-                    <td class="py-3 px-2 font-bold text-slate-800">\${r.residents ? r.residents.first_name + ' ' + r.residents.last_name : 'N/A'}</td>
+                    <td class="py-3 px-2 font-bold">\${r.residents ? r.residents.first_name + ' ' + r.residents.last_name : 'Resident'}</td>
                     <td class="py-3 px-2">\${r.certificate_type}</td>
                     <td class="py-3 px-2 font-bold \${r.status === 'READY_FOR_RELEASE' ? 'text-emerald-600' : 'text-amber-600'}">\${r.status}</td>
                     <td class="py-3 px-2">
                         \${r.status === 'PENDING' ? \`
                             <form onsubmit="approveCertRequest(event, '\${r.id}')" class="flex gap-2 items-center">
-                                <input type="file" name="certFile" required accept=".pdf,image/*" class="w-36 text-[10px] p-1 border rounded">
-                                <button type="submit" class="px-2 py-1 bg-emerald-600 text-white rounded font-bold">Upload & Approve</button>
+                                <input type="file" name="certificate_file" accept=".pdf,image/*" required class="text-[10px] w-36">
+                                <button type="submit" class="px-2 py-1 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Upload & Ready</button>
                             </form>
-                        \` : '<span class="text-slate-400">Processed</span>'}
+                        \` : '<span>Processed</span>'}
                     </td>
                 </tr>
             \`).join('');
 
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">Certificate Requests & Issuance</h3>
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Certificate Requests & Document Issuance</h3>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left border-collapse">
                             <thead>
                                 <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                    <th class="py-2">Req #</th>
+                                    <th class="py-2">Reference #</th>
                                     <th class="py-2">Resident</th>
-                                    <th class="py-2">Document Type</th>
+                                    <th class="py-2">Type</th>
                                     <th class="py-2">Status</th>
-                                    <th class="py-2">Action / Upload</th>
+                                    <th class="py-2">Action / File Upload</th>
                                 </tr>
                             </thead>
-                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No certificate requests.</td></tr>'}</tbody>
+                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No certificate requests found.</td></tr>'}</tbody>
                         </table>
                     </div>
                 </div>
             \`;
         }
 
-        async function approveCertRequest(e, requestId) {
+        window.approveCertRequest = async (e, requestId) => {
             e.preventDefault();
-            const formData = new FormData();
+            const formData = new FormData(e.target);
             formData.append('requestId', requestId);
-            formData.append('certificate_file', e.target.querySelector('input[type="file"]').files[0]);
-
-            const res = await fetch('/api/certificates/approve', {
-                method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + state.token },
-                body: formData
-            }).then(r => r.json());
-
+            const res = await api('/certificates/approve', { method: 'POST', body: formData });
             alert(res.message);
-            renderStaffCertificatesTab(document.getElementById('staffContent'));
-        }
+            renderAdminCertificates(document.getElementById('adminContent'));
+        };
 
-        /* BLOTTER MANAGEMENT */
-        async function renderStaffBlotterTab(container) {
-            const list = await api('/blotter');
-            let rows = list.map(b => \`
-                <tr class="border-b border-slate-100 text-xs">
-                    <td class="py-3 px-2 font-mono font-bold text-blue-700">\${b.case_number}</td>
-                    <td class="py-3 px-2 font-bold">\${b.complainant_name} vs \${b.respondent_name}</td>
-                    <td class="py-3 px-2">\${b.incident_date} \${b.location}</td>
-                    <td class="py-3 px-2 font-bold text-rose-600">\${b.status}</td>
+        async function renderAdminAppointments(container) {
+            const list = await api('/appointments');
+            let rows = list.map(a => \`
+                <tr class="border-b text-xs">
+                    <td class="py-3 px-2 font-mono font-bold text-blue-700">\${a.appointment_number}</td>
+                    <td class="py-3 px-2 font-bold">\${a.residents ? a.residents.first_name + ' ' + a.residents.last_name : 'Resident'}</td>
+                    <td class="py-3 px-2">\${a.service_type}</td>
+                    <td class="py-3 px-2">\${a.appointment_date}</td>
+                    <td class="py-3 px-2 font-bold text-emerald-600">\${a.status}</td>
                 </tr>
             \`).join('');
 
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">Blotter Incident Records</h3>
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                <th class="py-2">Case #</th>
-                                <th class="py-2">Complainant vs Respondent</th>
-                                <th class="py-2">Incident Date & Location</th>
-                                <th class="py-2">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No blotter cases recorded.</td></tr>'}</tbody>
-                    </table>
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Appointment Schedule Requests</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Appt #</th>
+                                    <th class="py-2">Resident</th>
+                                    <th class="py-2">Service</th>
+                                    <th class="py-2">Date</th>
+                                    <th class="py-2">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No appointments found.</td></tr>'}</tbody>
+                        </table>
+                    </div>
                 </div>
             \`;
         }
 
-        /* ANNOUNCEMENTS MANAGEMENT */
-        async function renderStaffAnnouncementsTab(container) {
+        async function renderAdminBlotter(container) {
+            const cases = await api('/blotter');
+            let rows = cases.map(c => \`
+                <tr class="border-b text-xs">
+                    <td class="py-3 px-2 font-mono font-bold text-blue-700">\${c.case_number}</td>
+                    <td class="py-3 px-2 font-bold">\${c.complainant_name}</td>
+                    <td class="py-3 px-2 font-bold text-rose-700">\${c.respondent_name}</td>
+                    <td class="py-3 px-2">\${c.incident_date}</td>
+                    <td class="py-3 px-2 font-bold text-emerald-600">\${c.status}</td>
+                </tr>
+            \`).join('');
+
             container.innerHTML = \`
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Blotter Cases & Incidents</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Case #</th>
+                                    <th class="py-2">Complainant</th>
+                                    <th class="py-2">Respondent</th>
+                                    <th class="py-2">Date</th>
+                                    <th class="py-2">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No blotter cases recorded.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            \`;
+        }
+
+        async function renderAdminAnnouncements(container) {
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Post New Announcement</h3>
-                        <form id="annForm" class="space-y-3 text-xs">
-                            <div><label class="font-bold text-slate-700">Title *</label><input type="text" id="annTitle" required class="w-full p-2 border rounded mt-1"></div>
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Post Announcement</h3>
+                        <form id="annForm" class="space-y-3">
                             <div>
-                                <label class="font-bold text-slate-700">Priority *</label>
+                                <label class="font-bold text-slate-700">Title *</label>
+                                <input type="text" id="annTitle" required class="w-full p-2 border rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold text-slate-700">Priority</label>
                                 <select id="annPriority" class="w-full p-2 border rounded mt-1">
-                                    <option value="Normal">Normal Priority</option>
-                                    <option value="Urgent">Urgent Priority</option>
+                                    <option value="Normal">Normal</option>
+                                    <option value="High">High</option>
+                                    <option value="Urgent">Urgent</option>
                                 </select>
                             </div>
-                            <div><label class="font-bold text-slate-700">Content / Details *</label><textarea id="annContent" required rows="4" class="w-full p-2 border rounded mt-1"></textarea></div>
-                            <div><label class="font-bold text-slate-700">Optional Image</label><input type="file" id="annImage" accept="image/*" class="w-full p-1 border rounded mt-1"></div>
+                            <div>
+                                <label class="font-bold text-slate-700">Content *</label>
+                                <textarea id="annContent" required rows="4" class="w-full p-2 border rounded mt-1"></textarea>
+                            </div>
                             <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Publish Announcement</button>
                         </form>
                     </div>
 
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm md:col-span-2">
                         <h3 class="text-sm font-bold text-slate-800 mb-4">Published Announcements</h3>
-                        <div id="staffAnnList" class="space-y-3 text-xs">Loading...</div>
+                        <div id="adminAnnounceList" class="space-y-3">Loading...</div>
                     </div>
                 </div>
             \`;
 
             fetch('/api/announcements').then(r => r.json()).then(list => {
-                const el = document.getElementById('staffAnnList');
-                el.innerHTML = (list || []).map(a => \`
-                    <div class="p-3 bg-slate-50 border rounded flex justify-between items-center">
-                        <div>
-                            <span class="font-bold text-slate-800 block">\${a.title}</span>
-                            <p class="text-[11px] text-slate-500 line-clamp-1">\${a.content}</p>
-                        </div>
-                        <span class="px-2 py-1 bg-emerald-100 text-emerald-800 font-bold rounded">\${a.priority}</span>
+                const el = document.getElementById('adminAnnounceList');
+                if (!list || list.length === 0) {
+                    el.innerHTML = '<p class="text-slate-400">No announcements posted yet.</p>';
+                    return;
+                }
+                el.innerHTML = list.map(a => \`
+                    <div class="p-3 bg-slate-50 border rounded">
+                        <span class="font-bold text-slate-800 block">\${a.title}</span>
+                        <p class="text-slate-600 mt-1">\${a.content}</p>
                     </div>
-                \`).join('') || '<p class="text-slate-400">No announcements posted.</p>';
+                \`).join('');
             });
 
             document.getElementById('annForm').onsubmit = async (e) => {
                 e.preventDefault();
-                const formData = new FormData();
-                formData.append('title', document.getElementById('annTitle').value);
-                formData.append('priority', document.getElementById('annPriority').value);
-                formData.append('content', document.getElementById('annContent').value);
-                const imgFile = document.getElementById('annImage').files[0];
-                if (imgFile) formData.append('image', imgFile);
-
-                const res = await fetch('/api/announcements', {
+                const res = await api('/announcements', {
                     method: 'POST',
-                    headers: { 'Authorization': 'Bearer ' + state.token },
-                    body: formData
-                }).then(r => r.json());
-
+                    body: JSON.stringify({
+                        title: document.getElementById('annTitle').value,
+                        priority: document.getElementById('annPriority').value,
+                        content: document.getElementById('annContent').value
+                    })
+                });
                 alert(res.message);
-                renderStaffAnnouncementsTab(container);
+                renderAdminAnnouncements(container);
             };
         }
 
-        /* SYSTEM SETTINGS & BRANDING */
-        async function renderStaffSettingsTab(container) {
+        async function renderAdminSettings(container) {
             const s = state.settings;
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4">Barangay System Settings & Branding</h3>
-                    <form id="settingsForm" class="space-y-4">
-                        <div><label class="font-bold text-slate-700">Barangay Name</label><input type="text" name="barangay_name" value="\${s.barangay_name || ''}" class="w-full p-2 border rounded mt-1"></div>
-                        <div><label class="font-bold text-slate-700">Municipality / City</label><input type="text" name="municipality" value="\${s.municipality || ''}" class="w-full p-2 border rounded mt-1"></div>
-                        <div><label class="font-bold text-slate-700">Province</label><input type="text" name="province" value="\${s.province || ''}" class="w-full p-2 border rounded mt-1"></div>
-                        <div><label class="font-bold text-slate-700">Punong Barangay (Captain) Name</label><input type="text" name="captain_name" value="\${s.captain_name || ''}" class="w-full p-2 border rounded mt-1"></div>
-                        <div><label class="font-bold text-slate-700">Barangay Logo (Resets securely with fallback)</label><input type="file" name="barangay_logo" accept="image/*" class="w-full p-1 border rounded mt-1"></div>
-                        <div><label class="font-bold text-slate-700">Captain's Signature for ID Cards</label><input type="file" name="captain_signature" accept="image/*" class="w-full p-1 border rounded mt-1"></div>
-                        <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Save System Settings</button>
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">System Branding & Captain Signature Settings</h3>
+                    <form id="settingsForm" class="space-y-4" enctype="multipart/form-data">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Barangay Name</label>
+                            <input type="text" name="barangay_name" value="\${s.barangay_name || ''}" class="w-full p-2 border rounded">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Municipality / City</label>
+                            <input type="text" name="municipality" value="\${s.municipality || ''}" class="w-full p-2 border rounded">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Province</label>
+                            <input type="text" name="province" value="\${s.province || ''}" class="w-full p-2 border rounded">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Punong Barangay (Captain) Name</label>
+                            <input type="text" name="captain_name" value="\${s.captain_name || ''}" class="w-full p-2 border rounded">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Barangay Logo Image</label>
+                            <input type="file" name="barangay_logo" accept="image/*" class="w-full p-1 border rounded">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Captain Signature Image</label>
+                            <input type="file" name="captain_signature" accept="image/*" class="w-full p-1 border rounded">
+                        </div>
+                        <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Save System Settings</button>
                     </form>
                 </div>
             \`;
@@ -2595,18 +2479,13 @@ app.get('*', (req, res) => {
             document.getElementById('settingsForm').onsubmit = async (e) => {
                 e.preventDefault();
                 const formData = new FormData(e.target);
-                const res = await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Authorization': 'Bearer ' + state.token },
-                    body: formData
-                }).then(r => r.json());
-
+                const res = await api('/settings', { method: 'POST', body: formData });
                 alert(res.message);
                 window.location.reload();
             };
         }
 
-        // Run application on load
+        // Initialize application on load
         window.onload = initApp;
     </script>
 </body>
@@ -2615,5 +2494,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Barangay Resident Management System running on port ${PORT}`);
+    console.log(`Brgy Management System running on port ${PORT}`);
 });
