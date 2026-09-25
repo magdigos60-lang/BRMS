@@ -143,7 +143,7 @@ app.post('/api/auth/login', async (req, res) => {
         );
 
         res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: 86400000 });
-        res.json({ success: true, role: user.role, token, user: { id: user.id, name: user.full_name, email: user.email, role: user.role } });
+        res.json({ success: true, role: user.role, token, user: { id: user.id, name: user.full_name, email: user.email, role: user.role, residentId: residentData ? residentData.id : null } });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -174,7 +174,6 @@ app.post('/api/auth/register-resident', upload.single('profilePhoto'), async (re
 
         const passwordHash = await bcrypt.hash(password, 10);
 
-        // Create User Record
         const { data: user, error: userErr } = await supabase.from('users').insert([{
             full_name: `${firstName} ${lastName}`,
             username: username.toLowerCase().trim(),
@@ -190,7 +189,6 @@ app.post('/api/auth/register-resident', upload.single('profilePhoto'), async (re
             photoBase64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
         }
 
-        // Create Resident Record
         const { data: resident, error: resErr } = await supabase.from('residents').insert([{
             user_id: user.id,
             first_name: firstName,
@@ -306,19 +304,23 @@ app.get('/api/stats/dashboard', authenticate, authorize(['admin', 'captain', 'se
 });
 
 // RESIDENTS MANAGEMENT
-app.get('/api/residents', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
+app.get('/api/residents', authenticate, async (req, res) => {
     try {
         const { status, archived, search } = req.query;
         let query = supabase.from('residents').select('*, puroks(name), households(household_number)');
 
-        if (archived === 'true') {
-            query = query.eq('is_archived', true);
+        if (req.user.role === 'resident') {
+            query = query.eq('id', req.user.residentId);
         } else {
-            query = query.eq('is_archived', false);
-        }
+            if (archived === 'true') {
+                query = query.eq('is_archived', true);
+            } else {
+                query = query.eq('is_archived', false);
+            }
 
-        if (status) {
-            query = query.eq('approval_status', status);
+            if (status) {
+                query = query.eq('approval_status', status);
+            }
         }
 
         const { data, error } = await query.order('registered_at', { ascending: false });
@@ -359,7 +361,6 @@ app.post('/api/residents/approve-reject', authenticate, authorize(['admin', 'cap
         const { data: resident, error } = await supabase.from('residents').update(updates).eq('id', residentId).select().single();
         if (error) throw error;
 
-        // Create Notification
         await supabase.from('notifications').insert([{
             user_id: resident.user_id,
             title: `Resident Registration ${status}`,
@@ -424,12 +425,23 @@ app.get('/api/puroks', async (req, res) => {
     }
 });
 
-app.post('/api/puroks', authenticate, authorize(['admin', 'captain', 'secretary']), async (req, res) => {
+app.post('/api/puroks', authenticate, authorize(['admin', 'captain', 'secretary', 'staff']), async (req, res) => {
     try {
         const { name, description } = req.body;
         const { data, error } = await supabase.from('puroks').insert([{ name, description }]).select();
         if (error) throw error;
         res.json({ success: true, data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/puroks/:id', authenticate, authorize(['admin', 'captain', 'secretary']), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { error } = await supabase.from('puroks').delete().eq('id', id);
+        if (error) throw error;
+        res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -509,7 +521,6 @@ app.post('/api/certificates/process', authenticate, authorize(['admin', 'captain
         const { data: cert, error } = await supabase.from('certificate_requests').update(updates).eq('id', requestId).select('*, residents(user_id)').single();
         if (error) throw error;
 
-        // Send Notification
         await supabase.from('notifications').insert([{
             user_id: cert.residents.user_id,
             title: `Certificate Request ${status}`,
@@ -820,7 +831,6 @@ app.post('/api/user/update-profile', authenticate, async (req, res) => {
     }
 });
 
-// PROFILE UPDATE REQUEST FROM RESIDENT
 app.post('/api/resident/request-update', authenticate, authorize(['resident']), async (req, res) => {
     try {
         const { contactNumber, occupation, civilStatus, address } = req.body;
@@ -872,7 +882,6 @@ app.get('*', (req, res) => {
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: var(--bg-neutral); color: var(--text-main); min-height: 100vh; display: flex; flex-direction: column; }
 
-        /* HEADER & NAVIGATION */
         header { background: linear-gradient(135deg, var(--dark-green), var(--dark-blue)); color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
         .branding { display: flex; align-items: center; gap: 1rem; }
         .branding img { width: 50px; height: 50px; border-radius: 50%; background: white; object-fit: cover; }
@@ -888,7 +897,6 @@ app.get('*', (req, res) => {
         .btn-secondary { background-color: #cbd5e1; color: #334155; }
         .btn-secondary:hover { background-color: #94a3b8; }
 
-        /* LAYOUT & SIDEBAR */
         .app-container { display: flex; flex: 1; }
         aside { width: 260px; background: white; border-right: 1px solid var(--border-color); padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
         aside button { width: 100%; text-align: left; padding: 0.75rem 1rem; border: none; background: none; border-radius: 6px; color: var(--text-muted); font-weight: 600; cursor: pointer; }
@@ -896,7 +904,6 @@ app.get('*', (req, res) => {
 
         main { flex: 1; padding: 2rem; overflow-y: auto; }
 
-        /* CARDS & GRID */
         .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
         .stat-card { background: white; padding: 1.5rem; border-radius: 8px; border-left: 5px solid var(--primary-green); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
         .stat-card.blue { border-left-color: var(--primary-blue); }
@@ -905,27 +912,21 @@ app.get('*', (req, res) => {
         .stat-card h3 { font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; }
         .stat-card .val { font-size: 1.8rem; font-weight: 700; margin-top: 0.5rem; }
 
-        /* TABLES */
         .table-container { background: white; border-radius: 8px; border: 1px solid var(--border-color); overflow-x: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
         table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
         th { background: #f1f5f9; padding: 0.75rem 1rem; color: var(--text-muted); font-weight: 600; }
         td { padding: 0.75rem 1rem; border-top: 1px solid var(--border-color); }
         tr:hover { background-color: #f8fafc; }
 
-        /* BADGES */
         .badge { padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 700; }
         .badge-success { background: var(--light-green); color: var(--dark-green); }
         .badge-warning { background: #fef3c7; color: #b45309; }
         .badge-danger { background: #fee2e2; color: #b91c1c; }
 
-        /* FORMS & MODALS */
         .form-group { margin-bottom: 1rem; }
         .form-group label { display: block; margin-bottom: 0.4rem; font-weight: 600; font-size: 0.85rem; }
         .form-control { width: 100%; padding: 0.6rem 0.8rem; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.9rem; }
-        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-        .modal { background: white; padding: 2rem; border-radius: 8px; width: 100%; max-width: 600px; max-height: 90vh; overflow-y: auto; }
 
-        /* DIGITAL ID DESIGN */
         .id-card { width: 350px; height: 220px; border-radius: 10px; background: linear-gradient(135deg, #047857, #0284c7); color: white; padding: 12px; position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.2); font-size: 0.8rem; display: inline-block; margin: 10px; vertical-align: top; }
         .id-card-header { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 6px; }
         .id-card-header img { width: 35px; height: 35px; border-radius: 50%; background: white; }
@@ -935,13 +936,10 @@ app.get('*', (req, res) => {
         .id-card-details div { margin-bottom: 3px; }
         .id-card-qr { position: absolute; bottom: 10px; right: 10px; background: white; padding: 4px; border-radius: 4px; }
 
-        /* PRINT MEDIA CONTROL */
         @media print {
             body * { visibility: hidden; }
             #print-area, #print-area * { visibility: visible; }
             #print-area { position: absolute; left: 0; top: 0; width: 100%; }
-            .no-print { display: none !important; }
-            .page-break { page-break-after: always; }
         }
 
         .print-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; width: 100%; max-width: 800px; margin: auto; }
@@ -952,12 +950,10 @@ app.get('*', (req, res) => {
     <div id="print-area"></div>
 
     <script>
-        // CLIENT STATE
         let currentUser = null;
         let systemSettings = {};
         let activeTab = 'dashboard';
 
-        // INIT
         async function initApp() {
             await fetchSettings();
             const res = await fetch('/api/setup/status');
@@ -979,33 +975,17 @@ app.get('*', (req, res) => {
             }
         }
 
-        // INITIAL ADMIN SETUP SCREEN
         function renderFirstSetup() {
             document.getElementById('app').innerHTML = \`
                 <div style="max-width: 450px; margin: 4rem auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
                     <h2 style="color: var(--dark-green); margin-bottom: 0.5rem;">Initial Admin Setup</h2>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">No administrator account exists yet. Please create the first administrator account to initialize the system.</p>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">No administrator account exists yet. Please create the first administrator account.</p>
                     <form onsubmit="handleFirstSetup(event)">
-                        <div class="form-group">
-                            <label>Admin Full Name</label>
-                            <input type="text" id="setupName" class="form-control" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Username</label>
-                            <input type="text" id="setupUsername" class="form-control" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Email Address</label>
-                            <input type="email" id="setupEmail" class="form-control" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Password</label>
-                            <input type="password" id="setupPassword" class="form-control" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Confirm Password</label>
-                            <input type="password" id="setupConfirm" class="form-control" required />
-                        </div>
+                        <div class="form-group"><label>Admin Full Name</label><input type="text" id="setupName" class="form-control" required /></div>
+                        <div class="form-group"><label>Username</label><input type="text" id="setupUsername" class="form-control" required /></div>
+                        <div class="form-group"><label>Email Address</label><input type="email" id="setupEmail" class="form-control" required /></div>
+                        <div class="form-group"><label>Password</label><input type="password" id="setupPassword" class="form-control" required /></div>
+                        <div class="form-group"><label>Confirm Password</label><input type="password" id="setupConfirm" class="form-control" required /></div>
                         <button type="submit" class="btn btn-green" style="width: 100%;">Create Admin Account</button>
                     </form>
                 </div>
@@ -1037,7 +1017,6 @@ app.get('*', (req, res) => {
             }
         }
 
-        // LOGIN SCREEN
         function renderLogin() {
             document.getElementById('app').innerHTML = \`
                 <div style="max-width: 400px; margin: 4rem auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
@@ -1047,14 +1026,8 @@ app.get('*', (req, res) => {
                         <p style="color: var(--text-muted); font-size: 0.85rem;">System Login</p>
                     </div>
                     <form onsubmit="handleLogin(event)">
-                        <div class="form-group">
-                            <label>Username or Email</label>
-                            <input type="text" id="loginUsername" class="form-control" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Password</label>
-                            <input type="password" id="loginPassword" class="form-control" required />
-                        </div>
+                        <div class="form-group"><label>Username or Email</label><input type="text" id="loginUsername" class="form-control" required /></div>
+                        <div class="form-group"><label>Password</label><input type="password" id="loginPassword" class="form-control" required /></div>
                         <button type="submit" class="btn btn-blue" style="width: 100%; margin-top: 0.5rem;">Sign In</button>
                     </form>
                     <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border-color);" />
@@ -1086,7 +1059,6 @@ app.get('*', (req, res) => {
             }
         }
 
-        // PUBLIC RESIDENT REGISTRATION
         async function renderRegistration() {
             const puroksRes = await fetch('/api/puroks');
             const puroks = await puroksRes.json();
@@ -1098,81 +1070,32 @@ app.get('*', (req, res) => {
                     
                     <form onsubmit="handleRegistration(event)">
                         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
-                            <div class="form-group">
-                                <label>First Name *</label>
-                                <input type="text" id="regFirst" class="form-control" required />
-                            </div>
-                            <div class="form-group">
-                                <label>Middle Name</label>
-                                <input type="text" id="regMiddle" class="form-control" />
-                            </div>
-                            <div class="form-group">
-                                <label>Last Name *</label>
-                                <input type="text" id="regLast" class="form-control" required />
-                            </div>
+                            <div class="form-group"><label>First Name *</label><input type="text" id="regFirst" class="form-control" required /></div>
+                            <div class="form-group"><label>Middle Name</label><input type="text" id="regMiddle" class="form-control" /></div>
+                            <div class="form-group"><label>Last Name *</label><input type="text" id="regLast" class="form-control" required /></div>
                         </div>
 
                         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
-                            <div class="form-group">
-                                <label>Suffix</label>
-                                <input type="text" id="regSuffix" class="form-control" placeholder="e.g. Jr, III" />
-                            </div>
-                            <div class="form-group">
-                                <label>Date of Birth *</label>
-                                <input type="date" id="regDob" class="form-control" required />
-                            </div>
-                            <div class="form-group">
-                                <label>Gender *</label>
-                                <select id="regGender" class="form-control" required>
-                                    <option value="Male">Male</option>
-                                    <option value="Female">Female</option>
-                                </select>
-                            </div>
+                            <div class="form-group"><label>Suffix</label><input type="text" id="regSuffix" class="form-control" placeholder="e.g. Jr, III" /></div>
+                            <div class="form-group"><label>Date of Birth *</label><input type="date" id="regDob" class="form-control" required /></div>
+                            <div class="form-group"><label>Gender *</label><select id="regGender" class="form-control" required><option value="Male">Male</option><option value="Female">Female</option></select></div>
                         </div>
 
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                            <div class="form-group">
-                                <label>Civil Status *</label>
-                                <select id="regCivil" class="form-control" required>
-                                    <option value="Single">Single</option>
-                                    <option value="Married">Married</option>
-                                    <option value="Widowed">Widowed</option>
-                                    <option value="Separated">Separated</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Purok *</label>
-                                <select id="regPurok" class="form-control">
-                                    \${puroks.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')}
-                                </select>
-                            </div>
+                            <div class="form-group"><label>Civil Status *</label><select id="regCivil" class="form-control" required><option value="Single">Single</option><option value="Married">Married</option><option value="Widowed">Widowed</option><option value="Separated">Separated</option></select></div>
+                            <div class="form-group"><label>Purok *</label><select id="regPurok" class="form-control">\${puroks.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')}</select></div>
                         </div>
 
-                        <div class="form-group">
-                            <label>Complete Address *</label>
-                            <input type="text" id="regAddress" class="form-control" required />
+                        <div class="form-group"><label>Complete Address *</label><input type="text" id="regAddress" class="form-control" required /></div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="form-group"><label>Contact Number</label><input type="text" id="regContact" class="form-control" /></div>
+                            <div class="form-group"><label>Email Address *</label><input type="email" id="regEmail" class="form-control" required /></div>
                         </div>
 
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                            <div class="form-group">
-                                <label>Contact Number</label>
-                                <input type="text" id="regContact" class="form-control" />
-                            </div>
-                            <div class="form-group">
-                                <label>Email Address *</label>
-                                <input type="email" id="regEmail" class="form-control" required />
-                            </div>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                            <div class="form-group">
-                                <label>Username *</label>
-                                <input type="text" id="regUsername" class="form-control" required />
-                            </div>
-                            <div class="form-group">
-                                <label>Password *</label>
-                                <input type="password" id="regPassword" class="form-control" required />
-                            </div>
+                            <div class="form-group"><label>Username *</label><input type="text" id="regUsername" class="form-control" required /></div>
+                            <div class="form-group"><label>Password *</label><input type="password" id="regPassword" class="form-control" required /></div>
                         </div>
 
                         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 0.5rem;">
@@ -1230,8 +1153,8 @@ app.get('*', (req, res) => {
                 document.getElementById('app').innerHTML = \`
                     <div style="max-width: 500px; margin: 4rem auto; background: white; padding: 2rem; border-radius: 8px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
                         <h2 style="color: var(--primary-green);">Registration Successful</h2>
-                        <p style="margin: 1rem 0; color: var(--text-muted);">Your registration is currently: <strong>PENDING APPROVAL</strong>.</p>
-                        <p style="font-size: 0.85rem; color: var(--text-muted);">Please wait for barangay staff to review your submitted information. You can try logging in later.</p>
+                        <p style="margin: 1rem 0; color: var(--text-muted);">Your registration status is: <strong>PENDING APPROVAL</strong>.</p>
+                        <p style="font-size: 0.85rem; color: var(--text-muted);">Please wait for barangay staff to review your submitted information.</p>
                         <button onclick="renderLogin()" class="btn btn-blue" style="margin-top: 1.5rem;">Go to Login</button>
                     </div>
                 \`;
@@ -1240,7 +1163,6 @@ app.get('*', (req, res) => {
             }
         }
 
-        // MAIN PORTAL CONTAINER (STAFF & RESIDENT)
         function renderPortal() {
             const isStaff = ['admin', 'captain', 'secretary', 'staff'].includes(currentUser.role);
 
@@ -1265,41 +1187,48 @@ app.get('*', (req, res) => {
             \`;
 
             renderSidebar(isStaff);
-            loadTab('dashboard');
+            loadTab(isStaff ? 'dashboard' : 'res-dashboard');
         }
 
         function renderSidebar(isStaff) {
             const nav = document.getElementById('sidebar-nav');
             if (isStaff) {
                 nav.innerHTML = \`
-                    <button onclick="loadTab('dashboard')" class="active">Dashboard</button>
-                    <button onclick="loadTab('residents')">Resident Records</button>
-                    <button onclick="loadTab('households')">Households</button>
-                    <button onclick="loadTab('puroks')">Puroks</button>
-                    <button onclick="loadTab('certificates')">Certificates</button>
-                    <button onclick="loadTab('appointments')">Appointments</button>
-                    <button onclick="loadTab('complaints')">Blotter / Complaints</button>
-                    <button onclick="loadTab('assistance')">Assistance Requests</button>
-                    <button onclick="loadTab('announcements')">Announcements</button>
-                    <button onclick="loadTab('businesses')">Local Businesses</button>
-                    <button onclick="loadTab('printing')">Batch Print IDs</button>
-                    \${currentUser.role === 'admin' ? \`<button onclick="loadTab('settings')">Barangay Settings</button>\` : ''}
+                    <button onclick="loadTab('dashboard')" id="nav-dashboard">Dashboard</button>
+                    <button onclick="loadTab('residents')" id="nav-residents">Resident Records</button>
+                    <button onclick="loadTab('households')" id="nav-households">Households</button>
+                    <button onclick="loadTab('puroks')" id="nav-puroks">Puroks</button>
+                    <button onclick="loadTab('certificates')" id="nav-certificates">Certificates</button>
+                    <button onclick="loadTab('appointments')" id="nav-appointments">Appointments</button>
+                    <button onclick="loadTab('complaints')" id="nav-complaints">Blotter / Complaints</button>
+                    <button onclick="loadTab('assistance')" id="nav-assistance">Assistance Requests</button>
+                    <button onclick="loadTab('announcements')" id="nav-announcements">Announcements</button>
+                    <button onclick="loadTab('businesses')" id="nav-businesses">Local Businesses</button>
+                    <button onclick="loadTab('printing')" id="nav-printing">Batch Print IDs</button>
+                    \${currentUser.role === 'admin' ? \`<button onclick="loadTab('settings')" id="nav-settings">Barangay Settings</button>\` : ''}
                 \`;
             } else {
                 nav.innerHTML = \`
-                    <button onclick="loadTab('res-dashboard')" class="active">My Dashboard</button>
-                    <button onclick="loadTab('res-profile')">My Profile</button>
-                    <button onclick="loadTab('res-id')">My Digital ID</button>
-                    <button onclick="loadTab('res-certificates')">Request Certificate</button>
-                    <button onclick="loadTab('res-appointments')">Book Appointment</button>
-                    <button onclick="loadTab('res-complaints')">Report Incident</button>
-                    <button onclick="loadTab('res-assistance')">Request Assistance</button>
+                    <button onclick="loadTab('res-dashboard')" id="nav-res-dashboard">My Dashboard</button>
+                    <button onclick="loadTab('res-profile')" id="nav-res-profile">My Profile</button>
+                    <button onclick="loadTab('res-id')" id="nav-res-id">My Digital ID</button>
+                    <button onclick="loadTab('res-certificates')" id="nav-res-certificates">Request Certificate</button>
+                    <button onclick="loadTab('res-appointments')" id="nav-res-appointments">Book Appointment</button>
+                    <button onclick="loadTab('res-complaints')" id="nav-res-complaints">Report Incident</button>
+                    <button onclick="loadTab('res-assistance')" id="nav-res-assistance">Request Assistance</button>
                 \`;
             }
         }
 
+        function setActiveNav(tab) {
+            document.querySelectorAll('aside button').forEach(btn => btn.classList.remove('active'));
+            const targetBtn = document.getElementById(\`nav-\${tab}\`);
+            if (targetBtn) targetBtn.classList.add('active');
+        }
+
         async function loadTab(tab) {
             activeTab = tab;
+            setActiveNav(tab);
             const content = document.getElementById('portal-content');
             content.innerHTML = '<p>Loading page content...</p>';
 
@@ -1360,30 +1289,309 @@ app.get('*', (req, res) => {
                         </table>
                     </div>
                 \`;
+            } else if (tab === 'puroks') {
+                const res = await fetch('/api/puroks');
+                const puroks = await res.json();
+                content.innerHTML = \`
+                    <h2>Purok Management</h2>
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1rem;">
+                        <form onsubmit="addPurok(event)" style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <h3>Add New Purok</h3>
+                            <div class="form-group" style="margin-top: 1rem;">
+                                <label>Purok Name</label>
+                                <input type="text" id="purokName" class="form-control" required />
+                            </div>
+                            <div class="form-group">
+                                <label>Description</label>
+                                <textarea id="purokDesc" class="form-control"></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-green" style="width:100%;">Add Purok</button>
+                        </form>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr><th>Name</th><th>Description</th><th>Action</th></tr>
+                                </thead>
+                                <tbody>
+                                    \${puroks.map(p => \`
+                                        <tr>
+                                            <td><strong>\${p.name}</strong></td>
+                                            <td>\${p.description || '-'}</td>
+                                            <td><button onclick="deletePurok('\${p.id}')" class="btn btn-danger" style="padding:0.2rem 0.5rem; font-size:0.75rem;">Delete</button></td>
+                                        </tr>
+                                    \`).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                \`;
+            } else if (tab === 'households') {
+                const [hRes, pRes] = await Promise.all([fetch('/api/households'), fetch('/api/puroks')]);
+                const households = await hRes.json();
+                const puroks = await pRes.json();
+                content.innerHTML = \`
+                    <h2>Household Management</h2>
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1rem;">
+                        <form onsubmit="addHousehold(event)" style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <h3>Add Household</h3>
+                            <div class="form-group" style="margin-top: 1rem;">
+                                <label>Household Number</label>
+                                <input type="text" id="hhNumber" class="form-control" required placeholder="HH-001" />
+                            </div>
+                            <div class="form-group">
+                                <label>Purok</label>
+                                <select id="hhPurok" class="form-control">
+                                    \${puroks.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Address</label>
+                                <input type="text" id="hhAddress" class="form-control" required />
+                            </div>
+                            <button type="submit" class="btn btn-green" style="width:100%;">Save Household</button>
+                        </form>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr><th>Household #</th><th>Purok</th><th>Address</th></tr>
+                                </thead>
+                                <tbody>
+                                    \${households.map(h => \`
+                                        <tr>
+                                            <td><strong>\${h.household_number}</strong></td>
+                                            <td>\${h.puroks ? h.puroks.name : '-'}</td>
+                                            <td>\${h.address}</td>
+                                        </tr>
+                                    \`).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                \`;
+            } else if (tab === 'certificates') {
+                const res = await fetch('/api/certificates');
+                const certs = await res.json();
+                content.innerHTML = \`
+                    <h2>Certificate Requests</h2>
+                    <div class="table-container" style="margin-top: 1rem;">
+                        <table>
+                            <thead>
+                                <tr><th>Resident</th><th>Type</th><th>Purpose</th><th>Status</th><th>Actions</th></tr>
+                            </thead>
+                            <tbody>
+                                \${certs.map(c => \`
+                                    <tr>
+                                        <td>\${c.residents ? c.residents.first_name + ' ' + c.residents.last_name : 'N/A'}</td>
+                                        <td>\${c.certificate_type}</td>
+                                        <td>\${c.purpose}</td>
+                                        <td><span class="badge \${c.status === 'Approved' || c.status === 'Released' ? 'badge-success' : (c.status === 'Pending' ? 'badge-warning' : 'badge-danger')}">\${c.status}</span></td>
+                                        <td>
+                                            \${c.status === 'Pending' ? \`
+                                                <button onclick="processCert('\${c.id}', 'Approved')" class="btn btn-green" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Approve</button>
+                                                <button onclick="processCert('\${c.id}', 'Rejected')" class="btn btn-danger" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Reject</button>
+                                            \` : ''}
+                                            \${c.status === 'Approved' ? \`
+                                                <button onclick="processCert('\${c.id}', 'Ready for Release')" class="btn btn-blue" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Mark Ready</button>
+                                            \` : ''}
+                                            \${c.status === 'Ready for Release' ? \`
+                                                <button onclick="processCert('\${c.id}', 'Released')" class="btn btn-secondary" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Mark Released</button>
+                                            \` : ''}
+                                        </td>
+                                    </tr>
+                                \`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                \`;
+            } else if (tab === 'appointments') {
+                const res = await fetch('/api/appointments');
+                const appts = await res.json();
+                content.innerHTML = \`
+                    <h2>Appointment Schedule</h2>
+                    <div class="table-container" style="margin-top: 1rem;">
+                        <table>
+                            <thead>
+                                <tr><th>Resident</th><th>Service</th><th>Preferred Date</th><th>Time</th><th>Status</th><th>Action</th></tr>
+                            </thead>
+                            <tbody>
+                                \${appts.map(a => \`
+                                    <tr>
+                                        <td>\${a.residents ? a.residents.first_name + ' ' + a.residents.last_name : 'N/A'}</td>
+                                        <td>\${a.service_type}</td>
+                                        <td>\${a.preferred_date}</td>
+                                        <td>\${a.preferred_time}</td>
+                                        <td><span class="badge \${a.status === 'Approved' ? 'badge-success' : 'badge-warning'}">\${a.status}</span></td>
+                                        <td>
+                                            \${a.status === 'Pending' ? \`
+                                                <button onclick="updateAppt('\${a.id}', 'Approved')" class="btn btn-green" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Approve</button>
+                                                <button onclick="updateAppt('\${a.id}', 'Rejected')" class="btn btn-danger" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Reject</button>
+                                            \` : ''}
+                                        </td>
+                                    </tr>
+                                \`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                \`;
+            } else if (tab === 'complaints') {
+                const res = await fetch('/api/complaints');
+                const complaints = await res.json();
+                content.innerHTML = \`
+                    <h2>Blotter / Complaint Records</h2>
+                    <div class="table-container" style="margin-top: 1rem;">
+                        <table>
+                            <thead>
+                                <tr><th>Case #</th><th>Complainant</th><th>Respondent</th><th>Type</th><th>Incident Date</th><th>Status</th><th>Action</th></tr>
+                            </thead>
+                            <tbody>
+                                \${complaints.map(c => \`
+                                    <tr>
+                                        <td><strong>\${c.case_number}</strong></td>
+                                        <td>\${c.complainant_name}</td>
+                                        <td>\${c.respondent_name}</td>
+                                        <td>\${c.complaint_type}</td>
+                                        <td>\${c.incident_date}</td>
+                                        <td><span class="badge badge-warning">\${c.status}</span></td>
+                                        <td>
+                                            <button onclick="updateComplaint('\${c.id}', 'Under Review')" class="btn btn-blue" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Review</button>
+                                            <button onclick="updateComplaint('\${c.id}', 'Resolved')" class="btn btn-green" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Resolve</button>
+                                        </td>
+                                    </tr>
+                                \`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                \`;
+            } else if (tab === 'assistance') {
+                const res = await fetch('/api/assistance');
+                const assist = await res.json();
+                content.innerHTML = \`
+                    <h2>Assistance Requests</h2>
+                    <div class="table-container" style="margin-top: 1rem;">
+                        <table>
+                            <thead>
+                                <tr><th>Resident</th><th>Assistance Type</th><th>Details</th><th>Status</th><th>Action</th></tr>
+                            </thead>
+                            <tbody>
+                                \${assist.map(a => \`
+                                    <tr>
+                                        <td>\${a.residents ? a.residents.first_name + ' ' + a.residents.last_name : 'N/A'}</td>
+                                        <td>\${a.assistance_type}</td>
+                                        <td>\${a.details}</td>
+                                        <td><span class="badge \${a.status === 'Approved' ? 'badge-success' : 'badge-warning'}">\${a.status}</span></td>
+                                        <td>
+                                            \${a.status === 'Pending' ? \`
+                                                <button onclick="updateAssist('\${a.id}', 'Approved')" class="btn btn-green" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Approve</button>
+                                                <button onclick="updateAssist('\${a.id}', 'Rejected')" class="btn btn-danger" style="padding: 0.2rem 0.5rem; font-size:0.75rem;">Reject</button>
+                                            \` : ''}
+                                        </td>
+                                    </tr>
+                                \`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                \`;
+            } else if (tab === 'announcements') {
+                const res = await fetch('/api/announcements');
+                const ann = await res.json();
+                content.innerHTML = \`
+                    <h2>Community Announcements</h2>
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1rem;">
+                        <form onsubmit="postAnnouncement(event)" style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <h3>Post New Announcement</h3>
+                            <div class="form-group" style="margin-top:1rem;">
+                                <label>Title</label>
+                                <input type="text" id="annTitle" class="form-control" required />
+                            </div>
+                            <div class="form-group">
+                                <label>Category</label>
+                                <select id="annCategory" class="form-control">
+                                    <option value="General">General</option>
+                                    <option value="Emergency">Emergency</option>
+                                    <option value="Event">Event</option>
+                                    <option value="Health">Health</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Description</label>
+                                <textarea id="annDesc" class="form-control" required></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-green" style="width:100%;">Publish</button>
+                        </form>
+                        <div>
+                            \${ann.map(a => \`
+                                <div style="background: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid var(--border-color);">
+                                    <span class="badge badge-success" style="float: right;">\${a.category}</span>
+                                    <h3>\${a.title}</h3>
+                                    <p style="color: var(--text-muted); margin-top: 0.5rem;">\${a.description}</p>
+                                    <small style="color: #94a3b8; display:block; margin-top:0.5rem;">Posted on: \${new Date(a.created_at).toLocaleDateString()}</small>
+                                </div>
+                            \`).join('')}
+                        </div>
+                    </div>
+                \`;
+            } else if (tab === 'businesses') {
+                const res = await fetch('/api/businesses');
+                const biz = await res.json();
+                content.innerHTML = \`
+                    <h2>Local Business Permits</h2>
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1rem;">
+                        <form onsubmit="addBusiness(event)" style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <h3>Register Business</h3>
+                            <div class="form-group" style="margin-top:1rem;">
+                                <label>Business Name</label>
+                                <input type="text" id="bizName" class="form-control" required />
+                            </div>
+                            <div class="form-group">
+                                <label>Owner Name</label>
+                                <input type="text" id="bizOwner" class="form-control" required />
+                            </div>
+                            <div class="form-group">
+                                <label>Business Type</label>
+                                <input type="text" id="bizType" class="form-control" required placeholder="e.g. Sari-Sari Store" />
+                            </div>
+                            <div class="form-group">
+                                <label>Address</label>
+                                <input type="text" id="bizAddress" class="form-control" required />
+                            </div>
+                            <div class="form-group">
+                                <label>Permit Number</label>
+                                <input type="text" id="bizPermit" class="form-control" required placeholder="BP-2026-001" />
+                            </div>
+                            <div class="form-group">
+                                <label>Expiration Date</label>
+                                <input type="date" id="bizExp" class="form-control" required />
+                            </div>
+                            <button type="submit" class="btn btn-green" style="width:100%;">Save Business</button>
+                        </form>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr><th>Business</th><th>Owner</th><th>Permit #</th><th>Status</th></tr>
+                                </thead>
+                                <tbody>
+                                    \${biz.map(b => \`
+                                        <tr>
+                                            <td><strong>\${b.business_name}</strong><br><small>\${b.business_type}</small></td>
+                                            <td>\${b.owner_name}</td>
+                                            <td>\${b.permit_number}</td>
+                                            <td><span class="badge badge-success">\${b.permit_status}</span></td>
+                                        </tr>
+                                    \`).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                \`;
             } else if (tab === 'settings') {
                 content.innerHTML = \`
                     <h2>Barangay Settings</h2>
                     <form onsubmit="saveSettings(event)" style="max-width: 600px; margin-top: 1rem; background: white; padding: 1.5rem; border-radius: 8px;">
-                        <div class="form-group">
-                            <label>Barangay Name</label>
-                            <input type="text" id="setBrgy" class="form-control" value="\${systemSettings.barangay_name || ''}" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Municipality</label>
-                            <input type="text" id="setMuni" class="form-control" value="\${systemSettings.municipality || ''}" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Province</label>
-                            <input type="text" id="setProv" class="form-control" value="\${systemSettings.province || ''}" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Captain Name</label>
-                            <input type="text" id="setCap" class="form-control" value="\${systemSettings.captain_name || ''}" />
-                        </div>
-                        <div class="form-group">
-                            <label>Barangay Logo</label>
-                            <input type="file" id="setLogo" class="form-control" accept="image/*" />
-                        </div>
+                        <div class="form-group"><label>Barangay Name</label><input type="text" id="setBrgy" class="form-control" value="\${systemSettings.barangay_name || ''}" required /></div>
+                        <div class="form-group"><label>Municipality</label><input type="text" id="setMuni" class="form-control" value="\${systemSettings.municipality || ''}" required /></div>
+                        <div class="form-group"><label>Province</label><input type="text" id="setProv" class="form-control" value="\${systemSettings.province || ''}" required /></div>
+                        <div class="form-group"><label>Captain Name</label><input type="text" id="setCap" class="form-control" value="\${systemSettings.captain_name || ''}" /></div>
+                        <div class="form-group"><label>Barangay Logo</label><input type="file" id="setLogo" class="form-control" accept="image/*" /></div>
                         <button type="submit" class="btn btn-green">Save Changes</button>
                     </form>
                 \`;
@@ -1397,12 +1605,7 @@ app.get('*', (req, res) => {
                     <div class="table-container">
                         <table>
                             <thead>
-                                <tr>
-                                    <th>Select</th>
-                                    <th>ID</th>
-                                    <th>Name</th>
-                                    <th>Address</th>
-                                </tr>
+                                <tr><th>Select</th><th>ID</th><th>Name</th><th>Address</th></tr>
                             </thead>
                             <tbody>
                                 \${residents.map(r => \`
@@ -1415,6 +1618,84 @@ app.get('*', (req, res) => {
                                 \`).join('')}
                             </tbody>
                         </table>
+                    </div>
+                \`;
+            } else if (tab === 'res-dashboard') {
+                const [cRes, aRes, nRes] = await Promise.all([
+                    fetch('/api/certificates'),
+                    fetch('/api/appointments'),
+                    fetch('/api/notifications')
+                ]);
+                const certs = await cRes.json();
+                const appts = await aRes.json();
+                const notifs = await nRes.json();
+
+                content.innerHTML = \`
+                    <h2>Resident Portal Dashboard</h2>
+                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; margin-top: 1rem;">
+                        <div>
+                            <div class="stat-card blue" style="margin-bottom: 1.5rem;">
+                                <h3>Account Overview</h3>
+                                <div class="val" style="font-size: 1.2rem;">\${currentUser.name}</div>
+                                <p style="color: var(--text-muted); font-size: 0.85rem;">Status: Active Barangay Resident</p>
+                            </div>
+                            <h3>Recent Certificate Requests</h3>
+                            <div class="table-container" style="margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                                <table>
+                                    <thead><tr><th>Type</th><th>Purpose</th><th>Status</th></tr></thead>
+                                    <tbody>
+                                        \${certs.slice(0, 5).map(c => \`
+                                            <tr>
+                                                <td>\${c.certificate_type}</td>
+                                                <td>\${c.purpose}</td>
+                                                <td><span class="badge \${c.status === 'Approved' || c.status === 'Released' ? 'badge-success' : 'badge-warning'}">\${c.status}</span></td>
+                                            </tr>
+                                        \`).join('')}
+                                        \${certs.length === 0 ? '<tr><td colspan="3">No requests found.</td></tr>' : ''}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <h3>Notifications</h3>
+                            <div style="margin-top: 1rem;">
+                                \${notifs.map(n => \`
+                                    <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; margin-bottom: 0.5rem;">
+                                        <strong>\${n.title}</strong>
+                                        <p style="font-size: 0.8rem; color: var(--text-muted);">\${n.message}</p>
+                                    </div>
+                                \`).join('')}
+                                \${notifs.length === 0 ? '<p style="font-size: 0.85rem; color: var(--text-muted);">No new notifications.</p>' : ''}
+                            </div>
+                        </div>
+                    </div>
+                \`;
+            } else if (tab === 'res-profile') {
+                const res = await fetch('/api/residents');
+                const list = await res.json();
+                const myRec = list[0] || {};
+
+                content.innerHTML = \`
+                    <h2>My Official Profile</h2>
+                    <div style="max-width: 600px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
+                        <div style="display: flex; gap: 1.5rem; align-items: center; margin-bottom: 1.5rem;">
+                            <img src="\${myRec.profile_photo || 'https://via.placeholder.com/100'}" style="width: 90px; height: 90px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary-green);" />
+                            <div>
+                                <h3 style="color: var(--dark-green);">\${myRec.first_name || ''} \${myRec.middle_name || ''} \${myRec.last_name || ''}</h3>
+                                <p style="color: var(--text-muted); font-size: 0.85rem;">Resident ID: <strong>\${myRec.resident_id || 'PENDING'}</strong></p>
+                                <span class="badge badge-success">\${myRec.approval_status || 'Pending'}</span>
+                            </div>
+                        </div>
+                        <hr style="margin-bottom: 1rem; border: none; border-top: 1px solid var(--border-color);" />
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: 0.9rem;">
+                            <div><strong>Date of Birth:</strong> \${myRec.date_of_birth || '-'}</div>
+                            <div><strong>Gender:</strong> \${myRec.gender || '-'}</div>
+                            <div><strong>Civil Status:</strong> \${myRec.civil_status || '-'}</div>
+                            <div><strong>Contact:</strong> \${myRec.contact_number || '-'}</div>
+                            <div><strong>Email:</strong> \${myRec.email || '-'}</div>
+                            <div><strong>Occupation:</strong> \${myRec.occupation || '-'}</div>
+                            <div style="grid-column: span 2;"><strong>Address:</strong> \${myRec.address || '-'}</div>
+                        </div>
                     </div>
                 \`;
             } else if (tab === 'res-id') {
@@ -1452,11 +1733,116 @@ app.get('*', (req, res) => {
                         QRCode.toCanvas(document.getElementById('qrcode-box'), \`\${window.location.origin}/api/verify/resident/\${myRec.resident_id}\`, { width: 50 });
                     }, 100);
                 }
-            } else {
-                content.innerHTML = \`<h2>Module Page</h2><p>Interface loaded for \${tab}.</p>\`;
+            } else if (tab === 'res-certificates') {
+                content.innerHTML = \`
+                    <h2>Request Official Certificate</h2>
+                    <form onsubmit="requestCert(event)" style="max-width: 500px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
+                        <div class="form-group">
+                            <label>Certificate Type</label>
+                            <select id="certType" class="form-control" required>
+                                <option value="Barangay Clearance">Barangay Clearance</option>
+                                <option value="Certificate of Residency">Certificate of Residency</option>
+                                <option value="Certificate of Indigency">Certificate of Indigency</option>
+                                <option value="Certificate of Good Moral Character">Certificate of Good Moral Character</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Purpose</label>
+                            <textarea id="certPurpose" class="form-control" required placeholder="e.g. Employment, Scholarship"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-green" style="width:100%;">Submit Certificate Request</button>
+                    </form>
+                \`;
+            } else if (tab === 'res-appointments') {
+                content.innerHTML = \`
+                    <h2>Book an Appointment</h2>
+                    <form onsubmit="bookAppt(event)" style="max-width: 500px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
+                        <div class="form-group">
+                            <label>Service Type</label>
+                            <select id="apptService" class="form-control" required>
+                                <option value="Consultation">Consultation</option>
+                                <option value="Document Pick-up">Document Pick-up</option>
+                                <option value="Lupon / Mediation">Lupon / Mediation</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Preferred Date</label>
+                            <input type="date" id="apptDate" class="form-control" required />
+                        </div>
+                        <div class="form-group">
+                            <label>Preferred Time</label>
+                            <input type="time" id="apptTime" class="form-control" required />
+                        </div>
+                        <div class="form-group">
+                            <label>Purpose / Details</label>
+                            <textarea id="apptPurpose" class="form-control" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-green" style="width:100%;">Submit Appointment</button>
+                    </form>
+                \`;
+            } else if (tab === 'res-complaints') {
+                content.innerHTML = \`
+                    <h2>File Incident / Complaint Report</h2>
+                    <form onsubmit="submitComplaint(event)" style="max-width: 600px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
+                        <div class="form-group">
+                            <label>Respondent Name (Inirereklamo)</label>
+                            <input type="text" id="compRespondent" class="form-control" required />
+                        </div>
+                        <div class="form-group">
+                            <label>Witnesses (Mga Saksi)</label>
+                            <input type="text" id="compWitnesses" class="form-control" placeholder="Optional" />
+                        </div>
+                        <div class="form-group">
+                            <label>Complaint Type</label>
+                            <select id="compType" class="form-control" required>
+                                <option value="Noise Disturbance">Noise Disturbance</option>
+                                <option value="Property Dispute">Property Dispute</option>
+                                <option value="Physical Altercation">Physical Altercation</option>
+                                <option value="Other Concerns">Other Concerns</option>
+                            </select>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="form-group">
+                                <label>Incident Date</label>
+                                <input type="date" id="compDate" class="form-control" required />
+                            </div>
+                            <div class="form-group">
+                                <label>Location</label>
+                                <input type="text" id="compLoc" class="form-control" required />
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Description of Incident</label>
+                            <textarea id="compDesc" class="form-control" required style="height:100px;"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-danger" style="width:100%;">Submit Complaint Report</button>
+                    </form>
+                \`;
+            } else if (tab === 'res-assistance') {
+                content.innerHTML = \`
+                    <h2>Request Barangay Assistance</h2>
+                    <form onsubmit="requestAssist(event)" style="max-width: 500px; background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 1rem;">
+                        <div class="form-group">
+                            <label>Assistance Type</label>
+                            <select id="assistType" class="form-control" required>
+                                <option value="Financial Assistance">Financial Assistance</option>
+                                <option value="Medical Assistance">Medical Assistance</option>
+                                <option value="Educational Assistance">Educational Assistance</option>
+                                <option value="Food Assistance">Food Assistance</option>
+                                <option value="Emergency Relief">Emergency Relief</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Details / Reason</label>
+                            <textarea id="assistDetails" class="form-control" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-green" style="width:100%;">Submit Request</button>
+                    </form>
+                \`;
             }
         }
 
+        // HANDLERS FOR STAFF & RESIDENT ACTIONS
         async function reviewResident(id, status) {
             let reason = '';
             if (status === 'Rejected') {
@@ -1490,6 +1876,177 @@ app.get('*', (req, res) => {
             if (data.success) {
                 loadTab('residents');
             }
+        }
+
+        async function addPurok(e) {
+            e.preventDefault();
+            const res = await fetch('/api/puroks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: document.getElementById('purokName').value,
+                    description: document.getElementById('purokDesc').value
+                })
+            });
+            const data = await res.json();
+            if (data.success) { alert('Purok added!'); loadTab('puroks'); }
+        }
+
+        async function deletePurok(id) {
+            if (!confirm('Are you sure you want to delete this Purok?')) return;
+            const res = await fetch(\`/api/puroks/\${id}\`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) { alert('Purok deleted!'); loadTab('puroks'); }
+        }
+
+        async function addHousehold(e) {
+            e.preventDefault();
+            const res = await fetch('/api/households', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    householdNumber: document.getElementById('hhNumber').value,
+                    purokId: document.getElementById('hhPurok').value,
+                    address: document.getElementById('hhAddress').value
+                })
+            });
+            const data = await res.json();
+            if (data.success) { alert('Household created!'); loadTab('households'); }
+        }
+
+        async function processCert(id, status) {
+            const res = await fetch('/api/certificates/process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ requestId: id, status })
+            });
+            const data = await res.json();
+            if (data.success) { alert(\`Status updated to \${status}\`); loadTab('certificates'); }
+        }
+
+        async function updateAppt(id, status) {
+            const res = await fetch('/api/appointments/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ appointmentId: id, status })
+            });
+            const data = await res.json();
+            if (data.success) { alert(\`Appointment updated to \${status}\`); loadTab('appointments'); }
+        }
+
+        async function updateComplaint(id, status) {
+            const res = await fetch('/api/complaints/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ complaintId: id, status })
+            });
+            const data = await res.json();
+            if (data.success) { alert(\`Complaint status updated to \${status}\`); loadTab('complaints'); }
+        }
+
+        async function updateAssist(id, status) {
+            const res = await fetch('/api/assistance/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ requestId: id, status })
+            });
+            const data = await res.json();
+            if (data.success) { alert(\`Assistance request updated to \${status}\`); loadTab('assistance'); }
+        }
+
+        async function postAnnouncement(e) {
+            e.preventDefault();
+            const res = await fetch('/api/announcements', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: document.getElementById('annTitle').value,
+                    category: document.getElementById('annCategory').value,
+                    description: document.getElementById('annDesc').value
+                })
+            });
+            const data = await res.json();
+            if (data.success) { alert('Announcement published!'); loadTab('announcements'); }
+        }
+
+        async function addBusiness(e) {
+            e.preventDefault();
+            const res = await fetch('/api/businesses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    businessName: document.getElementById('bizName').value,
+                    ownerName: document.getElementById('bizOwner').value,
+                    businessType: document.getElementById('bizType').value,
+                    address: document.getElementById('bizAddress').value,
+                    permitNumber: document.getElementById('bizPermit').value,
+                    expirationDate: document.getElementById('bizExp').value
+                })
+            });
+            const data = await res.json();
+            if (data.success) { alert('Business record saved!'); loadTab('businesses'); }
+        }
+
+        async function requestCert(e) {
+            e.preventDefault();
+            const res = await fetch('/api/certificates/request', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    certificateType: document.getElementById('certType').value,
+                    purpose: document.getElementById('certPurpose').value
+                })
+            });
+            const data = await res.json();
+            if (data.success) { alert('Certificate request submitted!'); loadTab('res-dashboard'); }
+        }
+
+        async function bookAppt(e) {
+            e.preventDefault();
+            const res = await fetch('/api/appointments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    serviceType: document.getElementById('apptService').value,
+                    preferredDate: document.getElementById('apptDate').value,
+                    preferredTime: document.getElementById('apptTime').value,
+                    purpose: document.getElementById('apptPurpose').value
+                })
+            });
+            const data = await res.json();
+            if (data.success) { alert('Appointment booked!'); loadTab('res-dashboard'); }
+        }
+
+        async function submitComplaint(e) {
+            e.preventDefault();
+            const res = await fetch('/api/complaints', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    respondentName: document.getElementById('compRespondent').value,
+                    witnessNames: document.getElementById('compWitnesses').value,
+                    complaintType: document.getElementById('compType').value,
+                    incidentDate: document.getElementById('compDate').value,
+                    incidentLocation: document.getElementById('compLoc').value,
+                    description: document.getElementById('compDesc').value
+                })
+            });
+            const data = await res.json();
+            if (data.success) { alert('Complaint filed successfully!'); loadTab('res-dashboard'); }
+        }
+
+        async function requestAssist(e) {
+            e.preventDefault();
+            const res = await fetch('/api/assistance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    assistanceType: document.getElementById('assistType').value,
+                    details: document.getElementById('assistDetails').value
+                })
+            });
+            const data = await res.json();
+            if (data.success) { alert('Assistance request submitted!'); loadTab('res-dashboard'); }
         }
 
         async function saveSettings(e) {
@@ -1558,13 +2115,21 @@ app.get('*', (req, res) => {
             }, 500);
         }
 
+        function filterResidentTable(query) {
+            const q = query.toLowerCase();
+            const rows = document.querySelectorAll('#res-tbl tr');
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                row.style.display = text.includes(q) ? '' : 'none';
+            });
+        }
+
         async function handleLogout() {
             await fetch('/api/auth/logout', { method: 'POST' });
             currentUser = null;
             renderLogin();
         }
 
-        // STARTUP
         window.onload = initApp;
     </script>
 </body>
