@@ -1,4 +1,4 @@
-\/**
+/**
  * BARANGAY RESIDENT MANAGEMENT SYSTEM (PRODUCTION)
  * Express.js Server + Supabase Client + PDF/QR Utilities
  * Direct deployment compatible with Render
