@@ -10,13 +10,16 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
-    "bcryptjs": "^2.4.3",
+    "@supabase/supabase-js": "^2.49.1",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "helmet": "^7.1.0",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
-    "qrcode": "^1.5.3"
+    "qrcode": "^1.5.4"
   }
 }
+```[cite: 2]
+
+If you need to add specific packages (like dotenv, mongoose, etc.) or specific version constraints, just let me know!
