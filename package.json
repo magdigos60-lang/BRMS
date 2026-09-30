@@ -20,6 +20,3 @@
     "qrcode": "^1.5.4"
   }
 }
-```[cite: 2]
-
-If you need to add specific packages (like dotenv, mongoose, etc.) or specific version constraints, just let me know!
