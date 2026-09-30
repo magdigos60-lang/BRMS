@@ -102,76 +102,56 @@ async function logActivity(userId, userName, action, details, ip) {
    API ENDPOINTS
    ========================================================================== */
 
-// SETUP / INIT CHECK (Updated to automatically seed/ensure admin: markjerald@gov.ph / 123456)
+// SETUP / INIT CHECK: Enforces Admin Account Creation before login/entry
 app.get('/api/setup/status', async (req, res) => {
     try {
         if (!supabase) return res.json({ configured: false, needsAdmin: true });
         
-        // Check if admin markjerald@gov.ph exists
-        const { data: adminData, error: adminErr } = await supabase.from('users').select('id').eq('username', 'markjerald@gov.ph');
-        if (adminErr) throw adminErr;
-
-        if (!adminData || adminData.length === 0) {
-            // Auto-create or ensure default admin account exists
-            const hashedPassword = await bcrypt.hash('123456', 10);
-            await supabase.from('users').insert([{
-                full_name: 'Mark Jerald Admin',
-                username: 'markjerald@gov.ph',
-                email: 'markjerald@gov.ph',
-                password_hash: hashedPassword,
-                role: 'super_admin'
-            }]);
-        }
-
+        // Check if any super_admin account currently exists
         const { data, error } = await supabase.from('users').select('id').eq('role', 'super_admin');
         if (error) throw error;
-        res.json({ configured: true, needsAdmin: data.length === 0 });
+        
+        // needsAdmin is TRUE if zero super_admin accounts exist
+        res.json({ configured: true, needsAdmin: !data || data.length === 0 });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
+// FIRST ADMIN CREATION ENDPOINT
 app.post('/api/setup/admin', async (req, res) => {
     try {
         const { fullName, username, email, password, confirmPassword } = req.body;
-        // Use default requested credentials if fields are empty
-        const finalUsername = username || 'markjerald@gov.ph';
-        const finalEmail = email || 'markjerald@gov.ph';
-        const finalPassword = password || '123456';
-        const finalFullName = fullName || 'Mark Jerald';
 
-        if (password && confirmPassword && password !== confirmPassword) {
+        if (!fullName || !username || !email || !password) {
+            return res.status(400).json({ error: 'All fields are required to create the Admin account.' });
+        }
+
+        if (confirmPassword && password !== confirmPassword) {
             return res.status(400).json({ error: 'Passwords do not match.' });
         }
 
-        const { data: existingAdmin } = await supabase.from('users').select('id').eq('username', 'markjerald@gov.ph');
-        let userId;
-        const hashedPassword = await bcrypt.hash(finalPassword, 10);
-
-        if (existingAdmin && existingAdmin.length > 0) {
-            // Update existing admin credentials
-            const { data, error } = await supabase.from('users').update({
-                full_name: finalFullName,
-                email: finalEmail,
-                password_hash: hashedPassword,
-                role: 'super_admin'
-            }).eq('username', 'markjerald@gov.ph').select();
-            if (error) throw error;
-            userId = data[0].id;
-        } else {
-            const { data, error } = await supabase.from('users').insert([{
-                full_name: finalFullName,
-                username: finalUsername,
-                email: finalEmail,
-                password_hash: hashedPassword,
-                role: 'super_admin'
-            }]).select();
-            if (error) throw error;
-            userId = data[0].id;
+        const { data: existingUser } = await supabase.from('users').select('id')
+            .or(`username.eq.${username},email.eq.${email}`).limit(1);
+            
+        if (existingUser && existingUser.length > 0) {
+            return res.status(400).json({ error: 'Username or Email is already registered.' });
         }
 
-        await logActivity(userId, finalFullName, 'SYSTEM_INIT', 'Super Admin Account Configured', req.ip);
-        res.json({ success: true, message: 'Administrator account configured successfully with username: markjerald@gov.ph.' });
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const { data, error } = await supabase.from('users').insert([{
+            full_name: fullName,
+            username: username,
+            email: email,
+            password_hash: hashedPassword,
+            role: 'super_admin'
+        }]).select();
+
+        if (error) throw error;
+        const userId = data[0].id;
+
+        await logActivity(userId, fullName, 'SYSTEM_INIT', 'First Super Admin Account Created', req.ip);
+        res.json({ success: true, message: 'Administrator account created successfully! You can now log in.' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -237,7 +217,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// ADMIN ACCOUNT CREATION ENDPOINT (Added feature for Admin to create account)
+// ADMIN CREATES SUB-ADMIN OR STAFF ACCOUNTS
 app.post('/api/admin/create-account', authenticateToken, requireRole(['super_admin']), async (req, res) => {
     try {
         const { fullName, username, email, password, role } = req.body;
@@ -1099,7 +1079,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           1. INITIAL ADMIN SETUP RENDER
+           1. MANDATORY INITIAL ADMIN SETUP RENDER
            ========================================================================== */
         function renderSetupAdmin() {
             const app = document.getElementById('app');
@@ -1111,23 +1091,31 @@ app.get('*', (req, res) => {
                                 <i class="fa-solid fa-user-shield fa-2x"></i>
                             </div>
                             <h1 class="text-2xl font-bold text-slate-800">INITIAL ADMIN SETUP</h1>
-                            <p class="text-xs text-slate-500 mt-1">Configure default admin account (markjerald@gov.ph).</p>
+                            <p class="text-xs text-slate-500 mt-1">Please create the primary administrator account before accessing the system.</p>
                         </div>
                         <form id="adminSetupForm" class="space-y-4">
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
-                                <input type="text" id="setupFullName" value="Mark Jerald" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Full Name *</label>
+                                <input type="text" id="setupFullName" placeholder="e.g. Mark Jerald" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Username / Email</label>
-                                <input type="text" id="setupUsername" value="markjerald@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Username *</label>
+                                <input type="text" id="setupUsername" placeholder="e.g. admin" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Password</label>
-                                <input type="password" id="setupPassword" value="123456" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Email Address *</label>
+                                <input type="email" id="setupEmail" placeholder="e.g. markjerald@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Password *</label>
+                                <input type="password" id="setupPassword" placeholder="••••••••" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Confirm Password *</label>
+                                <input type="password" id="setupConfirmPassword" placeholder="••••••••" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-lg hover:opacity-90 transition">
-                                Initialize Admin Account
+                                Create Primary Admin Account
                             </button>
                         </form>
                     </div>
@@ -1136,13 +1124,22 @@ app.get('*', (req, res) => {
 
             document.getElementById('adminSetupForm').onsubmit = async (e) => {
                 e.preventDefault();
+                const pwd = document.getElementById('setupPassword').value;
+                const confirmPwd = document.getElementById('setupConfirmPassword').value;
+
+                if (pwd !== confirmPwd) {
+                    alert("Passwords do not match!");
+                    return;
+                }
+
                 const res = await api('/setup/admin', {
                     method: 'POST',
                     body: JSON.stringify({
                         fullName: document.getElementById('setupFullName').value,
                         username: document.getElementById('setupUsername').value,
-                        email: document.getElementById('setupUsername').value,
-                        password: document.getElementById('setupPassword').value
+                        email: document.getElementById('setupEmail').value,
+                        password: pwd,
+                        confirmPassword: confirmPwd
                     })
                 });
                 if (res.success) {
@@ -1194,11 +1191,11 @@ app.get('*', (req, res) => {
                                 <input type="hidden" id="loginPortalType" value="staff">
                                 <div>
                                     <label class="block text-xs font-semibold text-slate-600 mb-1">Username or Email</label>
-                                    <input type="text" id="loginUsername" value="markjerald@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                    <input type="text" id="loginUsername" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                                 </div>
                                 <div>
                                     <label class="block text-xs font-semibold text-slate-600 mb-1">Password</label>
-                                    <input type="password" id="loginPassword" value="123456" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                    <input type="password" id="loginPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                                 </div>
                                 <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-md hover:opacity-90 transition">
                                     Sign In
@@ -1250,14 +1247,10 @@ app.get('*', (req, res) => {
                 btnStaff.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
                 btnResident.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
                 prompt.classList.add('hidden');
-                document.getElementById('loginUsername').value = 'markjerald@gov.ph';
-                document.getElementById('loginPassword').value = '123456';
             } else {
                 btnResident.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
                 btnStaff.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
                 prompt.classList.remove('hidden');
-                document.getElementById('loginUsername').value = '';
-                document.getElementById('loginPassword').value = '';
             }
         }
 
@@ -1370,7 +1363,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           3. RESIDENT PORTAL RENDER (BLUE, GREEN & WHITE THEME + ALL 13 FEATURES)
+           3. RESIDENT PORTAL RENDER
            ========================================================================== */
         function renderResidentPortal() {
             const app = document.getElementById('app');
@@ -2113,7 +2106,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           4. STAFF / ADMIN PORTAL RENDER (WITH ADMIN CREATE ACCOUNT & BATCH PRINT)
+           4. STAFF / ADMIN PORTAL RENDER
            ========================================================================== */
         function renderStaffPortal() {
             const app = document.getElementById('app');
@@ -2259,7 +2252,6 @@ app.get('*', (req, res) => {
                 const eight = list.slice(0, 8);
                 const logo = state.settings.barangay_logo || DEFAULT_LOGO;
                 const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
-                const captainSig = state.settings.captain_signature || '';
                 const captainName = state.settings.captain_name || 'HON. BARANGAY CAPTAIN';
 
                 let cardsHtml = eight.map(r => \`
