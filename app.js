@@ -1,1200 +1,1176 @@
 /**
- * BARANGAY RESIDENT MANAGEMENT SYSTEM (BRMS)
- * Built with Express.js, Supabase PostgreSQL, and Native Web Stack.
+ * BARANGAY RESIDENT MANAGEMENT SYSTEM
+ * Entire application backend and server-rendered modular frontend.
  */
 
+require('dotenv').config();
 const express = require('express');
-const path = require('path');
-const cookieParser = require('cookie-parser');
 const session = require('express-session');
+const cors = require('cors');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const QRCode = require('qrcode');
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config();
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'barangay_super_secret_jwt_key_2026';
 
-// Initialize Supabase Client
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://YOUR-SUPABASE-PROJECT.supabase.co';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'YOUR-SUPABASE-ANON-KEY';
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Supabase Initialization
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
-// Memory Upload Storage for Supabase Direct Buffer Uploads
-const upload = multer({ storage: multer.memoryStorage() });
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.error('CRITICAL ERROR: SUPABASE_URL or SUPABASE_ANON_KEY environment variables missing.');
+}
 
-// Middleware Configuration
+const supabase = createClient(SUPABASE_URL || 'https://placeholder.supabase.co', SUPABASE_ANON_KEY || 'placeholder');
+
+// Express Middleware
+app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-app.use(cookieParser());
+
 app.use(session({
-    secret: 'barangay_session_secret_2026',
+    secret: process.env.SESSION_SECRET || 'barangay_management_secret_key_2026',
     resave: false,
-    saveUninitialized: true,
-    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
+    saveUninitialized: false,
+    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 Hours
 }));
 
-// Utility Helpers
-async function logActivity(actorId, actorName, actorType, action, description, recordId = '') {
+// Multer Storage setup for file handling
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
+
+// Helper Functions
+async function logActivity(userId, username, action, details, ip) {
     try {
-        await supabase.from('activity_logs').insert([{
-            actor_id: actorId,
-            actor_name: actorName,
-            actor_type: actorType,
+        await supabase.from('user_activity_logs').insert([{
+            user_id: userId || null,
+            username: username || 'System',
             action: action,
-            description: description,
-            record_id: recordId
+            details: details,
+            ip_address: ip || '127.0.0.1'
         }]);
     } catch (e) {
-        console.error('Activity Log Error:', e);
+        console.error('Log Activity Error:', e);
     }
 }
 
-async function uploadToSupabase(file, folder = 'general') {
-    if (!file) return '';
-    try {
-        const ext = path.extname(file.originalname);
-        const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}${ext}`;
-        const { data, error } = await supabase.storage
-            .from('barangay_uploads')
-            .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true });
-
-        if (error) throw error;
-        const { data: publicUrlData } = supabase.storage
-            .from('barangay_uploads')
-            .getPublicUrl(fileName);
-
-        return publicUrlData.publicUrl;
-    } catch (err) {
-        console.error('Supabase File Upload Exception:', err);
-        return '';
-    }
-}
-
-// Authentication Middleware
-const requireAuth = (roles = []) => {
-    return (req, res, next) => {
-        const token = req.cookies.brgy_token || req.session.token;
-        if (!token) {
-            return res.redirect('/login');
-        }
-        try {
-            const decoded = jwt.verify(token, JWT_SECRET);
-            req.user = decoded;
-            if (roles.length > 0 && !roles.includes(decoded.role)) {
-                return res.status(403).send('Forbidden: Insufficient Security Privileges.');
-            }
-            next();
-        } catch (err) {
-            res.clearCookie('brgy_token');
-            return res.redirect('/login');
-        }
+async function getBarangaySettings() {
+    const { data } = await supabase.from('barangay_settings').select('*').limit(1).single();
+    return data || {
+        barangay_name: 'Barangay Central',
+        municipality: 'City Center',
+        province: 'Main Province',
+        system_name: 'Barangay Resident Management System',
+        logo_url: '',
+        captain_signature_url: '',
+        id_background_url: ''
     };
-};
+}
 
-// Global Barangay Settings Fetcher Middleware
-app.use(async (req, res, next) => {
-    try {
-        const { data } = await supabase.from('barangay_settings').select('*').limit(1).single();
-        res.locals.settings = data || {
-            barangay_name: 'Barangay Central',
-            municipality_city: 'City of Batac',
-            province: 'Ilocos Norte',
-            logo_url: '',
-            captain_signature_url: ''
-        };
-    } catch (e) {
-        res.locals.settings = { barangay_name: 'Barangay Central' };
-    }
-    next();
-});
-
-// INITIAL SETUP & FIRST RUN VERIFICATION ROUTE
-app.get('/setup', async (req, res) => {
-    const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    if (count > 0) {
+// Authentication & Authorization Middlewares
+function requireAuth(req, res, next) {
+    if (!req.session.user) {
         return res.redirect('/login');
     }
-    res.send(renderSetupHTML());
-});
+    next();
+}
 
-app.post('/setup', async (req, res) => {
-    const { username, email, password, full_name } = req.body;
-    const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    if (count > 0) {
-        return res.status(400).json({ success: false, message: 'System setup already completed.' });
+function requireAdmin(req, res, next) {
+    if (!req.session.user || !['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff'].includes(req.session.user.role)) {
+        return res.status(403).send('Forbidden: Administrative access required.');
     }
-    const hash = await bcrypt.hash(password, 10);
-    const { error } = await supabase.from('users').insert([{
-        username,
-        email,
-        password_hash: hash,
-        full_name,
-        role: 'Super Admin',
-        is_active: true
-    }]);
+    next();
+}
 
-    if (error) return res.status(500).json({ success: false, message: error.message });
-    return res.json({ success: true, message: 'Initial Administrator created successfully!' });
-});
+function requireResident(req, res, next) {
+    if (!req.session.user || req.session.user.role !== 'Resident') {
+        return res.status(403).send('Forbidden: Resident access required.');
+    }
+    next();
+}
 
-// LOGIN & ROUTING HANDLERS
-app.get('/login', async (req, res) => {
-    const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    if (count === 0) {
+// --- CORE SYSTEM SETUP & ROUTING ---
+
+app.get('/', async (req, res) => {
+    // Check initial system setup
+    const { data: setup } = await supabase.from('system_settings').select('*').limit(1).single();
+    if (!setup || !setup.is_setup_complete) {
         return res.redirect('/setup');
     }
-    res.send(renderLoginHTML());
-});
-
-app.post('/login', async (req, res) => {
-    const { identifier, password, user_type } = req.body;
-
-    if (user_type === 'RESIDENT') {
-        const { data: resident } = await supabase
-            .from('residents')
-            .select('*')
-            .or(`email.eq.${identifier},resident_id_number.eq.${identifier}`)
-            .eq('is_archived', false)
-            .single();
-
-        if (!resident || !(await bcrypt.compare(password, resident.password_hash))) {
-            return res.status(401).json({ success: false, message: 'Invalid Resident credentials.' });
+    if (req.session.user) {
+        if (req.session.user.role === 'Resident') {
+            return res.redirect('/resident/dashboard');
+        } else {
+            return res.redirect('/admin/dashboard');
         }
-
-        if (resident.verification_status !== 'APPROVED') {
-            return res.status(403).json({ success: false, message: `Account status is ${resident.verification_status}. Access restricted.` });
-        }
-
-        const token = jwt.sign({ id: resident.id, role: 'Resident', name: `${resident.first_name} ${resident.last_name}`, resident_id_number: resident.resident_id_number }, JWT_SECRET, { expiresIn: '1d' });
-        res.cookie('brgy_token', token, { httpOnly: true });
-        return res.json({ success: true, redirect: '/resident/dashboard' });
-    } else {
-        const { data: user } = await supabase
-            .from('users')
-            .select('*')
-            .or(`email.eq.${identifier},username.eq.${identifier}`)
-            .eq('is_active', true)
-            .single();
-
-        if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-            return res.status(401).json({ success: false, message: 'Invalid Staff/Admin credentials.' });
-        }
-
-        const token = jwt.sign({ id: user.id, role: user.role, name: user.full_name, username: user.username }, JWT_SECRET, { expiresIn: '1d' });
-        res.cookie('brgy_token', token, { httpOnly: true });
-
-        await supabase.from('login_history').insert([{ user_id: user.id, username: user.username, role: user.role, status: 'SUCCESS' }]);
-        await logActivity(user.id, user.full_name, user.role, 'LOGIN', 'User logged into Staff/Admin portal');
-
-        return res.json({ success: true, redirect: '/admin/dashboard' });
     }
-});
-
-app.get('/logout', (req, res) => {
-    res.clearCookie('brgy_token');
-    req.session.destroy();
     res.redirect('/login');
 });
 
-// PUBLIC RESIDENT REGISTRATION ROUTE
-app.get('/register', async (req, res) => {
-    const { data: puroks } = await supabase.from('puroks').select('*').eq('is_archived', false);
-    res.send(renderRegisterHTML(puroks || []));
+// INITIAL ADMIN SETUP PAGE
+app.get('/setup', async (req, res) => {
+    const { data: setup } = await supabase.from('system_settings').select('*').limit(1).single();
+    if (setup && setup.is_setup_complete) {
+        return res.redirect('/login');
+    }
+
+    const settings = await getBarangaySettings();
+    const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Initial System Setup - ${settings.system_name}</title>
+        <style>
+            :root { --primary-blue: #1e3a8a; --accent-green: #059669; --bg-white: #ffffff; --light-bg: #f3f4f6; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--light-bg); margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+            .setup-card { background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 480px; border-top: 6px solid var(--primary-blue); }
+            h2 { color: var(--primary-blue); margin-bottom: 0.5rem; text-align: center; }
+            p { color: #6b7280; text-align: center; font-size: 0.9rem; margin-bottom: 1.5rem; }
+            .form-group { margin-bottom: 1.2rem; }
+            label { display: block; margin-bottom: 0.4rem; font-weight: 600; color: #374151; font-size: 0.85rem; }
+            input { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; font-size: 0.95rem; }
+            input:focus { outline: none; border-color: var(--accent-green); box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.2); }
+            .btn-submit { width: 100%; background: var(--primary-blue); color: white; border: none; padding: 0.8rem; font-size: 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+            .btn-submit:hover { background: #1e40af; }
+            .alert { padding: 0.75rem; background: #fee2e2; border-left: 4px solid #ef4444; color: #b91c1c; margin-bottom: 1rem; border-radius: 4px; font-size: 0.85rem; display: none; }
+        </style>
+    </head>
+    <body>
+        <div class="setup-card">
+            <h2>System Initial Setup</h2>
+            <p>Create the primary Super Administrator account to initialize your Barangay System.</p>
+            <div id="error-alert" class="alert"></div>
+            <form id="setup-form">
+                <div class="form-group">
+                    <label>Administrator Username</label>
+                    <input type="text" name="username" required placeholder="admin">
+                </div>
+                <div class="form-group">
+                    <label>Administrator Email Address</label>
+                    <input type="email" name="email" required placeholder="admin@barangay.gov.ph">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" required minlength="8" placeholder="••••••••">
+                </div>
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" name="confirm_password" required minlength="8" placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn-submit">Initialize Application</button>
+            </form>
+        </div>
+        <script>
+            document.getElementById('setup-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const data = Object.fromEntries(formData.entries());
+                const alert = document.getElementById('error-alert');
+                
+                if(data.password !== data.confirm_password) {
+                    alert.innerText = "Passwords do not match.";
+                    alert.style.display = "block";
+                    return;
+                }
+
+                const res = await fetch('/api/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                if(result.success) {
+                    window.location.href = '/login?setup=complete';
+                } else {
+                    alert.innerText = result.message || "Setup failed.";
+                    alert.style.display = "block";
+                }
+            });
+        </script>
+    </body>
+    </html>
+    `;
+    res.send(html);
 });
 
-app.post('/register', upload.single('photo'), async (req, res) => {
+app.post('/api/setup', async (req, res) => {
     try {
-        const b = req.body;
-        const photoUrl = req.file ? await uploadToSupabase(req.file, 'residents') : '';
+        const { username, email, password } = req.body;
+        const { data: setup } = await supabase.from('system_settings').select('*').limit(1).single();
+        if (setup && setup.is_setup_complete) {
+            return res.status(400).json({ success: false, message: 'Setup has already been completed.' });
+        }
 
-        const { data: set } = await supabase.from('barangay_settings').select('id_prefix').limit(1).single();
-        const prefix = set?.id_prefix || 'BRGY-2026-';
-        const randNum = Math.floor(100000 + Math.random() * 900000);
-        const residentIdNum = `${prefix}${randNum}`;
-
-        const hash = await bcrypt.hash(b.password, 10);
-        const dob = new Date(b.date_of_birth);
-        const ageDiff = Date.now() - dob.getTime();
-        const ageDate = new Date(ageDiff);
-        const calculatedAge = Math.abs(ageDate.getUTCFullYear() - 1970);
-
-        const { data, error } = await supabase.from('residents').insert([{
-            resident_id_number: residentIdNum,
-            email: b.email,
-            password_hash: hash,
-            first_name: b.first_name,
-            middle_name: b.middle_name || '',
-            last_name: b.last_name,
-            suffix: b.suffix || '',
-            date_of_birth: b.date_of_birth,
-            age: calculatedAge,
-            gender: b.gender,
-            civil_status: b.civil_status,
-            nationality: b.nationality || 'Filipino',
-            contact_number: b.contact_number,
-            address: b.address,
-            purok_id: b.purok_id || null,
-            occupation: b.occupation || 'N/A',
-            educational_attainment: b.educational_attainment || 'N/A',
-            voter_status: b.voter_status || 'Non-Voter',
-            photo_url: photoUrl,
-            verification_status: 'PENDING',
-            is_senior_citizen: calculatedAge >= 60,
-            is_pwd: b.is_pwd === 'true',
-            is_solo_parent: b.is_solo_parent === 'true',
-            pwd_type: b.pwd_type || ''
+        const password_hash = await bcrypt.hash(password, 10);
+        const { data: newUser, error: userErr } = await supabase.from('users').insert([{
+            username,
+            email,
+            password_hash,
+            role: 'Super Admin',
+            is_active: true
         }]).select().single();
 
-        if (error) throw error;
+        if (userErr) throw userErr;
 
-        await logActivity(data.id, `${b.first_name} ${b.last_name}`, 'RESIDENT', 'REGISTER', 'Public online resident registration submitted', data.id);
-        res.json({ success: true, message: 'Registration submitted successfully! Please await Barangay Staff verification.' });
+        await supabase.from('system_settings').update({ is_setup_complete: true }).eq('id', setup.id);
+        await logActivity(newUser.id, username, 'INITIAL_SETUP', 'Created Super Admin account during system setup', req.ip);
+
+        res.json({ success: true });
     } catch (err) {
+        console.error('Setup Endpoint Error:', err);
         res.status(500).json({ success: false, message: err.message });
     }
 });
 
-// PUBLIC QR VERIFICATION SCANNER ROUTE
-app.get('/scanner', requireAuth(['Super Admin', 'Barangay Admin', 'Secretary', 'Staff']), (req, res) => {
-    res.send(renderScannerHTML(req.user));
-});
+// SYSTEM LOGIN PAGE
+app.get('/login', async (req, res) => {
+    const settings = await getBarangaySettings();
+    const bgImage = "https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=1920&q=80";
 
-app.get('/api/verify-qr/:code', requireAuth(['Super Admin', 'Barangay Admin', 'Secretary', 'Staff']), async (req, res) => {
-    const code = req.params.code;
-    const { data: cert } = await supabase.from('certificate_requests').select('*, residents(*)').eq('verification_code', code).single();
-
-    if (cert) {
-        return res.json({ success: true, type: 'CERTIFICATE', data: cert });
-    }
-
-    const { data: resident } = await supabase.from('residents').select('*, puroks(*)').eq('resident_id_number', code).single();
-    if (resident) {
-        return res.json({ success: true, type: 'RESIDENT_ID', data: resident });
-    }
-
-    return res.status(404).json({ success: false, message: 'Invalid Verification Code or Resident ID.' });
-});
-
-// ADMIN PORTAL ROUTES & APIS
-app.get('/admin/dashboard', requireAuth(['Super Admin', 'Barangay Admin', 'Secretary', 'Staff']), async (req, res) => {
-    const [
-        { count: totalResidents },
-        { count: pendingRegistrations },
-        { count: totalHouseholds },
-        { count: pendingCertificates },
-        { count: totalSenior },
-        { count: totalPwd },
-        { count: totalSoloParent },
-        { data: puroksData }
-    ] = await Promise.all([
-        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('is_archived', false).eq('verification_status', 'APPROVED'),
-        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('verification_status', 'PENDING'),
-        supabase.from('households').select('*', { count: 'exact', head: true }).eq('is_archived', false),
-        supabase.from('certificate_requests').select('*', { count: 'exact', head: true }).eq('status', 'SUBMITTED'),
-        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('is_senior_citizen', true).eq('verification_status', 'APPROVED'),
-        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('is_pwd', true).eq('verification_status', 'APPROVED'),
-        supabase.from('residents').select('*', { count: 'exact', head: true }).eq('is_solo_parent', true).eq('verification_status', 'APPROVED'),
-        supabase.from('puroks').select('*, residents(count)').eq('is_archived', false)
-    ]);
-
-    const metrics = {
-        totalResidents: totalResidents || 0,
-        pendingRegistrations: pendingRegistrations || 0,
-        totalHouseholds: totalHouseholds || 0,
-        pendingCertificates: pendingCertificates || 0,
-        totalSenior: totalSenior || 0,
-        totalPwd: totalPwd || 0,
-        totalSoloParent: totalSoloParent || 0,
-        puroks: puroksData || []
-    };
-
-    res.send(renderAdminDashboardHTML(req.user, metrics));
-});
-
-// ADMIN: RESIDENT MANAGEMENT CRUD
-app.get('/admin/residents', requireAuth(['Super Admin', 'Barangay Admin', 'Secretary', 'Staff']), async (req, res) => {
-    const { data: residents } = await supabase.from('residents').select('*, puroks(*)').order('created_at', { ascending: false });
-    const { data: puroks } = await supabase.from('puroks').select('*').eq('is_archived', false);
-    res.send(renderAdminResidentsHTML(req.user, residents || [], puroks || []));
-});
-
-app.post('/admin/residents/approve', requireAuth(['Super Admin', 'Barangay Admin', 'Secretary', 'Staff']), async (req, res) => {
-    const { id } = req.body;
-    const { data, error } = await supabase.from('residents').update({ verification_status: 'APPROVED' }).eq('id', id).select().single();
-    if (error) return res.status(500).json({ success: false, message: error.message });
-
-    await supabase.from('notifications').insert([{
-        resident_id: id,
-        title: 'Registration Approved',
-        message: 'Your Barangay Resident Registration has been officially approved! You can now access all services.',
-        type: 'REGISTRATION'
-    }]);
-
-    await logActivity(req.user.id, req.user.name, req.user.role, 'APPROVE_RESIDENT', `Approved resident account ID: ${data.resident_id_number}`, id);
-    res.json({ success: true, message: 'Resident account approved successfully.' });
-});
-
-app.post('/admin/residents/reject', requireAuth(['Super Admin', 'Barangay Admin', 'Secretary', 'Staff']), async (req, res) => {
-    const { id, reason } = req.body;
-    const { data, error } = await supabase.from('residents').update({ verification_status: 'REJECTED', rejection_reason: reason }).eq('id', id).select().single();
-    if (error) return res.status(500).json({ success: false, message: error.message });
-
-    await supabase.from('notifications').insert([{
-        resident_id: id,
-        title: 'Registration Rejected',
-        message: `Your registration was rejected. Reason: ${reason}`,
-        type: 'REGISTRATION'
-    }]);
-
-    await logActivity(req.user.id, req.user.name, req.user.role, 'REJECT_RESIDENT', `Rejected resident registration ID: ${id}. Reason: ${reason}`, id);
-    res.json({ success: true, message: 'Resident registration rejected.' });
-});
-
-// ADMIN: PRINT 8 IDS PER BOND PAPER ROUTE
-app.get('/admin/print-ids', requireAuth(['Super Admin', 'Barangay Admin', 'Secretary', 'Staff']), async (req, res) => {
-    const ids = req.query.ids ? req.query.ids.split(',') : [];
-    const { data: residents } = await supabase.from('residents').select('*, puroks(*)').in('id', ids);
-    const { data: settings } = await supabase.from('barangay_settings').select('*').limit(1).single();
-    res.send(render8IDsPrintLayoutHTML(residents || [], settings || {}));
-});
-
-// ADMIN: SYSTEM SETTINGS API & VIEW
-app.get('/admin/settings', requireAuth(['Super Admin', 'Barangay Admin']), async (req, res) => {
-    const { data: settings } = await supabase.from('barangay_settings').select('*').limit(1).single();
-    res.send(renderAdminSettingsHTML(req.user, settings || {}));
-});
-
-app.post('/admin/settings', requireAuth(['Super Admin', 'Barangay Admin']), upload.fields([
-    { name: 'logo', maxCount: 1 },
-    { name: 'captain_signature', maxCount: 1 },
-    { name: 'id_background', maxCount: 1 }
-]), async (req, res) => {
-    try {
-        const b = req.body;
-        const updatePayload = {
-            barangay_name: b.barangay_name,
-            municipality_city: b.municipality_city,
-            province: b.province,
-            barangay_address: b.barangay_address,
-            contact_number: b.contact_number,
-            email: b.email,
-            system_name: b.system_name,
-            barangay_captain: b.barangay_captain,
-            id_prefix: b.id_prefix,
-            updated_at: new Date()
-        };
-
-        if (req.files['logo']) {
-            updatePayload.logo_url = await uploadToSupabase(req.files['logo'][0], 'branding');
-        }
-        if (req.files['captain_signature']) {
-            updatePayload.captain_signature_url = await uploadToSupabase(req.files['captain_signature'][0], 'branding');
-        }
-        if (req.files['id_background']) {
-            updatePayload.id_background_url = await uploadToSupabase(req.files['id_background'][0], 'branding');
-        }
-
-        const { data: existing } = await supabase.from('barangay_settings').select('id').limit(1).single();
-        if (existing) {
-            await supabase.from('barangay_settings').update(updatePayload).eq('id', existing.id);
-        } else {
-            await supabase.from('barangay_settings').insert([updatePayload]);
-        }
-
-        await logActivity(req.user.id, req.user.name, req.user.role, 'UPDATE_SETTINGS', 'Updated System and Barangay configurations');
-        res.json({ success: true, message: 'Barangay settings updated persistently!' });
-    } catch (e) {
-        res.status(500).json({ success: false, message: e.message });
-    }
-});
-
-// RESIDENT PORTAL ROUTES
-app.get('/resident/dashboard', requireAuth(['Resident']), async (req, res) => {
-    const residentId = req.user.id;
-    const [
-        { data: resident },
-        { data: certs },
-        { data: annos },
-        { data: notifs }
-    ] = await Promise.all([
-        supabase.from('residents').select('*, puroks(*)').eq('id', residentId).single(),
-        supabase.from('certificate_requests').select('*').eq('resident_id', residentId).order('created_at', { ascending: false }),
-        supabase.from('announcements').select('*').eq('status', 'ACTIVE').order('created_at', { ascending: false }),
-        supabase.from('notifications').select('*').eq('resident_id', residentId).order('created_at', { ascending: false })
-    ]);
-
-    const { data: settings } = await supabase.from('barangay_settings').select('*').limit(1).single();
-    res.send(renderResidentDashboardHTML(req.user, resident, certs || [], annos || [], notifs || [], settings || {}));
-});
-
-// CERTIFICATE REQUEST API
-app.post('/resident/request-certificate', requireAuth(['Resident']), async (req, res) => {
-    const { document_type, purpose, preferred_release_date, notes } = req.body;
-    const reqNum = `REQ-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
-    const verifyCode = `CERT-VERIFY-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-
-    const { error } = await supabase.from('certificate_requests').insert([{
-        request_number: reqNum,
-        resident_id: req.user.id,
-        document_type,
-        purpose,
-        preferred_release_date,
-        notes,
-        verification_code: verifyCode,
-        status: 'SUBMITTED'
-    }]);
-
-    if (error) return res.status(500).json({ success: false, message: error.message });
-    await logActivity(req.user.id, req.user.name, 'RESIDENT', 'REQUEST_CERT', `Requested ${document_type} (Req #: ${reqNum})`);
-
-    res.json({ success: true, message: 'Certificate request submitted successfully!' });
-});
-
-// ADMIN: CERTIFICATE ISSUANCE & RELEASE
-app.post('/admin/certificates/update-status', requireAuth(['Super Admin', 'Barangay Admin', 'Secretary', 'Staff']), upload.single('issued_document'), async (req, res) => {
-    const { request_id, status, rejection_reason } = req.body;
-    const updatePayload = { status, updated_at: new Date(), processed_by: req.user.id };
-
-    if (rejection_reason) updatePayload.rejection_reason = rejection_reason;
-    if (req.file) {
-        updatePayload.issued_document_url = await uploadToSupabase(req.file, 'certificates');
-    }
-
-    const { data: cert, error } = await supabase.from('certificate_requests').update(updatePayload).eq('id', request_id).select('*, residents(*)').single();
-    if (error) return res.status(500).json({ success: false, message: error.message });
-
-    await supabase.from('notifications').insert([{
-        resident_id: cert.resident_id,
-        title: `Certificate Request ${status}`,
-        message: `Your request for ${cert.document_type} status updated to: ${status}.`,
-        type: 'CERTIFICATE'
-    }]);
-
-    await logActivity(req.user.id, req.user.name, req.user.role, 'UPDATE_CERT', `Updated certificate request ${cert.request_number} to ${status}`);
-    res.json({ success: true, message: `Request status updated to ${status}` });
-});
-
-
-/* ==========================================================================
-   UI TEMPLATE RENDERERS (BLUE, GREEN, AND WHITE PERSISTENT DESIGN STACK)
-   ========================================================================== */
-
-function getGlobalStyles() {
-    return `
-    <style>
-        :root {
-            --primary-blue: #0284c7;
-            --dark-blue: #0369a1;
-            --light-blue: #e0f2fe;
-            --accent-green: #16a34a;
-            --dark-green: #15803d;
-            --light-green: #dcfce7;
-            --bg-white: #ffffff;
-            --bg-slate: #f8fafc;
-            --text-dark: #0f172a;
-            --text-muted: #475569;
-            --border-color: #cbd5e1;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
-        body { background-color: var(--bg-slate); color: var(--text-dark); min-height: 100vh; display: flex; flex-direction: column; }
-        a { color: var(--primary-blue); text-decoration: none; }
-        
-        .btn { display: inline-flex; align-items: center; justify-content: center; padding: 0.6rem 1.2rem; font-weight: 600; border-radius: 0.375rem; cursor: pointer; border: none; gap: 0.5rem; transition: background 0.2s; }
-        .btn-primary { background: var(--primary-blue); color: white; }
-        .btn-primary:hover { background: var(--dark-blue); }
-        .btn-secondary { background: var(--accent-green); color: white; }
-        .btn-secondary:hover { background: var(--dark-green); }
-        .btn-outline { border: 1px solid var(--border-color); background: white; color: var(--text-dark); }
-        .btn-outline:hover { background: var(--bg-slate); }
-        .btn-danger { background: #dc2626; color: white; }
-        
-        .card { background: white; border-radius: 0.5rem; border: 1px solid var(--border-color); padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .grid { display: grid; gap: 1rem; }
-        .grid-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-        .grid-4 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-
-        .table-container { overflow-x: auto; background: white; border-radius: 0.5rem; border: 1px solid var(--border-color); }
-        table { width: 100%; border-collapse: collapse; text-align: left; }
-        th { background: var(--light-blue); color: var(--dark-blue); font-weight: 700; padding: 0.75rem 1rem; border-bottom: 2px solid var(--border-color); }
-        td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-color); font-size: 0.9rem; }
-        tr:hover { background: #f1f5f9; }
-
-        .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
-        .badge-success { background: var(--light-green); color: var(--dark-green); }
-        .badge-warning { background: #fef3c7; color: #d97706; }
-        .badge-danger { background: #fee2e2; color: #dc2626; }
-
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; }
-        .modal { background: white; border-radius: 0.5rem; width: 90%; max-width: 600px; max-height: 90vh; overflow-y: auto; padding: 1.5rem; }
-
-        .app-layout { display: flex; min-height: 100vh; }
-        .sidebar { width: 260px; background: var(--dark-blue); color: white; padding: 1.5rem 1rem; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; }
-        .sidebar h2 { font-size: 1.2rem; font-weight: 700; color: white; margin-bottom: 1.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.2); }
-        .nav-link { display: flex; align-items: center; padding: 0.75rem 1rem; color: #e0f2fe; text-decoration: none; border-radius: 0.375rem; font-weight: 500; margin-bottom: 0.25rem; }
-        .nav-link:hover, .nav-link.active { background: rgba(255,255,255,0.15); color: white; font-weight: 700; }
-        .main-content { flex-grow: 1; padding: 2rem; background: var(--bg-slate); overflow-y: auto; }
-        
-        .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; background: white; padding: 1rem 1.5rem; border-radius: 0.5rem; border: 1px solid var(--border-color); }
-        .form-group { margin-bottom: 1rem; }
-        .form-group label { display: block; font-weight: 600; margin-bottom: 0.35rem; color: var(--text-dark); }
-        .form-control { width: 100%; padding: 0.6rem 0.8rem; border: 1px solid var(--border-color); border-radius: 0.375rem; font-size: 0.95rem; }
-        .form-control:focus { outline: none; border-color: var(--primary-blue); box-shadow: 0 0 0 3px var(--light-blue); }
-    </style>
-    `;
-}
-
-function renderSetupHTML() {
-    return `<!DOCTYPE html>
+    const html = `
+    <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <title>Initial System Setup — BRMS</title>
-        ${getGlobalStyles()}
-    </head>
-    <body style="display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--dark-blue), var(--dark-green));">
-        <div class="card" style="width: 100%; max-width: 480px; padding: 2.5rem; background: white;">
-            <h2 style="color: var(--dark-blue); margin-bottom: 0.5rem; text-align: center;">SYSTEM INITIALIZATION</h2>
-            <p style="color: var(--text-muted); text-align: center; margin-bottom: 1.5rem;">Create the primary Super Administrator Account.</p>
-            <form id="setupForm">
-                <div class="form-group">
-                    <label>Full Name</label>
-                    <input type="text" name="full_name" class="form-control" required placeholder="e.g. Chief Admin">
-                </div>
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" name="username" class="form-control" required placeholder="admin">
-                </div>
-                <div class="form-group">
-                    <label>Email Address</label>
-                    <input type="email" name="email" class="form-control" required placeholder="admin@barangay.gov.ph">
-                </div>
-                <div class="form-group">
-                    <label>Master Password</label>
-                    <input type="password" name="password" class="form-control" required placeholder="••••••••••••">
-                </div>
-                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Complete Setup & Initialize System</button>
-            </form>
-        </div>
-        <script>
-            document.getElementById('setupForm').onsubmit = async (e) => {
-                e.preventDefault();
-                const fd = new FormData(e.target);
-                const res = await fetch('/setup', { method: 'POST', body: new URLSearchParams(fd) });
-                const json = await res.json();
-                if(json.success) {
-                    alert(json.message);
-                    window.location.href = '/login';
-                } else {
-                    alert('Setup Error: ' + json.message);
-                }
-            };
-        </script>
-    </body>
-    </html>`;
-}
-
-function renderLoginHTML() {
-    const bgUrl = "https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg";
-    return `<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Login — Barangay Resident Management System</title>
-        ${getGlobalStyles()}
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Login - ${settings.system_name}</title>
         <style>
-            body {
-                background: linear-gradient(rgba(3, 105, 161, 0.75), rgba(21, 128, 61, 0.75)), url('${bgUrl}') center/cover no-repeat fixed, #0369a1;
-                display: flex; align-items: center; justify-content: center;
-            }
-            .login-card {
-                background: rgba(255, 255, 255, 0.96);
-                backdrop-filter: blur(10px);
-                border-radius: 0.75rem;
-                width: 100%; max-width: 440px; padding: 2.5rem;
-                box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);
-            }
-            .tab-btn { flex: 1; padding: 0.6rem; text-align: center; cursor: pointer; font-weight: 700; border-bottom: 3px solid transparent; }
-            .tab-btn.active { border-color: var(--primary-blue); color: var(--primary-blue); }
+            :root { --primary-blue: #1e3a8a; --accent-green: #059669; --bg-white: #ffffff; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: url('${bgImage}') no-repeat center center fixed; background-size: cover; position: relative; }
+            body::before { content: ''; position: absolute; top:0; left:0; right:0; bottom:0; background: linear-gradient(135deg, rgba(30, 58, 138, 0.85), rgba(5, 150, 105, 0.75)); z-index: 1; }
+            .login-container { position: relative; z-index: 2; width: 100%; max-width: 420px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); padding: 2.5rem; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.3); }
+            .logo-header { text-align: center; margin-bottom: 1.5rem; }
+            .logo-header img { width: 80px; height: 80px; object-fit: contain; margin-bottom: 0.5rem; border-radius: 50%; background: white; padding: 4px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+            .logo-header h1 { font-size: 1.25rem; color: var(--primary-blue); margin: 0; text-transform: uppercase; font-weight: 800; }
+            .logo-header p { font-size: 0.85rem; color: #4b5563; margin: 4px 0 0 0; }
+            .form-group { margin-bottom: 1.2rem; }
+            label { display: block; margin-bottom: 0.3rem; font-weight: 600; color: #374151; font-size: 0.85rem; }
+            input, select { width: 100%; padding: 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; font-size: 0.95rem; }
+            input:focus, select:focus { outline: none; border-color: var(--accent-green); box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.2); }
+            .btn-login { width: 100%; background: var(--primary-blue); color: white; border: none; padding: 0.85rem; font-size: 1rem; border-radius: 8px; font-weight: bold; cursor: pointer; transition: all 0.2s ease; margin-top: 0.5rem; }
+            .btn-login:hover { background: var(--accent-green); transform: translateY(-1px); }
+            .alert { padding: 0.75rem; background: #fee2e2; border-left: 4px solid #ef4444; color: #b91c1c; margin-bottom: 1rem; border-radius: 6px; font-size: 0.85rem; display: none; }
+            .links { text-align: center; margin-top: 1.5rem; font-size: 0.85rem; color: #4b5563; }
+            .links a { color: var(--primary-blue); text-decoration: none; font-weight: 600; }
+            .links a:hover { text-decoration: underline; color: var(--accent-green); }
         </style>
     </head>
     <body>
-        <div class="login-card">
-            <div style="text-align: center; margin-bottom: 1.5rem;">
-                <h2 style="color: var(--dark-blue); font-size: 1.5rem;">BARANGAY PORTAL</h2>
-                <p style="color: var(--text-muted); font-size: 0.875rem;">Resident & Official Authentication Portal</p>
+        <div class="login-container">
+            <div class="logo-header">
+                <img src="${settings.logo_url || 'https://via.placeholder.com/80?text=Logo'}" alt="Barangay Logo">
+                <h1>${settings.barangay_name}</h1>
+                <p>${settings.system_name}</p>
             </div>
-
-            <div style="display: flex; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color);">
-                <div id="tabResident" class="tab-btn active" onclick="setLoginType('RESIDENT')">Resident Login</div>
-                <div id="tabStaff" class="tab-btn" onclick="setLoginType('STAFF')">Staff / Admin</div>
-            </div>
-
-            <form id="loginForm">
-                <input type="hidden" id="user_type" name="user_type" value="RESIDENT">
+            <div id="login-alert" class="alert"></div>
+            <form id="login-form">
                 <div class="form-group">
-                    <label id="idLabel">Email or Resident ID Number</label>
-                    <input type="text" name="identifier" class="form-control" required placeholder="e.g. BRGY-2026-123456 or email">
+                    <label>Username or Email Address</label>
+                    <input type="text" name="identifier" required placeholder="Enter your credential">
                 </div>
                 <div class="form-group">
                     <label>Password</label>
-                    <input type="password" name="password" class="form-control" required placeholder="••••••••••••">
+                    <input type="password" name="password" required placeholder="••••••••">
                 </div>
-                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Sign In to Account</button>
+                <button type="submit" class="btn-login">Sign In</button>
             </form>
-
-            <div style="margin-top: 1.5rem; text-align: center; font-size: 0.9rem;">
-                <span>New Resident? </span>
-                <a href="/register" style="font-weight: 700; color: var(--accent-green);">Register Online Here</a>
+            <div class="links">
+                Are you a resident? <a href="/register">Register for Resident Portal</a>
             </div>
         </div>
-
         <script>
-            let currentType = 'RESIDENT';
-            function setLoginType(type) {
-                currentType = type;
-                document.getElementById('user_type').value = type;
-                if(type === 'RESIDENT') {
-                    document.getElementById('tabResident').classList.add('active');
-                    document.getElementById('tabStaff').classList.remove('active');
-                    document.getElementById('idLabel').innerText = 'Email or Resident ID Number';
-                } else {
-                    document.getElementById('tabStaff').classList.add('active');
-                    document.getElementById('tabResident').classList.remove('active');
-                    document.getElementById('idLabel').innerText = 'Username or Official Email';
-                }
-            }
-
-            document.getElementById('loginForm').onsubmit = async (e) => {
+            document.getElementById('login-form').addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const fd = new FormData(e.target);
-                const res = await fetch('/login', { method: 'POST', body: new URLSearchParams(fd) });
-                const json = await res.json();
-                if(json.success) {
-                    window.location.href = json.redirect;
+                const formData = new FormData(e.target);
+                const data = Object.fromEntries(formData.entries());
+                const alert = document.getElementById('login-alert');
+
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                if (result.success) {
+                    window.location.href = result.redirect;
                 } else {
-                    alert('Authentication Failed: ' + json.message);
+                    alert.innerText = result.message || 'Invalid authentication credentials.';
+                    alert.style.display = 'block';
                 }
-            };
+            });
         </script>
     </body>
-    </html>`;
-}
+    </html>
+    `;
+    res.send(html);
+});
 
-function renderRegisterHTML(puroks) {
-    const purokOpts = puroks.map(p => `<option value="${p.id}">${p.purok_name}</option>`).join('');
-    return `<!DOCTYPE html>
+app.post('/api/login', async (req, res) => {
+    try {
+        const { identifier, password } = req.body;
+        const { data: user, error } = await supabase.from('users')
+            .select('*')
+            .or(`username.eq.${identifier},email.eq.${identifier}`)
+            .limit(1)
+            .single();
+
+        if (error || !user || !user.is_active) {
+            await supabase.from('login_history').insert([{ username: identifier, login_status: 'FAILED_INVALID_USER', ip_address: req.ip }]);
+            return res.status(401).json({ success: false, message: 'Invalid credentials or inactive account.' });
+        }
+
+        const match = await bcrypt.compare(password, user.password_hash);
+        if (!match) {
+            await supabase.from('login_history').insert([{ user_id: user.id, username: identifier, login_status: 'FAILED_BAD_PASSWORD', ip_address: req.ip }]);
+            return res.status(401).json({ success: false, message: 'Invalid credentials or password.' });
+        }
+
+        // Fetch Resident record if user is a Resident
+        let resident = null;
+        if (user.role === 'Resident') {
+            const { data: resData } = await supabase.from('residents').select('*').eq('user_id', user.id).single();
+            resident = resData;
+            if (resident && resident.resident_status !== 'ACTIVE') {
+                return res.status(403).json({ success: false, message: `Account pending or invalid. Status: ${resident.resident_status}` });
+            }
+        }
+
+        req.session.user = {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            role: user.role,
+            resident_id: resident ? resident.id : null
+        };
+
+        await supabase.from('login_history').insert([{ user_id: user.id, username: user.username, login_status: 'SUCCESS', ip_address: req.ip }]);
+        await logActivity(user.id, user.username, 'LOGIN', 'User successfully logged in', req.ip);
+
+        const redirect = user.role === 'Resident' ? '/resident/dashboard' : '/admin/dashboard';
+        res.json({ success: true, redirect });
+    } catch (err) {
+        console.error('Login Endpoint Error:', err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+app.get('/logout', async (req, res) => {
+    if (req.session.user) {
+        await logActivity(req.session.user.id, req.session.user.username, 'LOGOUT', 'User logged out', req.ip);
+        req.session.destroy();
+    }
+    res.redirect('/login');
+});
+
+// PUBLIC RESIDENT REGISTRATION PAGE
+app.get('/register', async (req, res) => {
+    const settings = await getBarangaySettings();
+    const { data: puroks } = await supabase.from('puroks').select('*').order('name');
+
+    let purokOptions = (puroks || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+
+    const html = `
+    <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <title>Resident Online Registration</title>
-        ${getGlobalStyles()}
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Resident Registration - ${settings.system_name}</title>
+        <style>
+            :root { --primary-blue: #1e3a8a; --accent-green: #059669; --light-bg: #f8fafc; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--light-bg); margin: 0; padding: 2rem 1rem; color: #334155; }
+            .reg-container { max-width: 800px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); overflow: hidden; border-top: 6px solid var(--accent-green); }
+            .reg-header { background: var(--primary-blue); color: white; padding: 2rem; text-align: center; }
+            .reg-header h2 { margin: 0; font-size: 1.5rem; }
+            .reg-header p { margin: 0.5rem 0 0 0; opacity: 0.9; font-size: 0.9rem; }
+            form { padding: 2rem; }
+            .section-title { font-size: 1.1rem; color: var(--primary-blue); border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; margin-top: 1.5rem; margin-bottom: 1rem; font-weight: 700; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+            .form-group { margin-bottom: 1rem; }
+            label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; color: #475569; }
+            input, select, textarea { width: 100%; padding: 0.65rem; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.9rem; }
+            input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-green); box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15); }
+            .btn-submit { background: var(--accent-green); color: white; border: none; padding: 0.85rem 2rem; font-size: 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 1.5rem; transition: background 0.2s; }
+            .btn-submit:hover { background: #047857; }
+            .alert { padding: 0.75rem; background: #fee2e2; border-left: 4px solid #ef4444; color: #b91c1c; margin-bottom: 1rem; border-radius: 6px; font-size: 0.85rem; display: none; }
+        </style>
     </head>
-    <body style="padding: 2rem 0; background: var(--bg-slate);">
-        <div style="max-width: 700px; margin: 0 auto;" class="card">
-            <h2 style="color: var(--dark-blue); border-bottom: 2px solid var(--light-blue); padding-bottom: 0.5rem; margin-bottom: 1.5rem;">
-                NEW RESIDENT REGISTRATION FORM
-            </h2>
-            <form id="regForm" enctype="multipart/form-data">
-                <div class="grid grid-2">
-                    <div class="form-group"><label>First Name *</label><input type="text" name="first_name" class="form-control" required></div>
-                    <div class="form-group"><label>Middle Name</label><input type="text" name="middle_name" class="form-control"></div>
+    <body>
+        <div class="reg-container">
+            <div class="reg-header">
+                <h2>Barangay Resident Registration</h2>
+                <p>Fill out the official form below to register for an official Barangay Account & Resident Card.</p>
+            </div>
+            <form id="register-form">
+                <div id="reg-alert" class="alert"></div>
+                <div class="section-title">1. Personal Information</div>
+                <div class="grid">
+                    <div class="form-group"><label>First Name *</label><input type="text" name="first_name" required></div>
+                    <div class="form-group"><label>Middle Name</label><input type="text" name="middle_name"></div>
+                    <div class="form-group"><label>Last Name *</label><input type="text" name="last_name" required></div>
+                    <div class="form-group"><label>Suffix</label><input type="text" name="suffix" placeholder="e.g. Jr., Sr., III"></div>
                 </div>
-                <div class="grid grid-2">
-                    <div class="form-group"><label>Last Name *</label><input type="text" name="last_name" class="form-control" required></div>
-                    <div class="form-group"><label>Suffix (e.g. Jr., III)</label><input type="text" name="suffix" class="form-control"></div>
-                </div>
-                <div class="grid grid-2">
-                    <div class="form-group"><label>Date of Birth *</label><input type="date" name="date_of_birth" class="form-control" required></div>
-                    <div class="form-group"><label>Gender *</label>
-                        <select name="gender" class="form-control" required>
+                <div class="grid">
+                    <div class="form-group"><label>Date of Birth *</label><input type="date" name="date_of_birth" required></div>
+                    <div class="form-group">
+                        <label>Gender *</label>
+                        <select name="gender" required>
+                            <option value="">Select Gender</option>
                             <option value="Male">Male</option>
                             <option value="Female">Female</option>
-                            <option value="Other">Other</option>
                         </select>
                     </div>
-                </div>
-                <div class="grid grid-2">
-                    <div class="form-group"><label>Civil Status *</label>
-                        <select name="civil_status" class="form-control" required>
+                    <div class="form-group">
+                        <label>Civil Status *</label>
+                        <select name="civil_status" required>
                             <option value="Single">Single</option>
                             <option value="Married">Married</option>
                             <option value="Widowed">Widowed</option>
                             <option value="Separated">Separated</option>
                         </select>
                     </div>
-                    <div class="form-group"><label>Purok *</label>
-                        <select name="purok_id" class="form-control" required>
-                            <option value="">Select Purok...</option>
-                            ${purokOpts}
+                    <div class="form-group"><label>Occupation</label><input type="text" name="occupation"></div>
+                </div>
+
+                <div class="section-title">2. Contact & Address Details</div>
+                <div class="grid">
+                    <div class="form-group"><label>Contact Number *</label><input type="text" name="contact_number" required placeholder="09123456789"></div>
+                    <div class="form-group"><label>Email Address *</label><input type="email" name="email" required placeholder="name@domain.com"></div>
+                    <div class="form-group">
+                        <label>Purok *</label>
+                        <select name="purok_id" required>
+                            <option value="">Select Purok</option>
+                            ${purokOptions}
                         </select>
                     </div>
                 </div>
-                <div class="form-group"><label>Full Address *</label><input type="text" name="address" class="form-control" required placeholder="House #, Street Name"></div>
-                <div class="grid grid-2">
-                    <div class="form-group"><label>Contact Number *</label><input type="text" name="contact_number" class="form-control" required placeholder="09123456789"></div>
-                    <div class="form-group"><label>Email Address *</label><input type="email" name="email" class="form-control" required></div>
+                <div class="form-group"><label>Complete Address *</label><textarea name="address" rows="2" required placeholder="House No., Street Name"></textarea></div>
+
+                <div class="section-title">3. Account Credentials</div>
+                <div class="grid">
+                    <div class="form-group"><label>Account Username *</label><input type="text" name="username" required></div>
+                    <div class="form-group"><label>Account Password *</label><input type="password" name="password" minlength="8" required></div>
                 </div>
-                <div class="grid grid-2">
-                    <div class="form-group"><label>Occupation</label><input type="text" name="occupation" class="form-control"></div>
-                    <div class="form-group"><label>Account Password *</label><input type="password" name="password" class="form-control" required></div>
-                </div>
-                <div class="form-group">
-                    <label>Upload Resident ID Photo</label>
-                    <input type="file" name="photo" class="form-control" accept="image/*">
-                </div>
-                <div style="margin: 1rem 0; display: flex; gap: 1.5rem;">
-                    <label><input type="checkbox" name="is_pwd" value="true"> Person With Disability (PWD)</label>
-                    <label><input type="checkbox" name="is_solo_parent" value="true"> Solo Parent</label>
-                </div>
-                <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-                    <button type="submit" class="btn btn-secondary" style="flex: 1;">Submit Registration</button>
-                    <a href="/login" class="btn btn-outline">Cancel</a>
-                </div>
+
+                <button type="submit" class="btn-submit">Submit Registration Request</button>
             </form>
         </div>
         <script>
-            document.getElementById('regForm').onsubmit = async (e) => {
+            document.getElementById('register-form').addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const fd = new FormData(e.target);
-                const res = await fetch('/register', { method: 'POST', body: fd });
-                const json = await res.json();
-                if(json.success) {
-                    alert(json.message);
-                    window.location.href = '/login';
-                } else {
-                    alert('Registration Failed: ' + json.message);
-                }
-            };
-        </script>
-    </body>
-    </html>`;
-}
+                const formData = new FormData(e.target);
+                const data = Object.fromEntries(formData.entries());
+                const alert = document.getElementById('reg-alert');
 
-function renderAdminDashboardHTML(user, metrics) {
-    const purokCards = metrics.puroks.map(p => `
-        <div class="card" style="border-left: 4px solid var(--accent-green);">
-            <div style="font-size: 0.875rem; color: var(--text-muted);">${p.purok_name}</div>
-            <div style="font-size: 1.5rem; font-weight: 700; color: var(--dark-green);">${p.residents ? p.residents[0]?.count || 0 : 0} Residents</div>
-        </div>
-    `).join('');
-
-    return `<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Admin Dashboard — Barangay Portal</title>
-        ${getGlobalStyles()}
-    </head>
-    <body>
-        <div class="app-layout">
-            <div class="sidebar">
-                <div>
-                    <h2>BARANGAY ADMIN</h2>
-                    <a href="/admin/dashboard" class="nav-link active">Dashboard</a>
-                    <a href="/admin/residents" class="nav-link">Resident Records</a>
-                    <a href="/scanner" class="nav-link">QR Verification Scanner</a>
-                    <a href="/admin/settings" class="nav-link">System Configurations</a>
-                </div>
-                <div>
-                    <div style="font-size: 0.8rem; margin-bottom: 0.5rem;">Logged in as: <b>${user.name}</b></div>
-                    <a href="/logout" class="btn btn-danger" style="width: 100%;">Sign Out</a>
-                </div>
-            </div>
-            <div class="main-content">
-                <div class="header-bar">
-                    <div>
-                        <h1 style="font-size: 1.5rem; color: var(--dark-blue);">Barangay Management Console</h1>
-                        <p style="color: var(--text-muted);">Real-time demographic and request overview</p>
-                    </div>
-                    <a href="/admin/print-ids" class="btn btn-secondary">Print Resident Cards</a>
-                </div>
-
-                <div class="grid grid-4" style="margin-bottom: 2rem;">
-                    <div class="card" style="border-top: 4px solid var(--primary-blue);">
-                        <div style="color: var(--text-muted); font-size: 0.875rem;">TOTAL APPROVED RESIDENTS</div>
-                        <div style="font-size: 2rem; font-weight: 800; color: var(--dark-blue);">${metrics.totalResidents}</div>
-                    </div>
-                    <div class="card" style="border-top: 4px solid #f59e0b;">
-                        <div style="color: var(--text-muted); font-size: 0.875rem;">PENDING REGISTRATIONS</div>
-                        <div style="font-size: 2rem; font-weight: 800; color: #d97706;">${metrics.pendingRegistrations}</div>
-                    </div>
-                    <div class="card" style="border-top: 4px solid var(--accent-green);">
-                        <div style="color: var(--text-muted); font-size: 0.875rem;">REGISTERED HOUSEHOLDS</div>
-                        <div style="font-size: 2rem; font-weight: 800; color: var(--dark-green);">${metrics.totalHouseholds}</div>
-                    </div>
-                    <div class="card" style="border-top: 4px solid #8b5cf6;">
-                        <div style="color: var(--text-muted); font-size: 0.875rem;">PENDING CERTIFICATES</div>
-                        <div style="font-size: 2rem; font-weight: 800; color: #6d28d9;">${metrics.pendingCertificates}</div>
-                    </div>
-                </div>
-
-                <h3 style="margin-bottom: 1rem; color: var(--dark-blue);">Purok Resident Distribution</h3>
-                <div class="grid grid-4" style="margin-bottom: 2rem;">
-                    ${purokCards}
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>`;
-}
-
-function renderAdminResidentsHTML(user, residents, puroks) {
-    const rows = residents.map(r => `
-        <tr>
-            <td><b>${r.resident_id_number}</b></td>
-            <td>${r.last_name}, ${r.first_name} ${r.middle_name || ''}</td>
-            <td>${r.puroks?.purok_name || 'N/A'}</td>
-            <td>${r.age} yrs (${r.gender})</td>
-            <td>
-                <span class="badge ${r.verification_status === 'APPROVED' ? 'badge-success' : (r.verification_status === 'PENDING' ? 'badge-warning' : 'badge-danger')}">
-                    ${r.verification_status}
-                </span>
-            </td>
-            <td>
-                ${r.verification_status === 'PENDING' ? `
-                    <button onclick="approveRes('${r.id}')" class="btn btn-secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;">Approve</button>
-                    <button onclick="rejectRes('${r.id}')" class="btn btn-danger" style="padding:0.25rem 0.5rem; font-size:0.75rem;">Reject</button>
-                ` : `
-                    <input type="checkbox" class="id-select-chk" value="${r.id}"> Select for Batch Print
-                `}
-            </td>
-        </tr>
-    `).join('');
-
-    return `<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Resident Records — BRMS Admin</title>
-        ${getGlobalStyles()}
-    </head>
-    <body>
-        <div class="app-layout">
-            <div class="sidebar">
-                <div>
-                    <h2>BARANGAY ADMIN</h2>
-                    <a href="/admin/dashboard" class="nav-link">Dashboard</a>
-                    <a href="/admin/residents" class="nav-link active">Resident Records</a>
-                    <a href="/scanner" class="nav-link">QR Verification Scanner</a>
-                    <a href="/admin/settings" class="nav-link">System Configurations</a>
-                </div>
-            </div>
-            <div class="main-content">
-                <div class="header-bar">
-                    <h2>Resident Directory Management</h2>
-                    <button onclick="printSelectedIDs()" class="btn btn-primary">Print Selected IDs (8 Batch Layout)</button>
-                </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Resident ID</th>
-                                <th>Full Name</th>
-                                <th>Purok</th>
-                                <th>Age / Gender</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        <script>
-            async function approveRes(id) {
-                if(!confirm('Officially approve this resident account?')) return;
-                const res = await fetch('/admin/residents/approve', {
+                const res = await fetch('/api/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id })
+                    body: JSON.stringify(data)
                 });
-                const j = await res.json();
-                alert(j.message);
-                location.reload();
-            }
-
-            function printSelectedIDs() {
-                const chks = document.querySelectorAll('.id-select-chk:checked');
-                const ids = Array.from(chks).map(c => c.value);
-                if(ids.length === 0) return alert('Select residents using checkboxes to batch print IDs.');
-                window.open('/admin/print-ids?ids=' + ids.join(','), '_blank');
-            }
+                const result = await res.json();
+                if (result.success) {
+                    alert.style.background = '#d1fae5';
+                    alert.style.borderColor = '#10b981';
+                    alert.style.color = '#065f46';
+                    alert.innerText = "Registration submitted successfully! Your account is pending Barangay Admin approval.";
+                    alert.style.display = 'block';
+                    e.target.reset();
+                } else {
+                    alert.style.background = '#fee2e2';
+                    alert.style.borderColor = '#ef4444';
+                    alert.style.color = '#b91c1c';
+                    alert.innerText = result.message || "Registration failed.";
+                    alert.style.display = 'block';
+                }
+            });
         </script>
     </body>
-    </html>`;
-}
+    </html>
+    `;
+    res.send(html);
+});
 
-function renderAdminSettingsHTML(user, settings) {
-    return `<!DOCTYPE html>
+app.post('/api/register', async (req, res) => {
+    try {
+        const { username, email, password, first_name, middle_name, last_name, suffix, date_of_birth, gender, civil_status, occupation, contact_number, purok_id, address } = req.body;
+
+        const password_hash = await bcrypt.hash(password, 10);
+        
+        // 1. Create User
+        const { data: newUser, error: uErr } = await supabase.from('users').insert([{
+            username,
+            email,
+            password_hash,
+            role: 'Resident',
+            is_active: true
+        }]).select().single();
+
+        if (uErr) return res.status(400).json({ success: false, message: 'Username or Email already registered.' });
+
+        // 2. Create Pending Resident Record
+        const { error: rErr } = await supabase.from('residents').insert([{
+            user_id: newUser.id,
+            first_name,
+            middle_name,
+            last_name,
+            suffix,
+            date_of_birth,
+            gender,
+            civil_status,
+            occupation,
+            contact_number,
+            email,
+            purok_id: purok_id || null,
+            address,
+            resident_status: 'PENDING_APPROVAL'
+        }]);
+
+        if (rErr) throw rErr;
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Registration Endpoint Error:', err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+// --- ADMIN DASHBOARD & MODULE TEMPLATES ---
+
+function renderAdminLayout(title, content, activeTab, user) {
+    return `
+    <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <title>Barangay Configurations</title>
-        ${getGlobalStyles()}
-    </head>
-    <body>
-        <div class="app-layout">
-            <div class="sidebar">
-                <div>
-                    <h2>BARANGAY ADMIN</h2>
-                    <a href="/admin/dashboard" class="nav-link">Dashboard</a>
-                    <a href="/admin/residents" class="nav-link">Resident Records</a>
-                    <a href="/admin/settings" class="nav-link active">System Configurations</a>
-                </div>
-            </div>
-            <div class="main-content">
-                <div class="card" style="max-width: 800px;">
-                    <h2 style="color: var(--dark-blue); margin-bottom: 1rem;">Persistent Barangay Configurations</h2>
-                    <form id="settingsForm" enctype="multipart/form-data">
-                        <div class="grid grid-2">
-                            <div class="form-group"><label>Barangay Name</label><input type="text" name="barangay_name" class="form-control" value="${settings.barangay_name || ''}"></div>
-                            <div class="form-group"><label>City / Municipality</label><input type="text" name="municipality_city" class="form-control" value="${settings.municipality_city || ''}"></div>
-                        </div>
-                        <div class="grid grid-2">
-                            <div class="form-group"><label>Province</label><input type="text" name="province" class="form-control" value="${settings.province || ''}"></div>
-                            <div class="form-group"><label>Barangay Captain</label><input type="text" name="barangay_captain" class="form-control" value="${settings.barangay_captain || ''}"></div>
-                        </div>
-                        <div class="grid grid-2">
-                            <div class="form-group"><label>Upload Official Logo</label><input type="file" name="logo" class="form-control"></div>
-                            <div class="form-group"><label>Captain Signature Image</label><input type="file" name="captain_signature" class="form-control"></div>
-                        </div>
-                        <button type="submit" class="btn btn-secondary" style="margin-top: 1rem;">Save Persistent Settings</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-        <script>
-            document.getElementById('settingsForm').onsubmit = async (e) => {
-                e.preventDefault();
-                const fd = new FormData(e.target);
-                const res = await fetch('/admin/settings', { method: 'POST', body: fd });
-                const json = await res.json();
-                alert(json.message);
-                location.reload();
-            };
-        </script>
-    </body>
-    </html>`;
-}
-
-function renderResidentDashboardHTML(user, resident, certs, annos, notifs, settings) {
-    const certRows = certs.map(c => `
-        <tr>
-            <td><b>${c.request_number}</b></td>
-            <td>${c.document_type}</td>
-            <td><span class="badge badge-warning">${c.status}</span></td>
-            <td>${new Date(c.created_at).toLocaleDateString()}</td>
-        </tr>
-    `).join('');
-
-    return `<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Resident Portal</title>
-        ${getGlobalStyles()}
-        <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title} - Barangay Admin Portal</title>
         <style>
-            .id-card {
-                width: 350px; height: 220px; border-radius: 12px; background: linear-gradient(135deg, #0284c7, #16a34a);
-                color: white; padding: 12px; position: relative; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); border: 2px solid white;
-            }
-            .id-header { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.4); padding-bottom: 4px; }
-            .id-body { display: flex; gap: 10px; margin-top: 8px; }
-            .id-photo { width: 75px; height: 75px; border-radius: 6px; background: #fff; object-fit: cover; border: 2px solid white; }
+            :root { --primary-blue: #1e3a8a; --accent-green: #059669; --bg-light: #f8fafc; --sidebar-width: 260px; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin:0; padding:0; background: var(--bg-light); color: #334155; display: flex; min-height: 100vh; }
+            .sidebar { width: var(--sidebar-width); background: var(--primary-blue); color: white; flex-shrink: 0; display: flex; flex-direction: column; }
+            .sidebar-header { padding: 1.5rem; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
+            .sidebar-header h3 { margin: 0; font-size: 1.1rem; text-transform: uppercase; tracking: 1px; }
+            .sidebar-menu { list-style: none; padding: 0; margin: 1rem 0; flex-grow: 1; overflow-y: auto; }
+            .sidebar-menu li a { display: block; padding: 0.75rem 1.5rem; color: #cbd5e1; text-decoration: none; font-size: 0.9rem; border-left: 4px solid transparent; transition: all 0.2s; }
+            .sidebar-menu li a:hover, .sidebar-menu li a.active { background: rgba(255,255,255,0.1); color: white; border-left-color: var(--accent-green); }
+            .main-content { flex-grow: 1; display: flex; flex-direction: column; overflow-x: hidden; }
+            .top-bar { background: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }
+            .user-info { font-size: 0.9rem; font-weight: 600; color: #475569; }
+            .content-area { padding: 2rem; flex-grow: 1; }
+            .card { background: white; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); padding: 1.5rem; margin-bottom: 1.5rem; }
+            .card-title { font-size: 1.1rem; font-weight: 700; color: var(--primary-blue); margin-bottom: 1rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem; }
+            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+            .stat-card { background: white; border-radius: 8px; border-left: 4px solid var(--accent-green); padding: 1.2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+            .stat-value { font-size: 1.8rem; font-weight: 800; color: var(--primary-blue); margin-top: 0.3rem; }
+            .stat-label { font-size: 0.8rem; text-transform: uppercase; color: #64748b; font-weight: 600; }
+            table { width: 100%; border-collapse: collapse; font-size: 0.9rem; text-align: left; }
+            th { background: #f1f5f9; padding: 0.75rem 1rem; color: #475569; font-weight: 700; border-bottom: 2px solid #e2e8f0; }
+            td { padding: 0.75rem 1rem; border-bottom: 1px solid #f1f5f9; }
+            .btn { display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600; cursor: pointer; border: none; transition: background 0.2s; }
+            .btn-primary { background: var(--primary-blue); color: white; }
+            .btn-success { background: var(--accent-green); color: white; }
+            .btn-danger { background: #dc2626; color: white; }
+            .badge { padding: 0.25rem 0.6rem; border-radius: 50px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
+            .badge-active { background: #d1fae5; color: #065f46; }
+            .badge-pending { background: #fef3c7; color: #92400e; }
         </style>
     </head>
     <body>
-        <div class="app-layout">
-            <div class="sidebar" style="background: var(--dark-green);">
-                <div>
-                    <h2>RESIDENT PORTAL</h2>
-                    <a href="/resident/dashboard" class="nav-link active">My Dashboard & ID</a>
-                    <a href="/logout" class="nav-link">Sign Out</a>
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h3>Admin Portal</h3>
+            </div>
+            <ul class="sidebar-menu">
+                <li><a href="/admin/dashboard" class="${activeTab==='dashboard'?'active':''}">Dashboard</a></li>
+                <li><a href="/admin/residents" class="${activeTab==='residents'?'active':''}">Resident Management</a></li>
+                <li><a href="/admin/registrations" class="${activeTab==='registrations'?'active':''}">Pending Registrations</a></li>
+                <li><a href="/admin/households" class="${activeTab==='households'?'active':''}">Household Management</a></li>
+                <li><a href="/admin/puroks" class="${activeTab==='puroks'?'active':''}">Purok Management</a></li>
+                <li><a href="/admin/certificates" class="${activeTab==='certificates'?'active':''}">Certificate Requests</a></li>
+                <li><a href="/admin/blotter" class="${activeTab==='blotter'?'active':''}">Blotter & Complaints</a></li>
+                <li><a href="/admin/assistance" class="${activeTab==='assistance'?'active':''}">Assistance Requests</a></li>
+                <li><a href="/admin/appointments" class="${activeTab==='appointments'?'active':''}">Appointments</a></li>
+                <li><a href="/admin/seniors" class="${activeTab==='seniors'?'active':''}">Senior Citizens</a></li>
+                <li><a href="/admin/pwd" class="${activeTab==='pwd'?'active':''}">PWD Management</a></li>
+                <li><a href="/admin/soloparents" class="${activeTab==='soloparents'?'active':''}">Solo Parents</a></li>
+                <li><a href="/admin/announcements" class="${activeTab==='announcements'?'active':''}">Announcements & Events</a></li>
+                <li><a href="/admin/officials" class="${activeTab==='officials'?'active':''}">Barangay Officials</a></li>
+                <li><a href="/scanner" target="_blank">QR Code Verification</a></li>
+                <li><a href="/admin/id-print" class="${activeTab==='id-print'?'active':''}">Bulk ID Printing (8/Page)</a></li>
+                <li><a href="/admin/users" class="${activeTab==='users'?'active':''}">User Management</a></li>
+                <li><a href="/admin/logs" class="${activeTab==='logs'?'active':''}">Activity & Login Logs</a></li>
+                <li><a href="/admin/settings" class="${activeTab==='settings'?'active':''}">System & Barangay Settings</a></li>
+            </ul>
+        </div>
+        <div class="main-content">
+            <div class="top-bar">
+                <div><strong>${title}</strong></div>
+                <div class="user-info">
+                    Logged in as: <strong>${user.username}</strong> (${user.role}) | <a href="/logout" style="color:#dc2626;">Logout</a>
                 </div>
             </div>
-            <div class="main-content">
-                <div class="header-bar">
-                    <h2>Welcome, ${resident.first_name}!</h2>
-                    <button onclick="document.getElementById('reqModal').style.display='flex'" class="btn btn-primary">Request Certificate</button>
-                </div>
-
-                <div class="grid grid-2" style="margin-bottom: 2rem;">
-                    <div>
-                        <h3 style="margin-bottom: 0.5rem; color: var(--dark-blue);">BARANGAY RESIDENT CARD (DIGITAL ID)</h3>
-                        <div class="id-card">
-                            <div class="id-header">
-                                <img src="${settings.logo_url || 'https://via.placeholder.com/40'}" style="width:32px; height:32px; border-radius:50%;">
-                                <div>
-                                    <div style="font-size:0.65rem; font-weight:800; text-transform:uppercase;">${settings.barangay_name || 'BARANGAY CENTRAL'}</div>
-                                    <div style="font-size:0.5rem;">OFFICIAL RESIDENT IDENTIFICATION CARD</div>
-                                </div>
-                            </div>
-                            <div class="id-body">
-                                <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="id-photo">
-                                <div style="font-size:0.7rem;">
-                                    <div><b>ID:</b> ${resident.resident_id_number}</div>
-                                    <div><b>NAME:</b> ${resident.first_name} ${resident.last_name}</div>
-                                    <div><b>DOB:</b> ${resident.date_of_birth}</div>
-                                    <div><b>PUROK:</b> ${resident.puroks?.purok_name || 'N/A'}</div>
-                                </div>
-                            </div>
-                            <div style="position:absolute; bottom:8px; right:12px;">
-                                <canvas id="idQrCanvas"></canvas>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <h3 style="margin-bottom: 1rem; color: var(--dark-blue);">My Certificate Requests</h3>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Req #</th>
-                                <th>Document</th>
-                                <th>Status</th>
-                                <th>Requested Date</th>
-                            </tr>
-                        </thead>
-                        <tbody>${certRows || '<tr><td colspan="4">No certificate requests found.</td></tr>'}</tbody>
-                    </table>
-                </div>
+            <div class="content-area">
+                ${content}
             </div>
         </div>
-
-        <!-- Request Modal -->
-        <div id="reqModal" class="modal-overlay">
-            <div class="modal">
-                <h3>Request Official Document</h3>
-                <form id="reqForm" style="margin-top:1rem;">
-                    <div class="form-group">
-                        <label>Document Type</label>
-                        <select name="document_type" class="form-control" required>
-                            <option value="Barangay Clearance">Barangay Clearance</option>
-                            <option value="Certificate of Residency">Certificate of Residency</option>
-                            <option value="Certificate of Indigency">Certificate of Indigency</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Purpose</label>
-                        <input type="text" name="purpose" class="form-control" required placeholder="e.g. Employment, Scholarship">
-                    </div>
-                    <div style="display:flex; gap:1rem; margin-top:1.5rem;">
-                        <button type="submit" class="btn btn-primary" style="flex:1;">Submit Request</button>
-                        <button type="button" onclick="document.getElementById('reqModal').style.display='none'" class="btn btn-outline">Close</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <script>
-            QRCode.toCanvas(document.getElementById('idQrCanvas'), '${resident.resident_id_number}', { width: 50, margin: 1 });
-            document.getElementById('reqForm').onsubmit = async (e) => {
-                e.preventDefault();
-                const fd = new FormData(e.target);
-                const res = await fetch('/resident/request-certificate', { method: 'POST', body: new URLSearchParams(fd) });
-                const json = await res.json();
-                alert(json.message);
-                location.reload();
-            };
-        </script>
     </body>
-    </html>`;
+    </html>
+    `;
 }
 
-function renderScannerHTML(user) {
-    return `<!DOCTYPE html>
+// ADMIN DASHBOARD ROUTE
+app.get('/admin/dashboard', requireAdmin, async (req, res) => {
+    // Query statistics live from Supabase
+    const { count: totalResidents } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('resident_status', 'ACTIVE');
+    const { count: pendingRegs } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('resident_status', 'PENDING_APPROVAL');
+    const { count: totalHouseholds } = await supabase.from('households').select('*', { count: 'exact', head: true });
+    const { count: totalPuroks } = await supabase.from('puroks').select('*', { count: 'exact', head: true });
+    const { count: pendingCerts } = await supabase.from('certificate_requests').select('*', { count: 'exact', head: true }).eq('status', 'SUBMITTED');
+    const { count: pendingAssistance } = await supabase.from('assistance_requests').select('*', { count: 'exact', head: true }).eq('status', 'PENDING');
+
+    const content = `
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Active Residents</div>
+            <div class="stat-value">${totalResidents || 0}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Pending Registrations</div>
+            <div class="stat-value">${pendingRegs || 0}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Households</div>
+            <div class="stat-value">${totalHouseholds || 0}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Puroks</div>
+            <div class="stat-value">${totalPuroks || 0}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Pending Document Requests</div>
+            <div class="stat-value">${pendingCerts || 0}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Pending Assistance Requests</div>
+            <div class="stat-value">${pendingAssistance || 0}</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Barangay Resident Management Information</div>
+        <p>Welcome to the production dashboard. Real-time statistics are synchronized directly with your Supabase PostgreSQL cluster.</p>
+    </div>
+    `;
+
+    res.send(renderAdminLayout('Dashboard', content, 'dashboard', req.session.user));
+});
+
+// RESIDENT MANAGEMENT ROUTE
+app.get('/admin/residents', requireAdmin, async (req, res) => {
+    const { data: residents } = await supabase.from('residents')
+        .select('*, puroks(name)')
+        .eq('resident_status', 'ACTIVE')
+        .order('last_name');
+
+    let rows = (residents || []).map(r => `
+        <tr>
+            <td><strong>${r.resident_id_number || 'N/A'}</strong></td>
+            <td>${r.last_name}, ${r.first_name} ${r.middle_name || ''}</td>
+            <td>${r.gender}</td>
+            <td>${r.puroks ? r.puroks.name : 'Unassigned'}</td>
+            <td>${r.contact_number || 'N/A'}</td>
+            <td><span class="badge badge-active">${r.resident_status}</span></td>
+            <td>
+                <a href="/admin/residents/view/${r.id}" class="btn btn-primary">View / ID</a>
+            </td>
+        </tr>
+    `).join('');
+
+    if(!rows) {
+        rows = `<tr><td colspan="7" style="text-align:center; color:#64748b;">No active residents found. Approve registered residents to populate the database.</td></tr>`;
+    }
+
+    const content = `
+    <div class="card">
+        <div class="card-title">Resident Management</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Resident ID</th>
+                    <th>Full Name</th>
+                    <th>Gender</th>
+                    <th>Purok</th>
+                    <th>Contact</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rows}
+            </tbody>
+        </table>
+    </div>
+    `;
+
+    res.send(renderAdminLayout('Resident Management', content, 'residents', req.session.user));
+});
+
+// PENDING REGISTRATIONS APPROVAL ROUTE
+app.get('/admin/registrations', requireAdmin, async (req, res) => {
+    const { data: pending } = await supabase.from('residents')
+        .select('*')
+        .eq('resident_status', 'PENDING_APPROVAL')
+        .order('created_at', { ascending: false });
+
+    let rows = (pending || []).map(r => `
+        <tr>
+            <td>${r.last_name}, ${r.first_name} ${r.middle_name || ''}</td>
+            <td>${r.email}</td>
+            <td>${r.contact_number}</td>
+            <td>${r.address}</td>
+            <td>
+                <button onclick="approveResident('${r.id}')" class="btn btn-success">Approve</button>
+                <button onclick="rejectResident('${r.id}')" class="btn btn-danger">Reject</button>
+            </td>
+        </tr>
+    `).join('');
+
+    if(!rows) {
+        rows = `<tr><td colspan="5" style="text-align:center; color:#64748b;">No pending registration requests.</td></tr>`;
+    }
+
+    const content = `
+    <div class="card">
+        <div class="card-title">Pending Resident Registration Approvals</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Full Name</th>
+                    <th>Email</th>
+                    <th>Contact</th>
+                    <th>Address</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rows}
+            </tbody>
+        </table>
+    </div>
+    <script>
+        async function approveResident(id) {
+            if(!confirm('Approve this resident and generate official Barangay ID?')) return;
+            const res = await fetch('/api/admin/residents/approve/' + id, { method: 'POST' });
+            const data = await res.json();
+            if(data.success) location.reload();
+            else alert(data.message);
+        }
+        async function rejectResident(id) {
+            const reason = prompt('Reason for rejection:');
+            if(!reason) return;
+            const res = await fetch('/api/admin/residents/reject/' + id, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason })
+            });
+            const data = await res.json();
+            if(data.success) location.reload();
+            else alert(data.message);
+        }
+    </script>
+    `;
+
+    res.send(renderAdminLayout('Pending Registrations', content, 'registrations', req.session.user));
+});
+
+app.post('/api/admin/residents/approve/:id', requireAdmin, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const year = new Date().getFullYear();
+        const randNum = Math.floor(100000 + Math.random() * 900000);
+        const residentIdNum = `BRGY-${year}-${randNum}`;
+
+        const { error } = await supabase.from('residents').update({
+            resident_status: 'ACTIVE',
+            resident_id_number: residentIdNum
+        }).eq('id', id);
+
+        if (error) throw error;
+
+        await logActivity(req.session.user.id, req.session.user.username, 'APPROVE_RESIDENT', `Approved resident registration ID: ${residentIdNum}`, req.ip);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.post('/api/admin/residents/reject/:id', requireAdmin, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const { reason } = req.body;
+
+        const { error } = await supabase.from('residents').update({
+            resident_status: 'REJECTED',
+            rejection_reason: reason
+        }).eq('id', id);
+
+        if (error) throw error;
+
+        await logActivity(req.session.user.id, req.session.user.username, 'REJECT_RESIDENT', `Rejected resident registration. Reason: ${reason}`, req.ip);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// PUROK MANAGEMENT ROUTE WITH LIVE RESIDENT COUNT
+app.get('/admin/puroks', requireAdmin, async (req, res) => {
+    const { data: puroks } = await supabase.from('puroks').select('*').order('name');
+    const { data: residents } = await supabase.from('residents').select('purok_id').eq('resident_status', 'ACTIVE');
+
+    // Calculate count dynamically from resident dataset
+    const countMap = {};
+    (residents || []).forEach(r => {
+        if(r.purok_id) countMap[r.purok_id] = (countMap[r.purok_id] || 0) + 1;
+    });
+
+    let cards = (puroks || []).map(p => `
+        <div class="stat-card" style="border-left-color: var(--primary-blue);">
+            <div class="stat-label">${p.name}</div>
+            <div class="stat-value">${countMap[p.id] || 0} Residents</div>
+            <p style="font-size:0.8rem; color:#64748b; margin-top:0.5rem;">${p.description || 'No description provided.'}</p>
+        </div>
+    `).join('');
+
+    const content = `
+    <div class="card">
+        <div class="card-title">Purok Management & Population Counts</div>
+        <form id="add-purok-form" style="display:flex; gap:1rem; margin-bottom:1.5rem;">
+            <input type="text" name="name" placeholder="Purok Name (e.g. Purok 1)" required style="flex:1;">
+            <input type="text" name="description" placeholder="Description" style="flex:2;">
+            <button type="submit" class="btn btn-success">Add Purok</button>
+        </form>
+    </div>
+    <div class="stats-grid">
+        ${cards}
+    </div>
+    <script>
+        document.getElementById('add-purok-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+            const res = await fetch('/api/admin/puroks/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            if(result.success) location.reload();
+            else alert(result.message);
+        });
+    </script>
+    `;
+
+    res.send(renderAdminLayout('Purok Management', content, 'puroks', req.session.user));
+});
+
+app.post('/api/admin/puroks/add', requireAdmin, async (req, res) => {
+    try {
+        const { name, description } = req.body;
+        const { error } = await supabase.from('puroks').insert([{ name, description }]);
+        if(error) throw error;
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+// --- RESIDENT PORTAL ---
+
+function renderResidentLayout(title, content, activeTab, user) {
+    return `
+    <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <title>QR Verification Scanner</title>
-        ${getGlobalStyles()}
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title} - Resident Portal</title>
+        <style>
+            :root { --primary-blue: #1e3a8a; --accent-green: #059669; --bg-light: #f8fafc; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin:0; padding:0; background: var(--bg-light); color: #334155; }
+            .navbar { background: var(--primary-blue); color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+            .navbar h2 { margin: 0; font-size: 1.2rem; }
+            .nav-links { display: flex; gap: 1rem; }
+            .nav-links a { color: white; text-decoration: none; font-size: 0.9rem; font-weight: 600; padding: 0.4rem 0.8rem; border-radius: 4px; }
+            .nav-links a.active, .nav-links a:hover { background: var(--accent-green); }
+            .container { max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
+            .card { background: white; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); padding: 1.5rem; margin-bottom: 1.5rem; }
+            .card-title { font-size: 1.1rem; font-weight: 700; color: var(--primary-blue); margin-bottom: 1rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem; }
+            .btn { display: inline-block; padding: 0.6rem 1.2rem; border-radius: 6px; text-decoration: none; font-size: 0.9rem; font-weight: 600; cursor: pointer; border: none; }
+            .btn-primary { background: var(--primary-blue); color: white; }
+            .btn-success { background: var(--accent-green); color: white; }
+        </style>
     </head>
     <body>
-        <div class="app-layout">
-            <div class="sidebar">
-                <div>
-                    <h2>BARANGAY ADMIN</h2>
-                    <a href="/admin/dashboard" class="nav-link">Dashboard</a>
-                    <a href="/scanner" class="nav-link active">QR Verification Scanner</a>
-                </div>
-            </div>
-            <div class="main-content">
-                <div class="card" style="max-width: 600px; margin: 0 auto; text-align: center;">
-                    <h2 style="color: var(--dark-blue);">OFFICIAL QR CODE VERIFIER</h2>
-                    <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Verify Resident Cards & Authenticate Documents</p>
-                    
-                    <div class="form-group">
-                        <input type="text" id="qrInput" class="form-control" placeholder="Scan or enter Verification / Resident ID code...">
-                    </div>
-                    <button onclick="verifyCode()" class="btn btn-primary" style="width: 100%;">Verify Code</button>
-
-                    <div id="verifyResult" style="margin-top: 2rem; display: none; text-align: left;" class="card"></div>
-                </div>
+        <div class="navbar">
+            <h2>Barangay Resident Portal</h2>
+            <div class="nav-links">
+                <a href="/resident/dashboard" class="${activeTab==='dashboard'?'active':''}">Dashboard</a>
+                <a href="/resident/profile" class="${activeTab==='profile'?'active':''}">My Profile</a>
+                <a href="/resident/digital-id" class="${activeTab==='id'?'active':''}">Digital ID</a>
+                <a href="/resident/certificates" class="${activeTab==='certificates'?'active':''}">Request Documents</a>
+                <a href="/logout" style="background:#dc2626;">Logout</a>
             </div>
         </div>
+        <div class="container">
+            ${content}
+        </div>
+    </body>
+    </html>
+    `;
+}
+
+app.get('/resident/dashboard', requireResident, async (req, res) => {
+    const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.session.user.resident_id).single();
+
+    const content = `
+    <div class="card">
+        <div class="card-title">Welcome, ${resident.first_name}!</div>
+        <p><strong>Resident ID:</strong> ${resident.resident_id_number || 'PENDING'}</p>
+        <p><strong>Purok:</strong> ${resident.puroks ? resident.puroks.name : 'Unassigned'}</p>
+        <p><strong>Status:</strong> <span style="color:var(--accent-green); font-weight:bold;">${resident.resident_status}</span></p>
+    </div>
+    `;
+
+    res.send(renderResidentLayout('Resident Dashboard', content, 'dashboard', req.session.user));
+});
+
+// DIGITAL RESIDENT ID PAGE & PHYSICAL ID MATCHING DESIGN
+app.get('/resident/digital-id', requireResident, async (req, res) => {
+    const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.session.user.resident_id).single();
+    const settings = await getBarangaySettings();
+
+    // Generate Verification QR Code
+    const qrDataUrl = await QRCode.toDataURL(`${req.protocol}://${req.get('host')}/verify/resident/${resident.qr_secure_token}`);
+
+    const content = `
+    <div class="card" style="text-align: center;">
+        <div class="card-title">Official Digital Barangay Resident Card</div>
+        <p style="font-size:0.85rem; color:#64748b;">This card is an officially issued Barangay Identification Document.</p>
+        
+        <!-- BARANGAY ID CARD CONTAINER -->
+        <div style="width: 350px; height: 220px; background: linear-gradient(135deg, #1e3a8a, #059669); color: white; border-radius: 12px; margin: 2rem auto; padding: 12px; box-shadow: 0 10px 20px rgba(0,0,0,0.2); position: relative; text-align: left; box-sizing: border-box;">
+            <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 6px;">
+                <img src="${settings.logo_url || 'https://via.placeholder.com/40'}" style="width: 36px; height: 36px; border-radius: 50%; background: white;">
+                <div>
+                    <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px;">${settings.barangay_name}</div>
+                    <div style="font-size: 0.8rem; font-weight: 800;">BARANGAY RESIDENT CARD</div>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <img src="${resident.photo_url || 'https://via.placeholder.com/80?text=Photo'}" style="width: 70px; height: 70px; object-fit: cover; border-radius: 6px; border: 2px solid white;">
+                <div style="font-size: 0.7rem; line-height: 1.3;">
+                    <div style="font-size: 0.85rem; font-weight: bold; color: #fef08a;">${resident.last_name}, ${resident.first_name}</div>
+                    <div><strong>ID:</strong> ${resident.resident_id_number}</div>
+                    <div><strong>DOB:</strong> ${resident.date_of_birth}</div>
+                    <div><strong>Purok:</strong> ${resident.puroks ? resident.puroks.name : 'N/A'}</div>
+                </div>
+                <img src="${qrDataUrl}" style="width: 50px; height: 50px; background: white; padding: 2px; border-radius: 4px; margin-left: auto;">
+            </div>
+            <div style="position: absolute; bottom: 8px; right: 12px; font-size: 0.55rem; opacity: 0.8; text-align: right;">
+                Official Barangay Issued Document
+            </div>
+        </div>
+    </div>
+    `;
+
+    res.send(renderResidentLayout('Digital Resident ID', content, 'id', req.session.user));
+});
+
+// DEDICATED QR SCANNER PAGE
+app.get('/scanner', requireAdmin, async (req, res) => {
+    const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>QR Verification & Service Terminal</title>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8fafc; padding: 2rem; text-align: center; }
+            .card { max-width: 500px; margin: 0 auto; background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+            input { width: 80%; padding: 0.75rem; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 6px; margin-bottom: 1rem; }
+            button { background: #059669; color: white; border: none; padding: 0.75rem 1.5rem; font-size: 1rem; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>QR Verification Terminal</h2>
+            <p>Scan resident QR token or manually input token key below:</p>
+            <input type="text" id="token" placeholder="Paste or Scan Secure Token">
+            <button onclick="verifyToken()">Verify Token</button>
+            <div id="result" style="margin-top: 1.5rem; text-align: left;"></div>
+        </div>
         <script>
-            async function verifyCode() {
-                const code = document.getElementById('qrInput').value.trim();
-                if(!code) return alert('Enter a code to verify.');
-                const res = await fetch('/api/verify-qr/' + encodeURIComponent(code));
-                const json = await res.json();
-                const resDiv = document.getElementById('verifyResult');
-                resDiv.style.display = 'block';
-                
-                if(json.success) {
-                    resDiv.innerHTML = '<h3 style="color:var(--dark-green);">VALID RECORD VERIFIED</h3><pre>' + JSON.stringify(json.data, null, 2) + '</pre>';
+            async function verifyToken() {
+                const token = document.getElementById('token').value;
+                const res = await fetch('/api/verify/' + token);
+                const data = await res.json();
+                const div = document.getElementById('result');
+                if(data.success) {
+                    div.innerHTML = \`<div style="padding:1rem; background:#d1fae5; color:#065f46; border-radius:6px;">
+                        <h3>✓ VERIFIED RESIDENT</h3>
+                        <p><strong>Name:</strong> \${data.resident.last_name}, \${data.resident.first_name}</p>
+                        <p><strong>Resident ID:</strong> \${data.resident.resident_id_number}</p>
+                        <p><strong>Status:</strong> \${data.resident.resident_status}</p>
+                    </div>\`;
                 } else {
-                    resDiv.innerHTML = '<h3 style="color:#dc2626;">VERIFICATION FAILED</h3><p>' + json.message + '</p>';
+                    div.innerHTML = \`<div style="padding:1rem; background:#fee2e2; color:#b91c1c; border-radius:6px;">INVALID TOKEN</div>\`;
                 }
             }
         </script>
     </body>
-    </html>`;
-}
+    </html>
+    `;
+    res.send(html);
+});
 
-function render8IDsPrintLayoutHTML(residents, settings) {
-    const cards = residents.map(r => `
-        <div style="width: 3.375in; height: 2.125in; border: 1px solid #000; border-radius: 8px; padding: 8px; box-sizing: border-box; background: linear-gradient(135deg, #0284c7, #16a34a); color: white; position: relative; page-break-inside: avoid;">
-            <div style="font-size: 8pt; font-weight: bold; text-align: center; border-bottom: 1px solid white;">${settings.barangay_name || 'BARANGAY CENTRAL'} RESIDENT CARD</div>
-            <div style="display: flex; gap: 8px; margin-top: 6px;">
-                <img src="${r.photo_url || 'https://via.placeholder.com/80'}" style="width: 0.8in; height: 0.8in; border-radius: 4px; object-fit: cover; border: 1px solid white;">
-                <div style="font-size: 7pt;">
-                    <div><b>ID:</b> ${r.resident_id_number}</div>
-                    <div><b>NAME:</b> ${r.first_name} ${r.last_name}</div>
-                    <div><b>DOB:</b> ${r.date_of_birth}</div>
-                    <div><b>STATUS:</b> ${r.verification_status}</div>
+app.get('/api/verify/:token', async (req, res) => {
+    const { data: resident } = await supabase.from('residents').select('*').eq('qr_secure_token', req.params.token).single();
+    if(resident) {
+        res.json({ success: true, resident });
+    } else {
+        res.json({ success: false });
+    }
+});
+
+// BULK PRINT 8 BARANGAY RESIDENT IDS ON ONE BOND PAPER SHEET
+app.get('/admin/id-print', requireAdmin, async (req, res) => {
+    const { data: residents } = await supabase.from('residents').select('*, puroks(name)').eq('resident_status', 'ACTIVE').limit(8);
+    const settings = await getBarangaySettings();
+
+    let cardsHtml = '';
+
+    for (let r of (residents || [])) {
+        const qrDataUrl = await QRCode.toDataURL(`${req.protocol}://${req.get('host')}/verify/resident/${r.qr_secure_token}`);
+        cardsHtml += `
+        <div class="id-card">
+            <div class="id-header">
+                <img src="${settings.logo_url || 'https://via.placeholder.com/30'}" class="logo">
+                <div>
+                    <div class="b-name">${settings.barangay_name}</div>
+                    <div class="id-title">BARANGAY RESIDENT CARD</div>
                 </div>
             </div>
+            <div class="id-body">
+                <img src="${r.photo_url || 'https://via.placeholder.com/60?text=Photo'}" class="photo">
+                <div class="info">
+                    <div class="name">${r.last_name}, ${r.first_name}</div>
+                    <div><strong>ID:</strong> ${r.resident_id_number}</div>
+                    <div><strong>DOB:</strong> ${r.date_of_birth}</div>
+                    <div><strong>Purok:</strong> ${r.puroks ? r.puroks.name : 'N/A'}</div>
+                </div>
+                <img src="${qrDataUrl}" class="qr">
+            </div>
         </div>
-    `).join('');
+        `;
+    }
 
-    return `<!DOCTYPE html>
+    const html = `
+    <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <title>Batch Print Resident Cards (8-Up Sheet)</title>
+        <title>Print 8 Resident IDs - Letter / Bond Paper</title>
         <style>
             @page { size: letter; margin: 0.5in; }
-            body { font-family: sans-serif; margin: 0; padding: 0; }
-            .print-grid { display: grid; grid-template-columns: repeat(2, 3.375in); gap: 0.2in; justify-content: center; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background: white; }
+            .print-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; width: 100%; max-width: 7.5in; margin: 0 auto; }
+            .id-card { width: 3.4in; height: 2.1in; background: linear-gradient(135deg, #1e3a8a, #059669); color: white; border-radius: 8px; padding: 8px; box-sizing: border-box; position: relative; border: 1px solid #cbd5e1; }
+            .id-header { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid rgba(255,255,255,0.4); padding-bottom: 4px; }
+            .logo { width: 28px; height: 28px; border-radius: 50%; background: white; }
+            .b-name { font-size: 0.55rem; text-transform: uppercase; }
+            .id-title { font-size: 0.7rem; font-weight: 800; }
+            .id-body { display: flex; gap: 6px; margin-top: 6px; }
+            .photo { width: 55px; height: 55px; object-fit: cover; border-radius: 4px; border: 1px solid white; }
+            .info { font-size: 0.6rem; line-height: 1.2; }
+            .name { font-size: 0.7rem; font-weight: bold; color: #fef08a; }
+            .qr { width: 40px; height: 40px; background: white; padding: 2px; border-radius: 4px; margin-left: auto; }
+            .btn-print { background: #1e3a8a; color: white; padding: 10px 20px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; margin: 1rem; }
+            @media print { .no-print { display: none; } }
         </style>
     </head>
-    <body onload="window.print()">
-        <div class="print-grid">${cards}</div>
+    <body>
+        <div class="no-print" style="text-align: center;">
+            <button onclick="window.print()" class="btn-print">Print Sheet (8 IDs / Page)</button>
+        </div>
+        <div class="print-grid">
+            ${cardsHtml}
+        </div>
     </body>
-    </html>`;
-}
+    </html>
+    `;
+    res.send(html);
+});
 
-// SERVER INITIALIZATION
+// SYSTEM SETTINGS ROUTE
+app.get('/admin/settings', requireAdmin, async (req, res) => {
+    const settings = await getBarangaySettings();
+    const content = `
+    <div class="card">
+        <div class="card-title">Barangay & System Configuration</div>
+        <form id="settings-form">
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div><label>Barangay Name</label><input type="text" name="barangay_name" value="${settings.barangay_name}"></div>
+                <div><label>Municipality/City</label><input type="text" name="municipality" value="${settings.municipality}"></div>
+                <div><label>Province</label><input type="text" name="province" value="${settings.province}"></div>
+                <div><label>System Name</label><input type="text" name="system_name" value="${settings.system_name}"></div>
+            </div>
+            <button type="submit" class="btn btn-success" style="margin-top:1rem;">Save Settings</button>
+        </form>
+    </div>
+    <script>
+        document.getElementById('settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+            const res = await fetch('/api/admin/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            if(result.success) alert('Settings saved persistently!');
+        });
+    </script>
+    `;
+    res.send(renderAdminLayout('System Settings', content, 'settings', req.session.user));
+});
+
+app.post('/api/admin/settings', requireAdmin, async (req, res) => {
+    try {
+        const { barangay_name, municipality, province, system_name } = req.body;
+        const { data: existing } = await supabase.from('barangay_settings').select('id').limit(1).single();
+
+        if(existing) {
+            await supabase.from('barangay_settings').update({ barangay_name, municipality, province, system_name }).eq('id', existing.id);
+        } else {
+            await supabase.from('barangay_settings').insert([{ barangay_name, municipality, province, system_name }]);
+        }
+
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// START EXPRESS ENGINE
 app.listen(PORT, () => {
-    console.log(`===================================================`);
-    console.log(`Barangay Resident Management System live on Port ${PORT}`);
-    console.log(`Ready for Render Deployment + Supabase Engine`);
-    console.log(`===================================================`);
+    console.log(`=======================================================`);
+    console.log(` Barangay Management System active on port ${PORT}`);
+    console.log(` Deployment ready for Render & Supabase Cloud Cluster`);
+    console.log(`=======================================================`);
 });
