@@ -1,1451 +1,2233 @@
-/**
- * BARANGAY RESIDENT MANAGEMENT SYSTEM (BRMS)
- * Production Node.js / Express Application with Supabase Database
- * Strict adherence to Blue, Green, White Theme & Full Feature Set
- */
+/* ==========================================================================
+   BARANGAY RESIDENT MANAGEMENT SYSTEM (BRMS) - MONOLITHIC SERVER & WEB CLIENT
+   Theme: Strict Blue (#2563eb / #1e40af), Green (#059669 / #047857), White (#ffffff)
+   ========================================================================== */
 
 const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
-const bcrypt = require('bcryptjs');
-const path = require('path');
-const compression = require('compression');
 const cors = require('cors');
-const rateLimit = require('express-rate-limit');
-const QRCode = require('qrcode');
+const helmet = require('helmet');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const multer = require('multer');
-require('dotenv').config();
+const QRCode = require('qrcode');
+const { createClient } = require('@supabase/supabase-js');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Supabase Client Initialization
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://your-supabase-project.supabase.co';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'your-supabase-anon-key';
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Environment Configs
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+const JWT_SECRET = process.env.JWT_SECRET || 'brms-fallback-secret-2026';
 
-// Middleware Configuration
-app.use(compression());
+// Background Image URL from User Request
+const CUSTOM_BG_URL = "https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg?stp=dst-jpg_tt6&cstp=mx1857x2048&ctp=s1857x2048&_nc_cat=107&ccb=1-7&_nc_sid=cc71e4&_nc_eui2=AeH-CrVk3UW0Tqq0z_SDhKwemnbseM68ydCadux4zrzJ0I4R6gykVtH1GEMMnjk_E0vUUupJBZ3vwMdzuIfYXMgZ&_nc_ohc=fKl5LR1-2YwQ7kNvwH7PIf8&_nc_oc=AdqAy1CtUXak56hu0R2Ufzy_6npapuoitUaMuup0g9veAD0bOy9PFjySTvVXJasGWis&_nc_zt=23&_nc_ht=scontent.fcrk3-3.fna&_nc_gid=SU-DBALnvlE-vtQ4KjJx4g&_nc_ss=7b2a8&oh=00_AQK7MxJys6gqu1LJrVhDYZ2WNBpKcThfTEtIUXEWUeB_Qw&oe=6ABBAEB1";
+
+// Default SVG Placeholders for Logo & User Photo to prevent missing images on reset
+const DEFAULT_LOGO_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23059669'/><path d='M50 15 L80 35 L80 75 L50 95 L20 75 L20 35 Z' fill='%232563eb' stroke='%23ffffff' stroke-width='3'/><text x='50' y='58' font-size='22' font-weight='bold' text-anchor='middle' fill='%23ffffff'>BRGY</text></svg>";
+const DEFAULT_USER_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%23cbd5e1'/><circle cx='50' cy='38' r='20' fill='%23475569'/><path d='M20 85 C20 65 35 55 50 55 C65 55 80 65 80 85 Z' fill='%23475569'/></svg>";
+
+// Initialize Supabase Client
+let supabase = null;
+if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+}
+
+// Ensure Uploads Directory Exists
+const uploadsDir = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Multer Storage Configuration
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadsDir),
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+});
+const upload = multer({ storage });
+
+// Express Middlewares
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static(uploadsDir));
 
-// Rate Limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use(limiter);
+/* ==========================================================================
+   AUTH & SECURITY MIDDLEWARES
+   ========================================================================== */
 
-// File Upload Memory Storage for Multer
-const upload = multer({ storage: multer.memoryStorage() });
+function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Access token required.' });
 
-// ==========================================
-// STYLESHEET & UI DESIGN SYSTEM (Blue/Green/White)
-// ==========================================
-const BASE_CSS = `
-:root {
-  --primary-blue: #0284c7;
-  --dark-blue: #0369a1;
-  --light-blue: #e0f2fe;
-  --accent-green: #10b981;
-  --dark-green: #059669;
-  --light-green: #d1fae5;
-  --bg-white: #ffffff;
-  --card-bg: #f8fafc;
-  --text-main: #1e293b;
-  --text-muted: #64748b;
-  --border-color: #cbd5e1;
-  --danger-red: #ef4444;
-  --warning-yellow: #f59e0b;
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.status(403).json({ error: 'Invalid or expired token.' });
+        req.user = user;
+        next();
+    });
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-body { background-color: #f1f5f9; color: var(--text-main); line-height: 1.6; min-height: 100vh; display: flex; flex-direction: column; }
-
-header { background: linear-gradient(135deg, var(--dark-blue), var(--primary-blue)); color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-header .logo-area { display: flex; align-items: center; gap: 1rem; }
-header img.brgy-logo { width: 45px; height: 45px; border-radius: 50%; object-fit: cover; background: white; border: 2px solid white; }
-header h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: 0.5px; }
-
-nav.main-nav { background: white; border-bottom: 1px solid var(--border-color); padding: 0.75rem 2rem; display: flex; gap: 1.5rem; overflow-x: auto; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-nav.main-nav a { color: var(--text-muted); text-decoration: none; font-weight: 500; font-size: 0.9rem; padding: 0.5rem 0.75rem; border-radius: 6px; white-space: nowrap; transition: all 0.2s; }
-nav.main-nav a:hover, nav.main-nav a.active { background: var(--light-blue); color: var(--dark-blue); }
-
-.container { max-width: 1400px; margin: 2rem auto; padding: 0 1.5rem; width: 100%; flex: 1; }
-
-.card { background: var(--bg-white); border-radius: 12px; border: 1px solid var(--border-color); padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; }
-.card-header h2 { color: var(--dark-blue); font-size: 1.25rem; font-weight: 600; }
-
-.grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; }
-.stat-card { background: white; border-left: 5px solid var(--primary-blue); border-radius: 8px; padding: 1.25rem; border-top: 1px solid var(--border-color); border-right: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-.stat-card.green { border-left-color: var(--accent-green); }
-.stat-card h3 { font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-card .value { font-size: 1.85rem; font-weight: 700; color: var(--text-main); margin-top: 0.5rem; }
-
-table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: white; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); }
-th, td { padding: 0.85rem 1rem; text-align: left; border-bottom: 1px solid var(--border-color); font-size: 0.9rem; }
-th { background: var(--light-blue); color: var(--dark-blue); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; }
-tr:hover { background-color: #f8fafc; }
-
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.6rem 1.25rem; background-color: var(--primary-blue); color: white; border: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem; cursor: pointer; text-decoration: none; transition: background 0.2s; }
-.btn:hover { background-color: var(--dark-blue); }
-.btn-green { background-color: var(--accent-green); }
-.btn-green:hover { background-color: var(--dark-green); }
-.btn-danger { background-color: var(--danger-red); }
-.btn-danger:hover { background-color: #dc2626; }
-.btn-secondary { background-color: var(--text-muted); }
-.btn-secondary:hover { background-color: #475569; }
-.btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
-
-form { display: flex; flex-direction: column; gap: 1.25rem; }
-.form-group { display: flex; flex-direction: column; gap: 0.4rem; }
-.form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
-label { font-weight: 500; font-size: 0.9rem; color: var(--text-main); }
-input, select, textarea { padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.95rem; background: white; color: var(--text-main); }
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary-blue); ring: 2px var(--light-blue); }
-
-.badge { display: inline-block; padding: 0.25rem 0.65rem; border-radius: 50px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
-.badge-blue { background: var(--light-blue); color: var(--dark-blue); }
-.badge-green { background: var(--light-green); color: var(--dark-green); }
-.badge-yellow { background: #fef3c7; color: #d97706; }
-.badge-red { background: #fee2e2; color: #dc2626; }
-
-.alert { padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem; font-size: 0.95rem; }
-.alert-success { background: var(--light-green); color: var(--dark-green); border: 1px solid #6ee7b7; }
-.alert-error { background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; }
-
-.login-bg { background: linear-gradient(rgba(2, 132, 199, 0.75), rgba(5, 150, 105, 0.75)), url('https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg?stp=dst-jpg_tt6&cstp=mx1857x2048&ctp=s1857x2048&_nc_cat=107&ccb=1-7&_nc_sid=cc71e4&_nc_eui2=AeH-CrVk3UW0Tqq0z_SDhKwemnbseM68ydCadux4zrzJ0I4R6gykVtH1GEMMnjk_E0vUUupJBZ3vwMdzuIfYXMgZ&_nc_ohc=dQMK5ddUuHcQ7kNvwGa1gPS&_nc_oc=AdoFKxV7tJpE4hgQ4pRI2MUvCVRMJBztcvXKVR66-nYuAHhEYRtmWNOf2aAis5Et9sE&_nc_zt=23&_nc_ht=scontent.fcrk3-3.fna&_nc_gid=xdfM6qfHMw-bCjf2oW_Nzw&_nc_ss=7b2a8&oh=00_AQMFazlU8aRub-iyfGwAHzijoCAXz8cAE0ZoQgTtFlJvjw&oe=6AC35F71') no-repeat center center fixed; background-size: cover; height: 100vh; display: flex; align-items: center; justify-content: center; }
-.login-card { background: white; padding: 2.5rem; border-radius: 12px; width: 100%; max-width: 450px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
-
-/* ID Card Styles */
-.id-card-print-container { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
-.barangay-id-card { width: 340px; height: 215px; background: linear-gradient(135deg, #ffffff, #f0fdf4); border: 2px solid var(--primary-blue); border-radius: 12px; padding: 12px; position: relative; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; page-break-inside: avoid; }
-.id-header { display: flex; align-items: center; gap: 8px; border-bottom: 2px solid var(--accent-green); padding-bottom: 6px; }
-.id-header img { width: 35px; height: 35px; border-radius: 50%; object-fit: cover; }
-.id-header h4 { font-size: 0.75rem; color: var(--dark-blue); line-height: 1.1; font-weight: 700; }
-.id-header p { font-size: 0.6rem; color: var(--text-muted); }
-.id-body { display: flex; gap: 10px; margin-top: 6px; }
-.id-photo { width: 85px; height: 95px; border: 1px solid var(--border-color); border-radius: 4px; object-fit: cover; background: #e2e8f0; }
-.id-details { font-size: 0.7rem; display: flex; flex-direction: column; gap: 2px; flex: 1; }
-.id-details strong { color: var(--dark-blue); }
-.id-footer { display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid var(--border-color); padding-top: 4px; margin-top: auto; }
-.id-signature { text-align: center; font-size: 0.6rem; }
-.id-signature img { max-height: 25px; display: block; margin: 0 auto; }
-.id-qr { width: 45px; height: 45px; }
-
-@media print {
-  body * { visibility: hidden; }
-  .printable-grid, .printable-grid * { visibility: visible; }
-  .printable-grid { position: absolute; left: 0; top: 0; width: 100%; }
-}
-`;
-
-// Helper for HTML wrapping
-function renderHTML(title, bodyContent, includeNav = false, activeTab = '', userRole = '') {
-  let navHTML = '';
-  if (includeNav) {
-    if (userRole === 'Resident') {
-      navHTML = `
-        <nav class="main-nav">
-          <a href="/resident/dashboard" class="${activeTab === 'dashboard' ? 'active' : ''}">Dashboard</a>
-          <a href="/resident/profile" class="${activeTab === 'profile' ? 'active' : ''}">My Profile</a>
-          <a href="/resident/edit-request" class="${activeTab === 'edit-request' ? 'active' : ''}">Edit Request</a>
-          <a href="/resident/certificates" class="${activeTab === 'certificates' ? 'active' : ''}">Certificates</a>
-          <a href="/resident/tracking" class="${activeTab === 'tracking' ? 'active' : ''}">Request Tracking</a>
-          <a href="/resident/appointments" class="${activeTab === 'appointments' ? 'active' : ''}">Appointments</a>
-          <a href="/resident/documents" class="${activeTab === 'documents' ? 'active' : ''}">My Documents</a>
-          <a href="/resident/complaints" class="${activeTab === 'complaints' ? 'active' : ''}">Complaints</a>
-          <a href="/resident/assistance" class="${activeTab === 'assistance' ? 'active' : ''}">Assistance</a>
-          <a href="/resident/announcements" class="${activeTab === 'announcements' ? 'active' : ''}">Announcements</a>
-          <a href="/resident/notifications" class="${activeTab === 'notifications' ? 'active' : ''}">Notifications</a>
-          <a href="/resident/feedback" class="${activeTab === 'feedback' ? 'active' : ''}">Feedback</a>
-          <a href="/resident/emergency" class="${activeTab === 'emergency' ? 'active' : ''}">Emergency Contacts</a>
-          <a href="/resident/digital-id" class="${activeTab === 'digital-id' ? 'active' : ''}">My Digital ID</a>
-          <a href="/resident/security" class="${activeTab === 'security' ? 'active' : ''}">Security</a>
-          <a href="/auth/logout" class="btn-danger" style="color:white; padding:0.3rem 0.6rem; border-radius:4px;">Logout</a>
-        </nav>
-      `;
-    } else {
-      navHTML = `
-        <nav class="main-nav">
-          <a href="/admin/dashboard" class="${activeTab === 'dashboard' ? 'active' : ''}">Dashboard</a>
-          <a href="/admin/residents" class="${activeTab === 'residents' ? 'active' : ''}">Residents</a>
-          <a href="/admin/households" class="${activeTab === 'households' ? 'active' : ''}">Households</a>
-          <a href="/admin/puroks" class="${activeTab === 'puroks' ? 'active' : ''}">Puroks</a>
-          <a href="/admin/documents" class="${activeTab === 'documents' ? 'active' : ''}">Documents</a>
-          <a href="/admin/blotter" class="${activeTab === 'blotter' ? 'active' : ''}">Blotter</a>
-          <a href="/admin/seniors" class="${activeTab === 'seniors' ? 'active' : ''}">Seniors</a>
-          <a href="/admin/pwd" class="${activeTab === 'pwd' ? 'active' : ''}">PWD</a>
-          <a href="/admin/solo-parents" class="${activeTab === 'solo-parents' ? 'active' : ''}">Solo Parents</a>
-          <a href="/admin/users" class="${activeTab === 'users' ? 'active' : ''}">Users</a>
-          <a href="/admin/officials" class="${activeTab === 'officials' ? 'active' : ''}">Officials</a>
-          <a href="/admin/announcements" class="${activeTab === 'announcements' ? 'active' : ''}">Announcements</a>
-          <a href="/admin/events" class="${activeTab === 'events' ? 'active' : ''}">Events</a>
-          <a href="/admin/reports" class="${activeTab === 'reports' ? 'active' : ''}">Reports</a>
-          <a href="/admin/activity-logs" class="${activeTab === 'activity-logs' ? 'active' : ''}">Logs</a>
-          <a href="/admin/scanner" class="${activeTab === 'scanner' ? 'active' : ''}">QR Scanner</a>
-          <a href="/admin/id-printing" class="${activeTab === 'id-printing' ? 'active' : ''}">ID Printing (8-in-1)</a>
-          <a href="/admin/backup" class="${activeTab === 'backup' ? 'active' : ''}">Backup & Restore</a>
-          <a href="/admin/settings" class="${activeTab === 'settings' ? 'active' : ''}">Settings</a>
-          <a href="/auth/logout" class="btn-danger" style="color:white; padding:0.3rem 0.6rem; border-radius:4px;">Logout</a>
-        </nav>
-      `;
-    }
-  }
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} | Barangay Resident Management System</title>
-  <style>${BASE_CSS}</style>
-</head>
-<body>
-  ${includeNav ? `
-  <header>
-    <div class="logo-area">
-      <img src="https://via.placeholder.com/45" alt="Logo" class="brgy-logo">
-      <h1>Barangay Resident Management System</h1>
-    </div>
-    <div style="font-size:0.9rem;">Role: <strong>${userRole}</strong></div>
-  </header>
-  ${navHTML}` : ''}
-  <div class="container">
-    ${bodyContent}
-  </div>
-</body>
-</html>`;
+function requireRole(roles) {
+    return (req, res, next) => {
+        if (!req.user || !roles.includes(req.user.role)) {
+            return res.status(403).json({ error: 'Unauthorized access.' });
+        }
+        next();
+    };
 }
 
-// ==========================================
-// AUTHENTICATION & SETUP ROUTES
-// ==========================================
-
-app.get('/', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('system_users').select('id').limit(1);
-    if (error || !data || data.length === 0) {
-      return res.redirect('/setup');
+async function logActivity(userId, userName, action, details, ip) {
+    if (!supabase) return;
+    try {
+        await supabase.from('activity_logs').insert([{
+            user_id: userId,
+            user_name: userName,
+            action,
+            details,
+            ip_address: ip
+        }]);
+    } catch (e) {
+        console.error('Log error:', e);
     }
-    res.redirect('/login');
-  } catch (err) {
-    res.status(500).send(renderHTML('Error', `<div class="card"><div class="alert alert-error">Database connection error: ${err.message}. Please check your Supabase credentials in environment variables.</div></div>`));
-  }
-});
+}
 
-app.get('/setup', async (req, res) => {
-  const { data } = await supabase.from('system_users').select('id').limit(1);
-  if (data && data.length > 0) {
-    return res.redirect('/login');
-  }
-  res.send(renderHTML('System Setup', `
-    <div class="login-card" style="max-width: 600px; margin: 3rem auto;">
-      <h2 style="color:var(--dark-blue); margin-bottom:1rem;">System Setup - Create Super Admin Account</h2>
-      <p style="margin-bottom:1.5rem; color:var(--text-muted);">Welcome to the Barangay Resident Management System. Please create your initial Administrator account to begin.</p>
-      <form action="/setup" method="POST">
-        <div class="form-group">
-          <label>Full Name</label>
-          <input type="text" name="full_name" required placeholder="Administrator Name">
-        </div>
-        <div class="form-group">
-          <label>Username</label>
-          <input type="text" name="username" required placeholder="admin">
-        </div>
-        <div class="form-group">
-          <label>Email Address</label>
-          <input type="email" name="email" required placeholder="admin@barangay.gov.ph">
-        </div>
-        <div class="form-group">
-          <label>Password</label>
-          <input type="password" name="password" required placeholder="Secure Password">
-        </div>
-        <button type="submit" class="btn btn-green" style="width:100%; margin-top:1rem;">Initialize System & Create Admin</button>
-      </form>
-    </div>
-  `));
-});
+/* ==========================================================================
+   API ENDPOINTS
+   ========================================================================== */
 
-app.post('/setup', async (req, res) => {
-  try {
-    const { full_name, username, email, password } = req.body;
-    const password_hash = await bcrypt.hash(password, 10);
-    const { error } = await supabase.from('system_users').insert([{
-      full_name,
-      username,
-      email,
-      password_hash,
-      role: 'Super Admin',
-      status: 'Active',
-      permissions: { all: true }
-    }]);
-
-    if (error) throw error;
-    res.redirect('/login');
-  } catch (err) {
-    res.status(400).send(renderHTML('Setup Error', `<div class="card"><div class="alert alert-error">Setup failed: ${err.message}</div><a href="/setup" class="btn">Try Again</a></div>`));
-  }
-});
-
-app.get('/login', (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Login | Barangay Resident Management System</title>
-  <style>${BASE_CSS}</style>
-</head>
-<body>
-  <div class="login-bg">
-    <div class="login-card">
-      <div style="text-align: center; margin-bottom: 1.5rem;">
-        <h2 style="color: var(--dark-blue); font-size: 1.5rem;">Barangay System Login</h2>
-        <p style="color: var(--text-muted); font-size: 0.85rem;">Secure Portal Access</p>
-      </div>
-      <form action="/auth/login" method="POST">
-        <div class="form-group">
-          <label>Login Portal</label>
-          <select name="portal_type" required>
-            <option value="admin">Admin / Staff Portal</option>
-            <option value="resident">Resident Portal</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Username or Email</label>
-          <input type="text" name="identifier" required placeholder="Enter username or email">
-        </div>
-        <div class="form-group">
-          <label>Password</label>
-          <input type="password" name="password" required placeholder="Enter password">
-        </div>
-        <button type="submit" class="btn" style="width: 100%; margin-top: 1rem;">Login to Portal</button>
-      </form>
-      <div style="text-align: center; margin-top: 1.25rem; font-size: 0.85rem;">
-        Resident without an account? <a href="/register" style="color: var(--primary-blue); font-weight: 600;">Register here</a>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`);
-});
-
-app.post('/auth/login', async (req, res) => {
-  const { portal_type, identifier, password } = req.body;
-  try {
-    if (portal_type === 'admin') {
-      const { data, error } = await supabase.from('system_users').select('*').or(`username.eq.${identifier},email.eq.${identifier}`).single();
-      if (error || !data || data.status !== 'Active') {
-        return res.status(401).send(renderHTML('Login Failed', `<div class="card"><div class="alert alert-error">Invalid admin credentials or account disabled.</div><a href="/login" class="btn">Back to Login</a></div>`));
-      }
-      const match = await bcrypt.compare(password, data.password_hash);
-      if (!match) {
-        return res.status(401).send(renderHTML('Login Failed', `<div class="card"><div class="alert alert-error">Incorrect password.</div><a href="/login" class="btn">Back to Login</a></div>`));
-      }
-      await supabase.from('login_history').insert([{ user_identifier: data.username, role: data.role, ip_address: req.ip }]);
-      // In production, sign session/JWT. Here we redirect with query or mock session cookie.
-      res.redirect('/admin/dashboard');
-    } else {
-      const { data, error } = await supabase.from('residents').select('*').eq('email', identifier).single();
-      if (error || !data || data.resident_status !== 'ACTIVE') {
-        return res.status(401).send(renderHTML('Login Failed', `<div class="card"><div class="alert alert-error">Invalid resident credentials or account pending approval.</div><a href="/login" class="btn">Back to Login</a></div>`));
-      }
-      const match = await bcrypt.compare(password, data.password_hash);
-      if (!match) {
-        return res.status(401).send(renderHTML('Login Failed', `<div class="card"><div class="alert alert-error">Incorrect password.</div><a href="/login" class="btn">Back to Login</a></div>`));
-      }
-      await supabase.from('login_history').insert([{ user_identifier: data.email, role: 'Resident', ip_address: req.ip }]);
-      res.redirect(`/resident/dashboard?rid=${data.id}`);
+// SETUP / INIT CHECK
+app.get('/api/setup/status', async (req, res) => {
+    try {
+        if (!supabase) return res.json({ configured: false, needsAdmin: true });
+        const { data, error } = await supabase.from('users').select('id').eq('role', 'super_admin');
+        if (error) throw error;
+        res.json({ configured: true, needsAdmin: data.length === 0 });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-  } catch (err) {
-    res.status(500).send(renderHTML('Error', `<div class="card"><div class="alert alert-error">System error during login: ${err.message}</div><a href="/login" class="btn">Back</a></div>`));
-  }
 });
 
-app.get('/auth/logout', (req, res) => {
-  res.redirect('/login');
+app.post('/api/setup/admin', async (req, res) => {
+    try {
+        const { fullName, username, email, password, confirmPassword } = req.body;
+        if (!fullName || !username || !email || !password) {
+            return res.status(400).json({ error: 'All fields are required.' });
+        }
+        if (password !== confirmPassword) {
+            return res.status(400).json({ error: 'Passwords do not match.' });
+        }
+
+        const { data: existingAdmin } = await supabase.from('users').select('id').eq('role', 'super_admin');
+        if (existingAdmin && existingAdmin.length > 0) {
+            return res.status(400).json({ error: 'Admin setup has already been completed.' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const { data, error } = await supabase.from('users').insert([{
+            full_name: fullName,
+            username,
+            email,
+            password_hash: hashedPassword,
+            role: 'super_admin'
+        }]).select();
+
+        if (error) throw error;
+        await logActivity(data[0].id, fullName, 'SYSTEM_INIT', 'Initial Super Admin Created', req.ip);
+        res.json({ success: true, message: 'Administrator created successfully. You can now login.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-// ==========================================
+// AUTHENTICATION (LOGIN)
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { username, password, portalType } = req.body;
+        if (!username || !password) return res.status(400).json({ error: 'Username/Email and password required.' });
+
+        const { data: users, error } = await supabase.from('users').select('*')
+            .or(`username.eq.${username},email.eq.${username}`);
+
+        if (error || !users || users.length === 0) {
+            return res.status(401).json({ error: 'Invalid user or password credentials.' });
+        }
+
+        const user = users[0];
+        if (user.is_active === false) {
+            return res.status(403).json({ error: 'Account is deactivated. Contact Barangay Administration.' });
+        }
+
+        const validPass = await bcrypt.compare(password, user.password_hash);
+        if (!validPass) {
+            return res.status(401).json({ error: 'Invalid user or password credentials.' });
+        }
+
+        if (portalType === 'staff' && user.role === 'resident') {
+            return res.status(403).json({ error: 'Resident accounts cannot access Staff Portal.' });
+        }
+        if (portalType === 'resident' && user.role !== 'resident') {
+            return res.status(403).json({ error: 'Staff users must log in through Staff Portal.' });
+        }
+
+        let residentProfile = null;
+        if (user.role === 'resident') {
+            const { data: resData } = await supabase.from('residents').select('*, puroks(name)').eq('user_id', user.id).single();
+            residentProfile = resData;
+            if (residentProfile && residentProfile.status === 'PENDING') {
+                return res.status(403).json({ error: 'Your resident account registration is still PENDING staff approval.' });
+            }
+            if (residentProfile && residentProfile.status === 'REJECTED') {
+                return res.status(403).json({ error: `Registration rejected: ${residentProfile.rejection_reason || 'Contact Barangay.'}` });
+            }
+        }
+
+        const token = jwt.sign(
+            { id: user.id, username: user.username, role: user.role, fullName: user.full_name },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        await logActivity(user.id, user.full_name, 'LOGIN', `Logged in via ${portalType} portal`, req.ip);
+
+        res.json({
+            token,
+            user: { id: user.id, username: user.username, role: user.role, fullName: user.full_name, email: user.email },
+            resident: residentProfile
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// UPDATE RESIDENT PROFILE PICTURE & DETAILS
+app.post('/api/resident/profile/update', authenticateToken, upload.single('photo'), async (req, res) => {
+    try {
+        const { contactNumber, email, address, civilStatus } = req.body;
+        const updateFields = {
+            contact_number: contactNumber,
+            email,
+            address,
+            civil_status: civilStatus,
+            updated_at: new Date()
+        };
+
+        if (req.file) {
+            updateFields.photo_url = `/uploads/${req.file.filename}`;
+        }
+
+        const { data, error } = await supabase.from('residents')
+            .update(updateFields)
+            .eq('user_id', req.user.id)
+            .select('*, puroks(name)');
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Profile updated successfully!', resident: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // PUBLIC RESIDENT REGISTRATION
-// ==========================================
+app.post('/api/public/register', upload.single('photo'), async (req, res) => {
+    try {
+        const {
+            firstName, middleName, lastName, suffix, dateOfBirth, gender, civilStatus,
+            contactNumber, email, address, purokId, occupation, educationalAttainment,
+            voterStatus, isSeniorCitizen, isPwd, isSoloParent, username, password
+        } = req.body;
 
-app.get('/register', (req, res) => {
-  res.send(`<!DOCTYPE html>
+        if (!firstName || !lastName || !dateOfBirth || !gender || !username || !password) {
+            return res.status(400).json({ error: 'Please provide all required registration fields.' });
+        }
+
+        const { data: existingUser } = await supabase.from('users').select('id')
+            .or(`username.eq.${username},email.eq.${email}`).limit(1);
+        if (existingUser && existingUser.length > 0) {
+            return res.status(400).json({ error: 'Username or Email is already registered.' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const { data: user, error: userError } = await supabase.from('users').insert([{
+            username,
+            email: email || `${username}@barangay.local`,
+            password_hash: hashedPassword,
+            role: 'resident',
+            full_name: `${firstName} ${lastName}`
+        }]).select();
+
+        if (userError) throw userError;
+
+        const photoUrl = req.file ? `/uploads/${req.file.filename}` : '';
+        const verificationToken = 'TOK-' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+
+        const { data: resident, error: resError } = await supabase.from('residents').insert([{
+            user_id: user[0].id,
+            first_name: firstName,
+            middle_name: middleName || '',
+            last_name: lastName,
+            suffix: suffix || '',
+            date_of_birth: dateOfBirth,
+            gender,
+            civil_status: civilStatus || 'Single',
+            contact_number: contactNumber,
+            email,
+            address,
+            purok_id: purokId || null,
+            occupation,
+            educational_attainment: educationalAttainment,
+            voter_status: voterStatus || 'No',
+            is_senior_citizen: isSeniorCitizen === 'true',
+            is_pwd: isPwd === 'true',
+            is_solo_parent: isSoloParent === 'true',
+            photo_url: photoUrl,
+            status: 'PENDING',
+            verification_token: verificationToken
+        }]).select();
+
+        if (resError) throw resError;
+
+        res.json({ success: true, message: 'Registration submitted successfully. Please wait for Barangay Staff approval.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// SYSTEM SETTINGS
+app.get('/api/settings', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('system_settings').select('*');
+        if (error) throw error;
+        const settings = {
+            barangay_logo: DEFAULT_LOGO_SVG,
+            barangay_name: 'BARANGAY CENTRAL',
+            municipality: 'Municipality',
+            province: 'Province',
+            captain_name: 'Hon. Barangay Captain',
+            captain_signature: ''
+        };
+        if (data && data.length > 0) {
+            data.forEach(item => {
+                if (item.setting_value) settings[item.setting_key] = item.setting_value;
+            });
+        }
+        res.json(settings);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/settings', authenticateToken, requireRole(['super_admin']), upload.fields([
+    { name: 'barangay_logo', maxCount: 1 },
+    { name: 'captain_signature', maxCount: 1 }
+]), async (req, res) => {
+    try {
+        const body = req.body;
+        if (req.files && req.files['barangay_logo']) {
+            body.barangay_logo = `/uploads/${req.files['barangay_logo'][0].filename}`;
+        }
+        if (req.files && req.files['captain_signature']) {
+            body.captain_signature = `/uploads/${req.files['captain_signature'][0].filename}`;
+        }
+        for (const [key, val] of Object.entries(body)) {
+            await supabase.from('system_settings').upsert({ setting_key: key, setting_value: val, updated_at: new Date() }, { onConflict: 'setting_key' });
+        }
+        await logActivity(req.user.id, req.user.fullName, 'UPDATE_SETTINGS', 'Updated system branding settings', req.ip);
+        res.json({ success: true, message: 'System settings updated successfully.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DASHBOARD STATS
+app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
+    try {
+        const { count: totalResidents } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE');
+        const { count: totalHouseholds } = await supabase.from('households').select('*', { count: 'exact', head: true });
+        const { count: maleResidents } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE').eq('gender', 'Male');
+        const { count: femaleResidents } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE').eq('gender', 'Female');
+        const { count: seniorCitizens } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE').eq('is_senior_citizen', true);
+        const { count: pwdCount } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE').eq('is_pwd', true);
+        const { count: soloParents } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE').eq('is_solo_parent', true);
+        const { count: voters } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE').eq('voter_status', 'Yes');
+        const { count: pendingApprovals } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'PENDING');
+        const { count: pendingCerts } = await supabase.from('certificate_requests').select('*', { count: 'exact', head: true }).eq('status', 'PENDING');
+        const { count: pendingAppts } = await supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'PENDING');
+        const { count: openBlotter } = await supabase.from('blotter_cases').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE');
+
+        res.json({
+            totalResidents: totalResidents || 0,
+            totalHouseholds: totalHouseholds || 0,
+            maleResidents: maleResidents || 0,
+            femaleResidents: femaleResidents || 0,
+            seniorCitizens: seniorCitizens || 0,
+            pwdCount: pwdCount || 0,
+            soloParents: soloParents || 0,
+            voters: voters || 0,
+            pendingApprovals: pendingApprovals || 0,
+            pendingCerts: pendingCerts || 0,
+            pendingAppts: pendingAppts || 0,
+            openBlotter: openBlotter || 0
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// RESIDENTS MANAGEMENT
+app.get('/api/residents', authenticateToken, async (req, res) => {
+    try {
+        const { status = 'ACTIVE', search = '', purokId = '' } = req.query;
+        let query = supabase.from('residents').select('*, puroks(name)').eq('status', status);
+
+        if (purokId) query = query.eq('purok_id', purokId);
+        if (search) {
+            query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,resident_number.ilike.%${search}%`);
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/residents/:id/approve', authenticateToken, requireRole(['super_admin', 'captain', 'secretary']), async (req, res) => {
+    try {
+        const residentId = req.params.id;
+        const resNum = 'BRGY-' + new Date().getFullYear() + '-' + Math.floor(10000 + Math.random() * 90000);
+
+        const verifyUrl = `${req.protocol}://${req.get('host')}/verify/resident/${residentId}`;
+        const qrCodeDataUrl = await QRCode.toDataURL(verifyUrl, { width: 300, margin: 1 });
+
+        const { data, error } = await supabase.from('residents').update({
+            status: 'ACTIVE',
+            resident_number: resNum,
+            qr_code_url: qrCodeDataUrl,
+            updated_at: new Date()
+        }).eq('id', residentId).select();
+
+        if (error) throw error;
+        await logActivity(req.user.id, req.user.fullName, 'APPROVE_RESIDENT', `Approved resident ID: ${resNum}`, req.ip);
+        res.json({ success: true, message: 'Resident approved successfully.', resident: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/residents/:id/reject', authenticateToken, requireRole(['super_admin', 'captain', 'secretary']), async (req, res) => {
+    try {
+        const { reason } = req.body;
+        const { error } = await supabase.from('residents').update({
+            status: 'REJECTED',
+            rejection_reason: reason || 'Information verification failed',
+            updated_at: new Date()
+        }).eq('id', req.params.id);
+
+        if (error) throw error;
+        await logActivity(req.user.id, req.user.fullName, 'REJECT_RESIDENT', `Rejected resident ID: ${req.params.id}`, req.ip);
+        res.json({ success: true, message: 'Resident application rejected.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/residents/:id/archive', authenticateToken, requireRole(['super_admin', 'captain', 'secretary']), async (req, res) => {
+    try {
+        const { error } = await supabase.from('residents').update({ status: 'ARCHIVED', updated_at: new Date() }).eq('id', req.params.id);
+        if (error) throw error;
+        await logActivity(req.user.id, req.user.fullName, 'ARCHIVE_RESIDENT', `Archived resident ${req.params.id}`, req.ip);
+        res.json({ success: true, message: 'Resident archived.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/residents/:id/restore', authenticateToken, requireRole(['super_admin', 'captain', 'secretary']), async (req, res) => {
+    try {
+        const { error } = await supabase.from('residents').update({ status: 'ACTIVE', updated_at: new Date() }).eq('id', req.params.id);
+        if (error) throw error;
+        await logActivity(req.user.id, req.user.fullName, 'RESTORE_RESIDENT', `Restored resident ${req.params.id}`, req.ip);
+        res.json({ success: true, message: 'Resident restored to Active status.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PUROKS WITH RESIDENT COUNT
+app.get('/api/puroks', async (req, res) => {
+    try {
+        const { data: puroks, error } = await supabase.from('puroks').select('*').order('name');
+        if (error) throw error;
+
+        const { data: residents } = await supabase.from('residents').select('purok_id').eq('status', 'ACTIVE');
+        const countMap = {};
+        if (residents) {
+            residents.forEach(r => {
+                if (r.purok_id) {
+                    countMap[r.purok_id] = (countMap[r.purok_id] || 0) + 1;
+                }
+            });
+        }
+
+        const formatted = (puroks || []).map(p => ({
+            ...p,
+            resident_count: countMap[p.id] || 0
+        }));
+
+        res.json(formatted);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/puroks', authenticateToken, requireRole(['super_admin', 'captain', 'secretary']), async (req, res) => {
+    try {
+        const { name, description } = req.body;
+        const { data, error } = await supabase.from('puroks').insert([{ name, description }]).select();
+        if (error) throw error;
+        res.json({ success: true, message: 'Purok added successfully.', data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// HOUSEHOLDS
+app.get('/api/households', authenticateToken, async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('households').select('*, puroks(name), head:residents(first_name, last_name)').order('household_number');
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/households', authenticateToken, requireRole(['super_admin', 'captain', 'secretary']), async (req, res) => {
+    try {
+        const { householdNumber, purokId, streetAddress } = req.body;
+        const { data, error } = await supabase.from('households').insert([{
+            household_number: householdNumber,
+            purok_id: purokId || null,
+            street_address: streetAddress
+        }]).select();
+        if (error) throw error;
+        res.json({ success: true, message: 'Household added successfully.', data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// CERTIFICATE REQUESTS & ISSUANCE
+app.get('/api/certificates/requests', authenticateToken, async (req, res) => {
+    try {
+        let query = supabase.from('certificate_requests').select('*, residents(first_name, last_name, resident_number, address)');
+        if (req.user.role === 'resident') {
+            const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+            if (resData) query = query.eq('resident_id', resData.id);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/certificates/request', authenticateToken, async (req, res) => {
+    try {
+        const { certificateType, purpose } = req.body;
+        const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+        if (!resData) return res.status(400).json({ error: 'Resident profile not found.' });
+
+        const reqNum = 'REQ-' + Math.floor(100000 + Math.random() * 900000);
+        const { data, error } = await supabase.from('certificate_requests').insert([{
+            request_number: reqNum,
+            resident_id: resData.id,
+            certificate_type: certificateType,
+            purpose,
+            status: 'PENDING'
+        }]).select();
+
+        if (error) throw error;
+        await logActivity(req.user.id, req.user.fullName, 'REQUEST_CERTIFICATE', `Requested ${certificateType}`, req.ip);
+        res.json({ success: true, message: 'Certificate request submitted successfully.', data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/certificates/approve', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), upload.single('certificate_file'), async (req, res) => {
+    try {
+        const { requestId } = req.body;
+        if (!req.file) return res.status(400).json({ error: 'Official certificate file (PDF/Image) is required.' });
+
+        const { data: reqData } = await supabase.from('certificate_requests').select('*').eq('id', requestId).single();
+        if (!reqData) return res.status(404).json({ error: 'Request not found.' });
+
+        const certNum = 'CERT-' + new Date().getFullYear() + '-' + Math.floor(10000 + Math.random() * 90000);
+        const fileUrl = `/uploads/${req.file.filename}`;
+
+        await supabase.from('certificates').insert([{
+            request_id: requestId,
+            resident_id: reqData.resident_id,
+            certificate_number: certNum,
+            certificate_type: reqData.certificate_type,
+            file_url: fileUrl,
+            issued_by: req.user.id
+        }]);
+
+        await supabase.from('certificate_requests').update({
+            status: 'READY_FOR_RELEASE',
+            processed_by: req.user.id,
+            updated_at: new Date()
+        }).eq('id', requestId);
+
+        await logActivity(req.user.id, req.user.fullName, 'APPROVE_CERTIFICATE', `Approved & uploaded ${certNum}`, req.ip);
+        res.json({ success: true, message: 'Certificate file uploaded and marked Ready For Release.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ASSISTANCE REQUESTS
+app.get('/api/assistance', authenticateToken, async (req, res) => {
+    try {
+        let query = supabase.from('assistance_requests').select('*, residents(first_name, last_name, contact_number)');
+        if (req.user.role === 'resident') {
+            const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+            if (resData) query = query.eq('resident_id', resData.id);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/assistance', authenticateToken, async (req, res) => {
+    try {
+        const { assistanceType, details } = req.body;
+        const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+        if (!resData) return res.status(400).json({ error: 'Resident record missing.' });
+
+        const reqNum = 'AST-' + Math.floor(10000 + Math.random() * 90000);
+        const { data, error } = await supabase.from('assistance_requests').insert([{
+            request_number: reqNum,
+            resident_id: resData.id,
+            assistance_type: assistanceType,
+            details,
+            status: 'PENDING'
+        }]).select();
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Assistance request submitted successfully.', data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PROFILE EDIT REQUESTS
+app.post('/api/resident/edit-request', authenticateToken, async (req, res) => {
+    try {
+        const { requestedChanges } = req.body;
+        const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+        if (!resData) return res.status(400).json({ error: 'Resident record missing.' });
+
+        const { data, error } = await supabase.from('profile_edit_requests').insert([{
+            resident_id: resData.id,
+            requested_changes: requestedChanges,
+            status: 'PENDING'
+        }]).select();
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Profile edit request submitted to Barangay Staff.', data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// FEEDBACK & COMPLAINTS
+app.get('/api/feedback', authenticateToken, async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('feedback').select('*, residents(first_name, last_name)').order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/feedback', authenticateToken, async (req, res) => {
+    try {
+        const { rating, comments } = req.body;
+        const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+        
+        const { data, error } = await supabase.from('feedback').insert([{
+            resident_id: resData ? resData.id : null,
+            rating,
+            comments
+        }]).select();
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Thank you for your feedback!', data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// QR CLAIM SCANNING & RELEASE
+app.get('/api/qr/claim-info/:residentId', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), async (req, res) => {
+    try {
+        const { residentId } = req.params;
+        const { data: resident, error: rErr } = await supabase.from('residents').select('*').eq('id', residentId).single();
+        if (rErr || !resident) return res.status(404).json({ error: 'Resident record not found.' });
+
+        const { data: claims } = await supabase.from('certificate_requests')
+            .select('*')
+            .eq('resident_id', residentId)
+            .in('status', ['READY_FOR_RELEASE', 'APPROVED']);
+
+        res.json({ resident, claims: claims || [] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/qr/release-claim', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), async (req, res) => {
+    try {
+        const { requestId } = req.body;
+        const { data, error } = await supabase.from('certificate_requests').update({
+            status: 'RELEASED',
+            released_by: req.user.id,
+            released_at: new Date(),
+            updated_at: new Date()
+        }).eq('id', requestId).select();
+
+        if (error) throw error;
+        await logActivity(req.user.id, req.user.fullName, 'RELEASE_CLAIM', `Released request ID ${requestId}`, req.ip);
+        res.json({ success: true, message: 'Item marked as RELEASED successfully.', data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ANNOUNCEMENTS
+app.get('/api/announcements', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/announcements', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), upload.single('image'), async (req, res) => {
+    try {
+        const { title, content, priority } = req.body;
+        const imageUrl = req.file ? `/uploads/${req.file.filename}` : '';
+        const { data, error } = await supabase.from('announcements').insert([{
+            title, content, priority: priority || 'Normal', image_url: imageUrl, created_by: req.user.id
+        }]).select();
+
+        if (error) throw error;
+        await logActivity(req.user.id, req.user.fullName, 'CREATE_ANNOUNCEMENT', `Created: ${title}`, req.ip);
+        res.json({ success: true, message: 'Announcement published successfully.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// BLOTTER CASES
+app.get('/api/blotter', authenticateToken, async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('blotter_cases').select('*').order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/blotter', authenticateToken, async (req, res) => {
+    try {
+        const { complainantName, respondentName, witnessName, incidentDate, incidentTime, location, description } = req.body;
+        const caseNum = 'BLOT-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+        const { data, error } = await supabase.from('blotter_cases').insert([{
+            case_number: caseNum,
+            complainant_name: complainantName,
+            respondent_name: respondentName,
+            witness_name: witnessName,
+            incident_date: incidentDate,
+            incident_time: incidentTime,
+            location,
+            description,
+            created_by: req.user.id
+        }]).select();
+
+        if (error) throw error;
+        await logActivity(req.user.id, req.user.fullName, 'CREATE_BLOTTER', `Case ${caseNum} logged`, req.ip);
+        res.json({ success: true, message: 'Blotter case recorded successfully.', data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// APPOINTMENTS
+app.get('/api/appointments', authenticateToken, async (req, res) => {
+    try {
+        let query = supabase.from('appointments').select('*, residents(first_name, last_name, contact_number)');
+        if (req.user.role === 'resident') {
+            const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+            if (resData) query = query.eq('resident_id', resData.id);
+        }
+        const { data, error } = await query.order('appointment_date', { ascending: true });
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/appointments', authenticateToken, async (req, res) => {
+    try {
+        const { serviceType, appointmentDate, appointmentTime, purpose } = req.body;
+        const { data: resData } = await supabase.from('residents').select('id').eq('user_id', req.user.id).single();
+        if (!resData) return res.status(400).json({ error: 'Resident record missing.' });
+
+        const apptNum = 'APT-' + Math.floor(10000 + Math.random() * 90000);
+        const { data, error } = await supabase.from('appointments').insert([{
+            appointment_number: apptNum,
+            resident_id: resData.id,
+            service_type: serviceType,
+            appointment_date: appointmentDate,
+            appointment_time: appointmentTime,
+            purpose,
+            status: 'PENDING'
+        }]).select();
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Appointment requested successfully.', data: data[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ACTIVITY LOGS
+app.get('/api/logs', authenticateToken, requireRole(['super_admin']), async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(200);
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PUBLIC VERIFICATION ROUTE
+app.get('/verify/resident/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', id).single();
+        const { data: settings } = await supabase.from('system_settings').select('*');
+        const brgy = {
+            barangay_logo: DEFAULT_LOGO_SVG
+        };
+        if (settings) settings.forEach(s => brgy[s.setting_key] = s.setting_value);
+
+        if (!resident || resident.status !== 'ACTIVE') {
+            return res.send(`
+                <html><body style="font-family:sans-serif; text-align:center; padding:50px; background:#f8fafc;">
+                    <h1 style="color:#dc2626;">INVALID / UNVERIFIED BARANGAY ID</h1>
+                    <p>The queried resident ID token does not exist or is currently inactive.</p>
+                </body></html>
+            `);
+        }
+
+        const photo = resident.photo_url || DEFAULT_USER_SVG;
+
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Barangay Resident ID Verification</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>
+                    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0fdf4; margin: 0; padding: 20px; display:flex; justify-content:center; }
+                    .card { background: white; max-width: 450px; width:100%; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); overflow:hidden; border:2px solid #059669; }
+                    .header { background: linear-gradient(135deg, #059669, #2563eb); color: white; padding: 20px; text-align:center; }
+                    .body { padding: 25px; text-align:center; }
+                    .badge { background: #dcfce7; color: #166534; padding: 6px 16px; border-radius: 20px; font-weight:bold; display:inline-block; margin-bottom:15px; }
+                    .photo { width: 110px; height: 110px; border-radius: 50%; object-fit: cover; border: 4px solid #059669; margin-bottom: 15px; }
+                    .info-table { width:100%; text-align:left; margin-top:15px; border-collapse:collapse; }
+                    .info-table td { padding: 8px; border-bottom: 1px solid #f1f5f9; }
+                    .info-table td.label { font-weight:bold; color:#475569; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <div class="header">
+                        <h2 style="margin:0;">${brgy.barangay_name || 'BARANGAY CENTRAL'}</h2>
+                        <small>${brgy.municipality || 'Municipality'}, ${brgy.province || 'Province'}</small>
+                    </div>
+                    <div class="body">
+                        <div class="badge">&#10004; OFFICIAL VALID RESIDENT CARD</div><br>
+                        <img class="photo" src="${photo}" onerror="this.src='${DEFAULT_USER_SVG}'" alt="Resident Photo">
+                        <h2 style="margin:5px 0; color:#1e293b;">${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</h2>
+                        <p style="color:#059669; font-weight:bold; margin:0;">ID: ${resident.resident_number}</p>
+                        <table class="info-table">
+                            <tr><td class="label">Purok:</td><td>${resident.puroks ? resident.puroks.name : 'N/A'}</td></tr>
+                            <tr><td class="label">Civil Status:</td><td>${resident.civil_status}</td></tr>
+                            <tr><td class="label">Voter Status:</td><td>${resident.voter_status}</td></tr>
+                            <tr><td class="label">Address:</td><td>${resident.address}</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `);
+    } catch (err) {
+        res.status(500).send('Verification Error');
+    }
+});
+
+/* ==========================================================================
+   FRONTEND APPLICATION SERVING (SINGLE PAGE APPLICATION)
+   ========================================================================== */
+
+app.get('*', (req, res) => {
+    res.send(`
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Resident Registration | Barangay System</title>
-  <style>${BASE_CSS}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barangay Resident Management System</title>
+    <!-- Tailwind CSS & FontAwesome -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode/html5-qrcode.min.js"></script>
+    <style>
+        :root {
+            --primary-green: #059669;
+            --primary-blue: #2563eb;
+        }
+        
+        /* STRICT BLUE, GREEN & WHITE THEME CUSTOM STYLES */
+        .bg-login-custom {
+            background-image: linear-gradient(rgba(5, 150, 105, 0.88), rgba(37, 99, 235, 0.88)), 
+                              url('${CUSTOM_BG_URL}');
+            background-size: cover;
+            background-position: center;
+        }
+
+        /* NATIONAL ID LAYOUT - FULL UTILIZATION, NO WASTED SPACE */
+        .id-card-national {
+            width: 3.375in;
+            height: 2.125in;
+            border: 2px solid #059669;
+            border-radius: 8px;
+            overflow: hidden;
+            box-sizing: border-box;
+            background-image: linear-gradient(rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.92)), url('${CUSTOM_BG_URL}');
+            background-size: cover;
+            background-position: center;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 4px;
+            font-family: 'Arial', sans-serif;
+            color: #0f172a;
+        }
+
+        @media print {
+            body * { visibility: hidden; }
+            #printableArea, #printableArea * { visibility: visible; }
+            #printableArea { position: absolute; left: 0; top: 0; width: 100%; }
+            .no-print { display: none !important; }
+            
+            .id-grid-container {
+                display: grid;
+                grid-template-columns: repeat(2, 3.375in);
+                grid-auto-rows: 2.125in;
+                gap: 0.2in;
+                padding: 0.2in;
+                justify-content: center;
+            }
+        }
+    </style>
 </head>
-<body>
-  <div class="container" style="max-width: 700px; margin: 3rem auto;">
-    <div class="card">
-      <div class="card-header">
-        <h2>Resident Online Registration</h2>
-      </div>
-      <form action="/register" method="POST" enctype="multipart/form-data">
-        <div class="form-row">
-          <div class="form-group">
-            <label>First Name</label>
-            <input type="text" name="first_name" required>
-          </div>
-          <div class="form-group">
-            <label>Middle Name</label>
-            <input type="text" name="middle_name">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Last Name</label>
-            <input type="text" name="last_name" required>
-          </div>
-          <div class="form-group">
-            <label>Suffix (e.g. Jr, III)</label>
-            <input type="text" name="suffix">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Date of Birth</label>
-            <input type="date" name="date_of_birth" required>
-          </div>
-          <div class="form-group">
-            <label>Gender</label>
-            <select name="gender" required>
-              <option value="Male">Male</option>
-              <option value="Female">Female</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Civil Status</label>
-            <select name="civil_status" required>
-              <option value="Single">Single</option>
-              <option value="Married">Married</option>
-              <option value="Widowed">Widowed</option>
-              <option value="Separated">Separated</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Contact Number</label>
-            <input type="text" name="contact_number" required placeholder="09XXXXXXXXX">
-          </div>
-        </div>
-        <div class="form-group">
-          <label>Email Address (Portal Username)</label>
-          <input type="email" name="email" required>
-        </div>
-        <div class="form-group">
-          <label>Password</label>
-          <input type="password" name="password" required>
-        </div>
-        <div class="form-group">
-          <label>Complete Address</label>
-          <textarea name="complete_address" required rows="2"></textarea>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Occupation</label>
-            <input type="text" name="occupation">
-          </div>
-          <div class="form-group">
-            <label>Resident Photo URL or File</label>
-            <input type="text" name="resident_photo" placeholder="https://example.com/photo.jpg">
-          </div>
-        </div>
-        <button type="submit" class="btn btn-green" style="margin-top: 1rem;">Submit Registration for Approval</button>
-      </form>
-      <div style="text-align: center; margin-top: 1rem;">
-        <a href="/login" style="color: var(--primary-blue);">Already have an account? Login</a>
-      </div>
-    </div>
-  </div>
+<body class="bg-slate-50 text-slate-800 antialiased font-sans">
+
+    <!-- APP CONTAINER -->
+    <div id="app" class="min-h-screen flex flex-col"></div>
+
+    <script>
+        const DEFAULT_LOGO = "${DEFAULT_LOGO_SVG}";
+        const DEFAULT_USER = "${DEFAULT_USER_SVG}";
+
+        // Global State
+        let state = {
+            token: localStorage.getItem('brms_token') || null,
+            user: JSON.parse(localStorage.getItem('brms_user')) || null,
+            resident: JSON.parse(localStorage.getItem('brms_resident')) || null,
+            settings: {},
+            activeTab: 'dashboard',
+            resActiveTab: 'profile'
+        };
+
+        // API Helper
+        async function api(endpoint, options = {}) {
+            const headers = options.headers || {};
+            if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+            if (!(options.body instanceof FormData)) {
+                headers['Content-Type'] = 'application/json';
+            }
+            try {
+                const res = await fetch('/api' + endpoint, { ...options, headers });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Server error occurred');
+                return data;
+            } catch (err) {
+                alert(err.message);
+                throw err;
+            }
+        }
+
+        // Initialize App
+        async function initApp() {
+            try {
+                const settings = await fetch('/api/settings').then(r => r.json());
+                state.settings = settings || {};
+
+                const setupStatus = await fetch('/api/setup/status').then(r => r.json());
+                if (setupStatus.needsAdmin) {
+                    renderSetupAdmin();
+                    return;
+                }
+
+                if (state.token && state.user) {
+                    if (state.user.role === 'resident') renderResidentPortal();
+                    else renderStaffPortal();
+                } else {
+                    renderLogin();
+                }
+            } catch (e) {
+                console.error("Initialization Error:", e);
+                renderLogin();
+            }
+        }
+
+        function logout() {
+            localStorage.clear();
+            state.token = null;
+            state.user = null;
+            state.resident = null;
+            renderLogin();
+        }
+
+        /* ==========================================================================
+           1. INITIAL ADMIN SETUP RENDER
+           ========================================================================== */
+        function renderSetupAdmin() {
+            const app = document.getElementById('app');
+            app.innerHTML = \`
+                <div class="min-h-screen bg-login-custom flex items-center justify-center p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full border border-emerald-500/30">
+                        <div class="text-center mb-6">
+                            <div class="inline-flex p-3 bg-emerald-100 rounded-full text-emerald-600 mb-3">
+                                <i class="fa-solid fa-user-shield fa-2x"></i>
+                            </div>
+                            <h1 class="text-2xl font-bold text-slate-800">INITIAL ADMIN SETUP</h1>
+                            <p class="text-xs text-slate-500 mt-1">Create the primary System Administrator account to start.</p>
+                        </div>
+                        <form id="adminSetupForm" class="space-y-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
+                                <input type="text" id="setupFullName" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Username</label>
+                                <input type="text" id="setupUsername" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Email Address</label>
+                                <input type="email" id="setupEmail" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Password</label>
+                                <input type="password" id="setupPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Confirm Password</label>
+                                <input type="password" id="setupConfirmPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                            </div>
+                            <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-lg hover:opacity-90 transition">
+                                Create Super Administrator
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            \`;
+
+            document.getElementById('adminSetupForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const res = await api('/setup/admin', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        fullName: document.getElementById('setupFullName').value,
+                        username: document.getElementById('setupUsername').value,
+                        email: document.getElementById('setupEmail').value,
+                        password: document.getElementById('setupPassword').value,
+                        confirmPassword: document.getElementById('setupConfirmPassword').value
+                    })
+                });
+                if (res.success) {
+                    alert(res.message);
+                    renderLogin();
+                }
+            };
+        }
+
+        /* ==========================================================================
+           2. LOGIN & REGISTRATION RENDER
+           ========================================================================== */
+        function renderLogin() {
+            const app = document.getElementById('app');
+            const logo = state.settings.barangay_logo || DEFAULT_LOGO;
+            const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
+            const municipality = state.settings.municipality || 'Municipality';
+            const province = state.settings.province || 'Province';
+
+            app.innerHTML = \`
+                <div class="min-h-screen bg-login-custom flex items-center justify-center p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 border border-white/20">
+                        <!-- Left Info Banner -->
+                        <div class="bg-gradient-to-br from-emerald-700 to-blue-800 p-8 text-white flex flex-col justify-between">
+                            <div class="text-center md:text-left">
+                                <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-20 h-20 mx-auto md:mx-0 rounded-full bg-white p-1 mb-4 shadow-md object-cover">
+                                <h2 class="text-2xl font-black tracking-wide">\${brgyName.toUpperCase()}</h2>
+                                <p class="text-xs text-emerald-100 mt-1">\${municipality}, \${province}</p>
+                            </div>
+                            <div class="my-8 hidden md:block">
+                                <h3 class="text-lg font-bold">Resident Services & Management System</h3>
+                                <p class="text-xs text-emerald-100 mt-2 leading-relaxed">
+                                    Access online barangay clearances, digital ID cards, schedule appointments, and submit community requests fast & efficiently.
+                                </p>
+                            </div>
+                            <div class="text-xs text-emerald-200 text-center md:text-left">
+                                &copy; 2026 Official Barangay Portal. All rights reserved.
+                            </div>
+                        </div>
+
+                        <!-- Right Login Form -->
+                        <div class="p-8 flex flex-col justify-center bg-white">
+                            <div class="flex border-b border-slate-200 mb-6">
+                                <button id="btnPortalStaff" type="button" onclick="switchLoginPortal('staff')" class="flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600">Staff Login</button>
+                                <button id="btnPortalResident" type="button" onclick="switchLoginPortal('resident')" class="flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent">Resident Portal</button>
+                            </div>
+
+                            <form id="loginForm" class="space-y-4">
+                                <input type="hidden" id="loginPortalType" value="staff">
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-600 mb-1">Username or Email</label>
+                                    <input type="text" id="loginUsername" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-600 mb-1">Password</label>
+                                    <input type="password" id="loginPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                </div>
+                                <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-md hover:opacity-90 transition">
+                                    Sign In
+                                </button>
+                            </form>
+
+                            <div id="registerPrompt" class="hidden mt-6 text-center border-t border-slate-100 pt-4">
+                                <p class="text-xs text-slate-500">Don't have an approved resident account?</p>
+                                <button type="button" onclick="renderRegisterModal()" class="mt-2 text-xs font-bold text-emerald-600 hover:underline">
+                                    Register as New Resident
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            \`;
+
+            document.getElementById('loginForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const portalType = document.getElementById('loginPortalType').value;
+                const res = await api('/auth/login', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        username: document.getElementById('loginUsername').value,
+                        password: document.getElementById('loginPassword').value,
+                        portalType
+                    })
+                });
+                
+                state.token = res.token;
+                state.user = res.user;
+                state.resident = res.resident;
+                localStorage.setItem('brms_token', res.token);
+                localStorage.setItem('brms_user', JSON.stringify(res.user));
+                if (res.resident) localStorage.setItem('brms_resident', JSON.stringify(res.resident));
+
+                if (res.user.role === 'resident') renderResidentPortal();
+                else renderStaffPortal();
+            };
+        }
+
+        function switchLoginPortal(type) {
+            document.getElementById('loginPortalType').value = type;
+            const btnStaff = document.getElementById('btnPortalStaff');
+            const btnResident = document.getElementById('btnPortalResident');
+            const prompt = document.getElementById('registerPrompt');
+
+            if (type === 'staff') {
+                btnStaff.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
+                btnResident.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
+                prompt.classList.add('hidden');
+            } else {
+                btnResident.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
+                btnStaff.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
+                prompt.classList.remove('hidden');
+            }
+        }
+
+        async function renderRegisterModal() {
+            let puroks = [];
+            try { puroks = await fetch('/api/puroks').then(r => r.json()); } catch(e){}
+            let purokOptions = (puroks || []).map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('');
+
+            const modalHtml = \`
+                <div id="regModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl my-8">
+                        <div class="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
+                            <h3 class="text-lg font-bold text-slate-800">New Resident Registration</h3>
+                            <button type="button" onclick="document.getElementById('regModal').remove()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
+                        </div>
+                        <form id="publicRegForm" class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                            <div>
+                                <label class="font-semibold text-slate-600">First Name *</label>
+                                <input type="text" name="firstName" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Middle Name</label>
+                                <input type="text" name="middleName" class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Last Name *</label>
+                                <input type="text" name="lastName" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Suffix</label>
+                                <input type="text" name="suffix" placeholder="Jr., Sr., III" class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Date of Birth *</label>
+                                <input type="date" name="dateOfBirth" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Gender *</label>
+                                <select name="gender" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Civil Status</label>
+                                <select name="civilStatus" class="w-full p-2 border border-slate-300 rounded mt-1">
+                                    <option value="Single">Single</option>
+                                    <option value="Married">Married</option>
+                                    <option value="Widowed">Widowed</option>
+                                    <option value="Separated">Separated</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Purok Zone</label>
+                                <select name="purokId" class="w-full p-2 border border-slate-300 rounded mt-1">
+                                    <option value="">-- Select Purok --</option>
+                                    \${purokOptions}
+                                </select>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="font-semibold text-slate-600">Street Address *</label>
+                                <input type="text" name="address" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Contact Number</label>
+                                <input type="text" name="contactNumber" class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Email Address</label>
+                                <input type="email" name="email" class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Account Username *</label>
+                                <input type="text" name="username" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-semibold text-slate-600">Account Password *</label>
+                                <input type="password" name="password" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="font-semibold text-slate-600">Resident Photo (2x2 / ID Photo)</label>
+                                <input type="file" name="photo" accept="image/*" class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div class="md:col-span-2 flex gap-4 pt-2">
+                                <label><input type="checkbox" name="isSeniorCitizen" value="true"> Senior Citizen</label>
+                                <label><input type="checkbox" name="isPwd" value="true"> Person with Disability (PWD)</label>
+                                <label><input type="checkbox" name="isSoloParent" value="true"> Solo Parent</label>
+                            </div>
+                            <div class="md:col-span-2 pt-4">
+                                <button type="submit" class="w-full py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">
+                                    Submit Registration Request
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            \`;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            document.getElementById('publicRegForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const res = await api('/public/register', {
+                    method: 'POST',
+                    body: formData
+                });
+                alert(res.message);
+                document.getElementById('regModal').remove();
+            };
+        }
+
+        /* ==========================================================================
+           3. RESIDENT PORTAL RENDER (BLUE, GREEN & WHITE THEME + ALL 13 FEATURES)
+           ========================================================================== */
+        function renderResidentPortal() {
+            const app = document.getElementById('app');
+            const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
+            const logo = state.settings.barangay_logo || DEFAULT_LOGO;
+            const resName = state.resident ? \`\${state.resident.first_name} \${state.resident.last_name}\` : state.user.fullName;
+
+            app.innerHTML = \`
+                <div class="flex h-screen bg-slate-50 overflow-hidden">
+                    <!-- Resident Sidebar -->
+                    <aside class="w-64 bg-slate-900 text-slate-200 flex flex-col justify-between hidden md:flex border-r border-emerald-700">
+                        <div>
+                            <div class="p-4 border-b border-slate-800 flex items-center gap-3 bg-gradient-to-r from-emerald-800 to-blue-800">
+                                <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-10 h-10 rounded-full bg-white p-0.5 object-cover">
+                                <div class="overflow-hidden">
+                                    <h1 class="font-bold text-white text-xs truncate">\${brgyName}</h1>
+                                    <span class="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full uppercase font-bold">Resident Portal</span>
+                                </div>
+                            </div>
+                            <nav class="p-3 space-y-1 text-xs overflow-y-auto max-h-[calc(100vh-140px)]">
+                                <button type="button" onclick="setResTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-gauge w-4"></i> Dashboard</button>
+                                <button type="button" onclick="setResTab('profile')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-id-card w-4"></i> My Profile & Brgy ID</button>
+                                <button type="button" onclick="setResTab('editProfile')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-user-pen w-4"></i> Edit Profile Request</button>
+                                <button type="button" onclick="setResTab('certRequest')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-file-signature w-4"></i> Certificate Request</button>
+                                <button type="button" onclick="setResTab('tracking')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-magnifying-glass-location w-4"></i> Request Tracking</button>
+                                <button type="button" onclick="setResTab('appointments')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-calendar-check w-4"></i> Appointment Booking</button>
+                                <button type="button" onclick="setResTab('documents')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-folder-open w-4"></i> My Documents</button>
+                                <button type="button" onclick="setResTab('complaints')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-triangle-exclamation w-4"></i> Complaints & Reports</button>
+                                <button type="button" onclick="setResTab('assistance')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-hand-holding-heart w-4"></i> Assistance Request</button>
+                                <button type="button" onclick="setResTab('announcements')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-bullhorn w-4"></i> Announcements</button>
+                                <button type="button" onclick="setResTab('notifications')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-bell w-4"></i> Notifications</button>
+                                <button type="button" onclick="setResTab('feedback')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-comments w-4"></i> Feedback</button>
+                                <button type="button" onclick="setResTab('emergency')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-phone-volume w-4"></i> Emergency Contacts</button>
+                                <button type="button" onclick="setResTab('security')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-shield-halved w-4"></i> Account Security</button>
+                            </nav>
+                        </div>
+                        <div class="p-3 border-t border-slate-800">
+                            <button type="button" onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2 text-xs text-rose-400 hover:bg-slate-800 rounded-lg font-medium">
+                                <i class="fa-solid fa-arrow-right-from-bracket w-4"></i> Sign Out
+                            </button>
+                        </div>
+                    </aside>
+
+                    <!-- Main Resident Content Area -->
+                    <main class="flex-1 flex flex-col overflow-hidden">
+                        <header class="bg-gradient-to-r from-emerald-700 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
+                            <h2 id="resPageTitle" class="text-xl font-bold">Resident Dashboard</h2>
+                            <div class="flex items-center gap-3">
+                                <span class="text-xs font-semibold">\${resName}</span>
+                                <img src="\${state.resident && state.resident.photo_url ? state.resident.photo_url : DEFAULT_USER}" onerror="this.src='\${DEFAULT_USER}'" class="w-8 h-8 rounded-full border-2 border-emerald-300 object-cover">
+                            </div>
+                        </header>
+
+                        <div id="resContent" class="flex-1 overflow-y-auto p-6">
+                            <!-- Dynamic Resident Content -->
+                        </div>
+                    </main>
+                </div>
+            \`;
+
+            setResTab('dashboard');
+        }
+
+        async function setResTab(tab) {
+            state.resActiveTab = tab;
+            const content = document.getElementById('resContent');
+            const title = document.getElementById('resPageTitle');
+
+            if (tab === 'dashboard') {
+                title.innerText = 'Resident Dashboard';
+                renderResDashboardTab(content);
+            } else if (tab === 'profile') {
+                title.innerText = 'My Profile & Barangay Resident Card';
+                renderResProfileTab(content);
+            } else if (tab === 'editProfile') {
+                title.innerText = 'Edit Profile Request';
+                renderResEditProfileTab(content);
+            } else if (tab === 'certRequest') {
+                title.innerText = 'Request Barangay Certificate';
+                renderResCertRequestTab(content);
+            } else if (tab === 'tracking') {
+                title.innerText = 'Request Status Tracking';
+                renderResTrackingTab(content);
+            } else if (tab === 'appointments') {
+                title.innerText = 'Book Barangay Appointment';
+                renderResAppointmentsTab(content);
+            } else if (tab === 'documents') {
+                title.innerText = 'My Official Documents';
+                renderResDocumentsTab(content);
+            } else if (tab === 'complaints') {
+                title.innerText = 'Submit Complaint or Incident Report';
+                renderResComplaintsTab(content);
+            } else if (tab === 'assistance') {
+                title.innerText = 'Request Barangay Assistance / Ayuda';
+                renderResAssistanceTab(content);
+            } else if (tab === 'announcements') {
+                title.innerText = 'Barangay Announcements & News';
+                renderResAnnouncementsTab(content);
+            } else if (tab === 'notifications') {
+                title.innerText = 'System Notifications';
+                renderResNotificationsTab(content);
+            } else if (tab === 'feedback') {
+                title.innerText = 'Barangay Service Feedback';
+                renderResFeedbackTab(content);
+            } else if (tab === 'emergency') {
+                title.innerText = 'Barangay Emergency Contacts';
+                renderResEmergencyTab(content);
+            } else if (tab === 'security') {
+                title.innerText = 'Account Security';
+                renderResSecurityTab(content);
+            }
+        }
+
+        /* RESIDENT TAB IMPLEMENTATIONS */
+        function renderResDashboardTab(container) {
+            const res = state.resident || {};
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div class="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm flex items-center gap-4">
+                        <div class="p-3 bg-emerald-100 text-emerald-700 rounded-lg"><i class="fa-solid fa-id-card fa-2x"></i></div>
+                        <div>
+                            <span class="text-xs text-slate-500 font-bold uppercase">Resident ID Status</span>
+                            <h4 class="text-lg font-extrabold text-emerald-800">\${res.status || 'ACTIVE'}</h4>
+                            <p class="text-[11px] text-slate-400">ID #: \${res.resident_number || 'N/A'}</p>
+                        </div>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm flex items-center gap-4">
+                        <div class="p-3 bg-blue-100 text-blue-700 rounded-lg"><i class="fa-solid fa-file-contract fa-2x"></i></div>
+                        <div>
+                            <span class="text-xs text-slate-500 font-bold uppercase">Certificate Services</span>
+                            <h4 class="text-lg font-extrabold text-blue-800">Online Requests</h4>
+                            <p class="text-[11px] text-slate-400">Barangay Clearance, Indigency & Residency</p>
+                        </div>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm flex items-center gap-4">
+                        <div class="p-3 bg-emerald-100 text-emerald-700 rounded-lg"><i class="fa-solid fa-hand-holding-heart fa-2x"></i></div>
+                        <div>
+                            <span class="text-xs text-slate-500 font-bold uppercase">Assistance Program</span>
+                            <h4 class="text-lg font-extrabold text-emerald-800">Ayuda / Welfare</h4>
+                            <p class="text-[11px] text-slate-400">Submit requests for medical or emergency aid</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4 border-b pb-2"><i class="fa-solid fa-bolt text-emerald-600 mr-2"></i> Quick Actions</h3>
+                        <div class="grid grid-cols-2 gap-3">
+                            <button onclick="setResTab('certRequest')" class="p-4 bg-emerald-50 text-emerald-800 rounded-lg font-bold text-xs text-left hover:bg-emerald-100 border border-emerald-200"><i class="fa-solid fa-file-medical text-lg block mb-2"></i> Request Certificate</button>
+                            <button onclick="setResTab('appointments')" class="p-4 bg-blue-50 text-blue-800 rounded-lg font-bold text-xs text-left hover:bg-blue-100 border border-blue-200"><i class="fa-solid fa-calendar-plus text-lg block mb-2"></i> Book Appointment</button>
+                            <button onclick="setResTab('complaints')" class="p-4 bg-blue-50 text-blue-800 rounded-lg font-bold text-xs text-left hover:bg-blue-100 border border-blue-200"><i class="fa-solid fa-bullhorn text-lg block mb-2"></i> Submit Report</button>
+                            <button onclick="setResTab('assistance')" class="p-4 bg-emerald-50 text-emerald-800 rounded-lg font-bold text-xs text-left hover:bg-emerald-100 border border-emerald-200"><i class="fa-solid fa-handshake-angle text-lg block mb-2"></i> Request Ayuda</button>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4 border-b pb-2"><i class="fa-solid fa-bullhorn text-blue-600 mr-2"></i> Barangay Announcements</h3>
+                        <div id="resDashAnnounce" class="space-y-3 text-xs text-slate-600">Loading latest updates...</div>
+                    </div>
+                </div>
+            \`;
+
+            fetch('/api/announcements').then(r => r.json()).then(list => {
+                const el = document.getElementById('resDashAnnounce');
+                if (!list || list.length === 0) {
+                    el.innerHTML = '<p class="text-slate-400">No current announcements posted.</p>';
+                    return;
+                }
+                el.innerHTML = list.slice(0, 3).map(a => \`
+                    <div class="p-3 bg-slate-50 border-l-4 border-emerald-600 rounded">
+                        <span class="font-bold text-slate-800 block">\${a.title}</span>
+                        <p class="text-[11px] text-slate-500 mt-1 line-clamp-2">\${a.content}</p>
+                    </div>
+                \`).join('');
+            });
+        }
+
+        /* RESIDENT PROFILE & NATIONAL ID STYLE ID CARD */
+        function renderResProfileTab(container) {
+            const r = state.resident || {};
+            const photo = r.photo_url || DEFAULT_USER;
+            const logo = state.settings.barangay_logo || DEFAULT_LOGO;
+            const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
+            const captainSig = state.settings.captain_signature || '';
+            const captainName = state.settings.captain_name || 'HON. BARANGAY CAPTAIN';
+
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- Left: Profile Details & Photo Update -->
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm lg:col-span-1 text-xs">
+                        <div class="text-center mb-4">
+                            <img src="\${photo}" onerror="this.src='\${DEFAULT_USER}'" class="w-28 h-28 mx-auto rounded-full object-cover border-4 border-emerald-600 shadow-md">
+                            <h3 class="text-base font-extrabold text-slate-800 mt-3">\${r.first_name || ''} \${r.last_name || ''}</h3>
+                            <p class="text-emerald-700 font-mono font-bold">\${r.resident_number || 'BRGY-PENDING'}</p>
+                        </div>
+                        
+                        <form id="updatePhotoForm" class="border-t pt-4 space-y-3">
+                            <p class="font-bold text-slate-700">Update Profile Picture & Details</p>
+                            <div>
+                                <label class="block font-semibold mb-1">New Resident Photo</label>
+                                <input type="file" name="photo" accept="image/*" class="w-full p-1 border rounded text-[11px]">
+                            </div>
+                            <div>
+                                <label class="block font-semibold mb-1">Contact Number</label>
+                                <input type="text" name="contactNumber" value="\${r.contact_number || ''}" class="w-full p-2 border rounded">
+                            </div>
+                            <div>
+                                <label class="block font-semibold mb-1">Email</label>
+                                <input type="email" name="email" value="\${r.email || ''}" class="w-full p-2 border rounded">
+                            </div>
+                            <div>
+                                <label class="block font-semibold mb-1">Civil Status</label>
+                                <select name="civilStatus" class="w-full p-2 border rounded">
+                                    <option value="Single" \${r.civil_status==='Single'?'selected':''}>Single</option>
+                                    <option value="Married" \${r.civil_status==='Married'?'selected':''}>Married</option>
+                                    <option value="Widowed" \${r.civil_status==='Widowed'?'selected':''}>Widowed</option>
+                                    <option value="Separated" \${r.civil_status==='Separated'?'selected':''}>Separated</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block font-semibold mb-1">Street Address</label>
+                                <input type="text" name="address" value="\${r.address || ''}" class="w-full p-2 border rounded">
+                            </div>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Save Profile Updates</button>
+                        </form>
+                    </div>
+
+                    <!-- Right: NATIONAL ID STYLE BARANGAY RESIDENT CARD -->
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-id-card text-emerald-600 mr-2"></i> Official Barangay Resident Card (National ID Layout)</h3>
+                            <button type="button" onclick="window.print()" class="px-3 py-1 bg-blue-600 text-white rounded text-xs font-bold hover:bg-blue-700 no-print"><i class="fa-solid fa-print mr-1"></i> Print ID</button>
+                        </div>
+
+                        <!-- ID CARD CONTAINER (PHILIPPINE NATIONAL ID SPECIFICATION: 3.375" x 2.125", ZERO WASTED SPACE) -->
+                        <div id="printableArea" class="flex justify-center p-4 bg-slate-100 rounded-xl">
+                            <div class="id-card-national shadow-lg">
+                                <!-- Top Bar / Header -->
+                                <div class="flex items-center gap-1.5 border-b border-emerald-700/40 pb-1 bg-gradient-to-r from-emerald-800 to-blue-800 text-white px-2 py-1 rounded-t">
+                                    <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-7 h-7 rounded-full bg-white p-0.5 object-cover">
+                                    <div class="leading-none flex-1">
+                                        <p class="text-[7pt] font-extrabold uppercase tracking-tight">REPUBLIKA NG PILIPINAS</p>
+                                        <p class="text-[8pt] font-black uppercase text-emerald-200 tracking-wider">\${brgyName}</p>
+                                        <p class="text-[6pt] font-extrabold text-white uppercase tracking-widest mt-0.5" style="letter-spacing: 0.5px;">RESIDENT CARD / BRGY ID</p>
+                                    </div>
+                                </div>
+
+                                <!-- Body Grid: Dense Photo, Data, and Large QR Code -->
+                                <div class="grid grid-cols-12 gap-1 my-1 px-1 text-[7pt] leading-tight flex-1 items-center">
+                                    <!-- Photo Left -->
+                                    <div class="col-span-3 text-center">
+                                        <img src="\${photo}" onerror="this.src='\${DEFAULT_USER}'" class="w-[0.75in] h-[0.9in] border-2 border-emerald-700 rounded object-cover mx-auto bg-white">
+                                        <span class="text-[5pt] font-bold text-emerald-800 block mt-0.5">REGISTERED</span>
+                                    </div>
+
+                                    <!-- Personal Details Middle -->
+                                    <div class="col-span-6 space-y-0.5">
+                                        <div>
+                                            <span class="text-[5pt] text-slate-500 font-bold block uppercase">Resident ID Number</span>
+                                            <span class="font-extrabold text-blue-900 font-mono text-[7.5pt]">\${r.resident_number || 'BRGY-0000-00000'}</span>
+                                        </div>
+                                        <div>
+                                            <span class="text-[5pt] text-slate-500 font-bold block uppercase">Full Name</span>
+                                            <span class="font-black text-slate-900 uppercase text-[7.5pt] block truncate">\${r.last_name || ''}, \${r.first_name || ''} \${r.middle_name || ''}</span>
+                                        </div>
+                                        <div class="grid grid-cols-2 gap-1">
+                                            <div>
+                                                <span class="text-[5pt] text-slate-500 font-bold block uppercase">Date of Birth</span>
+                                                <span class="font-bold text-slate-800 text-[6.5pt]">\${r.date_of_birth || 'N/A'}</span>
+                                            </div>
+                                            <div>
+                                                <span class="text-[5pt] text-slate-500 font-bold block uppercase">Sex / Status</span>
+                                                <span class="font-bold text-slate-800 text-[6.5pt]">\${r.gender || ''} / \${r.civil_status || ''}</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span class="text-[5pt] text-slate-500 font-bold block uppercase">Address</span>
+                                            <span class="font-bold text-slate-800 text-[6pt] truncate block">\${r.address || 'Barangay Central'}</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- LARGE QR Code Right -->
+                                    <div class="col-span-3 text-center flex flex-col items-center justify-center">
+                                        \${r.qr_code_url ? \`<img src="\${r.qr_code_url}" class="w-[0.9in] h-[0.9in] border border-slate-300 rounded p-0.5 bg-white shadow-sm">\` : \`<div class="w-[0.9in] h-[0.9in] border border-dashed text-[6pt] flex items-center justify-center text-slate-400">QR Code</div>\`}
+                                        <span class="text-[4.5pt] text-slate-400 font-mono mt-0.5">SCAN TO VERIFY</span>
+                                    </div>
+                                </div>
+
+                                <!-- Bottom Signature & Official Seal Line -->
+                                <div class="border-t border-emerald-700/30 pt-0.5 flex justify-between items-end px-2 bg-emerald-50/50 rounded-b">
+                                    <div class="text-[5.5pt]">
+                                        <span class="text-slate-500">Purok:</span> <strong class="text-emerald-800">\${r.puroks ? r.puroks.name : 'N/A'}</strong>
+                                    </div>
+                                    <div class="text-center">
+                                        \${captainSig ? \`<img src="\${captainSig}" class="h-4 mx-auto -mb-1 object-contain">\` : ''}
+                                        <div class="border-b border-slate-800 w-24 mx-auto"></div>
+                                        <span class="text-[5pt] font-extrabold text-slate-800 uppercase block">\${captainName}</span>
+                                        <span class="text-[4pt] text-slate-500 block -mt-0.5">PUNONG BARANGAY</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            \`;
+
+            document.getElementById('updatePhotoForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const res = await api('/resident/profile/update', { method: 'POST', body: formData });
+                alert(res.message);
+                state.resident = res.resident;
+                localStorage.setItem('brms_resident', JSON.stringify(res.resident));
+                renderResProfileTab(container);
+            };
+        }
+
+        /* EDIT PROFILE REQUEST */
+        function renderResEditProfileTab(container) {
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
+                    <h3 class="text-sm font-bold text-slate-800 mb-2">Submit Profile Correction / Update Request</h3>
+                    <p class="text-slate-500 mb-4">Request changes to official records like full name, date of birth, civil status, or family head assignments.</p>
+                    <form id="editReqForm" class="space-y-4">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Details of Requested Changes *</label>
+                            <textarea id="editReqDetails" required rows="5" class="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Please state clearly what info needs correction..."></textarea>
+                        </div>
+                        <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Submit Request to Barangay Office</button>
+                    </form>
+                </div>
+            \`;
+
+            document.getElementById('editReqForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const requestedChanges = document.getElementById('editReqDetails').value;
+                const res = await api('/resident/edit-request', {
+                    method: 'POST',
+                    body: JSON.stringify({ requestedChanges })
+                });
+                alert(res.message);
+                setResTab('tracking');
+            };
+        }
+
+        /* CERTIFICATE REQUEST */
+        function renderResCertRequestTab(container) {
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Request Official Barangay Document</h3>
+                    <form id="resCertForm" class="space-y-4">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Document Type *</label>
+                            <select id="certType" required class="w-full p-2 border border-slate-300 rounded">
+                                <option value="Barangay Clearance">Barangay Clearance</option>
+                                <option value="Certificate of Indigency">Certificate of Indigency</option>
+                                <option value="Certificate of Residency">Certificate of Residency</option>
+                                <option value="First Time Job Seeker Certificate">First Time Job Seeker Certificate</option>
+                                <option value="Barangay Business Clearance">Barangay Business Clearance</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Purpose of Request *</label>
+                            <textarea id="certPurpose" required rows="3" class="w-full p-2 border border-slate-300 rounded" placeholder="E.g., Employment, Scholarship, Financial Aid, Loan Application"></textarea>
+                        </div>
+                        <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Submit Request</button>
+                    </form>
+                </div>
+            \`;
+
+            document.getElementById('resCertForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const res = await api('/certificates/request', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        certificateType: document.getElementById('certType').value,
+                        purpose: document.getElementById('certPurpose').value
+                    })
+                });
+                alert(res.message);
+                setResTab('tracking');
+            };
+        }
+
+        /* REQUEST TRACKING */
+        async function renderResTrackingTab(container) {
+            const requests = await api('/certificates/requests');
+            let rows = requests.map(r => \`
+                <tr class="border-b border-slate-100 text-xs">
+                    <td class="py-3 px-2 font-mono font-bold text-blue-700">\${r.request_number}</td>
+                    <td class="py-3 px-2 font-bold text-slate-800">\${r.certificate_type}</td>
+                    <td class="py-3 px-2 text-slate-600">\${r.purpose}</td>
+                    <td class="py-3 px-2 font-bold \${r.status === 'READY_FOR_RELEASE' ? 'text-emerald-600' : 'text-amber-600'}">\${r.status}</td>
+                    <td class="py-3 px-2 text-slate-400">\${new Date(r.created_at).toLocaleDateString()}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Live Request Tracker</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Reference #</th>
+                                    <th class="py-2">Document Type</th>
+                                    <th class="py-2">Purpose</th>
+                                    <th class="py-2">Current Status</th>
+                                    <th class="py-2">Date Requested</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No active document requests found.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            \`;
+        }
+
+        /* APPOINTMENT BOOKING */
+        async function renderResAppointmentsTab(container) {
+            const appts = await api('/appointments');
+            let rows = appts.map(a => \`
+                <tr class="border-b border-slate-100 text-xs">
+                    <td class="py-3 px-2 font-mono font-bold text-blue-700">\${a.appointment_number}</td>
+                    <td class="py-3 px-2 font-bold text-slate-800">\${a.service_type}</td>
+                    <td class="py-3 px-2">\${a.appointment_date} \${a.appointment_time || ''}</td>
+                    <td class="py-3 px-2 font-bold text-emerald-600">\${a.status}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Book New Appointment</h3>
+                        <form id="resApptForm" class="space-y-3 text-xs">
+                            <div>
+                                <label class="font-bold text-slate-700">Service Required *</label>
+                                <select id="aptService" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                                    <option value="Barangay Consultation">Barangay Consultation</option>
+                                    <option value="Lupon / Mediation Hearing">Lupon / Mediation Hearing</option>
+                                    <option value="Document Pick-up & Payment">Document Pick-up & Payment</option>
+                                    <option value="Senior / PWD Assistance Verification">Senior / PWD Assistance Verification</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="font-bold text-slate-700">Preferred Date *</label>
+                                <input type="date" id="aptDate" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold text-slate-700">Preferred Time</label>
+                                <input type="time" id="aptTime" class="w-full p-2 border border-slate-300 rounded mt-1">
+                            </div>
+                            <div>
+                                <label class="font-bold text-slate-700">Purpose / Details</label>
+                                <textarea id="aptPurpose" class="w-full p-2 border border-slate-300 rounded mt-1" rows="3"></textarea>
+                            </div>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Schedule Appointment</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Scheduled Appointments</h3>
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Appt #</th>
+                                    <th class="py-2">Service</th>
+                                    <th class="py-2">Date & Time</th>
+                                    <th class="py-2">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No appointments scheduled.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            \`;
+
+            document.getElementById('resApptForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const res = await api('/appointments', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        serviceType: document.getElementById('aptService').value,
+                        appointmentDate: document.getElementById('aptDate').value,
+                        appointmentTime: document.getElementById('aptTime').value,
+                        purpose: document.getElementById('aptPurpose').value
+                    })
+                });
+                alert(res.message);
+                setResTab('appointments');
+            };
+        }
+
+        /* MY DOCUMENTS */
+        async function renderResDocumentsTab(container) {
+            const requests = await api('/certificates/requests');
+            const readyDocs = requests.filter(r => r.status === 'READY_FOR_RELEASE' || r.status === 'RELEASED');
+
+            let list = readyDocs.map(d => \`
+                <div class="p-4 bg-white rounded-xl border border-emerald-200 shadow-sm flex justify-between items-center">
+                    <div>
+                        <h4 class="font-bold text-slate-800 text-sm">\${d.certificate_type}</h4>
+                        <p class="text-xs text-slate-500">Ref #: \${d.request_number} | Status: <span class="text-emerald-700 font-bold">\${d.status}</span></p>
+                    </div>
+                    <div class="flex gap-2">
+                        <span class="px-3 py-1 bg-emerald-100 text-emerald-800 font-bold rounded-lg text-xs"><i class="fa-solid fa-check mr-1"></i> Ready at Brgy Office</span>
+                    </div>
+                </div>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="space-y-4">
+                    <h3 class="text-sm font-bold text-slate-800 mb-2">Issued & Approved Official Documents</h3>
+                    \${list || '<div class="bg-white p-8 rounded-xl text-center text-xs text-slate-400 border">No ready or released documents found yet.</div>'}
+                </div>
+            \`;
+        }
+
+        /* COMPLAINTS & REPORTS */
+        function renderResComplaintsTab(container) {
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Submit Complaint or Incident Report</h3>
+                    <form id="resBlotterForm" class="space-y-3">
+                        <div><label class="font-bold text-slate-700">Respondent / Person Involved *</label><input type="text" id="compRespondent" required class="w-full p-2 border border-slate-300 rounded mt-1"></div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div><label class="font-bold text-slate-700">Incident Date *</label><input type="date" id="compDate" required class="w-full p-2 border border-slate-300 rounded mt-1"></div>
+                            <div><label class="font-bold text-slate-700">Incident Time</label><input type="time" id="compTime" class="w-full p-2 border border-slate-300 rounded mt-1"></div>
+                        </div>
+                        <div><label class="font-bold text-slate-700">Location of Incident *</label><input type="text" id="compLoc" required class="w-full p-2 border border-slate-300 rounded mt-1"></div>
+                        <div><label class="font-bold text-slate-700">Detailed Report Description *</label><textarea id="compDesc" required rows="4" class="w-full p-2 border border-slate-300 rounded mt-1"></textarea></div>
+                        <button type="submit" class="w-full py-2.5 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">File Incident Report</button>
+                    </form>
+                </div>
+            \`;
+
+            document.getElementById('resBlotterForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const rName = state.resident ? \`\${state.resident.first_name} \${state.resident.last_name}\` : state.user.fullName;
+                const res = await api('/blotter', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        complainantName: rName,
+                        respondentName: document.getElementById('compRespondent').value,
+                        witnessName: '',
+                        incidentDate: document.getElementById('compDate').value,
+                        incidentTime: document.getElementById('compTime').value,
+                        location: document.getElementById('compLoc').value,
+                        description: document.getElementById('compDesc').value
+                    })
+                });
+                alert(res.message);
+                setResTab('dashboard');
+            };
+        }
+
+        /* ASSISTANCE REQUEST */
+        async function renderResAssistanceTab(container) {
+            const list = await api('/assistance');
+            let rows = list.map(a => \`
+                <tr class="border-b border-slate-100 text-xs">
+                    <td class="py-3 px-2 font-mono font-bold text-blue-700">\${a.request_number}</td>
+                    <td class="py-3 px-2 font-bold text-slate-800">\${a.assistance_type}</td>
+                    <td class="py-3 px-2">\${a.details}</td>
+                    <td class="py-3 px-2 font-bold text-amber-600">\${a.status}</td>
+                </tr>
+            \`).join('');
+
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Request Financial / Medical Assistance</h3>
+                        <form id="resAstForm" class="space-y-3 text-xs">
+                            <div>
+                                <label class="font-bold text-slate-700">Assistance Category *</label>
+                                <select id="astType" required class="w-full p-2 border border-slate-300 rounded mt-1">
+                                    <option value="Medical & Medicine Aid">Medical & Medicine Aid</option>
+                                    <option value="Financial / AICS Aid">Financial / AICS Aid</option>
+                                    <option value="Burial Assistance">Burial Assistance</option>
+                                    <option value="Food & Disaster Relief">Food & Disaster Relief</option>
+                                    <option value="Educational Cash Aid">Educational Cash Aid</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="font-bold text-slate-700">Reason & Details *</label>
+                                <textarea id="astDetails" required rows="4" class="w-full p-2 border border-slate-300 rounded mt-1"></textarea>
+                            </div>
+                            <button type="submit" class="w-full py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700">Submit Ayuda Request</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm md:col-span-2">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">My Submitted Assistance Requests</h3>
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Req #</th>
+                                    <th class="py-2">Category</th>
+                                    <th class="py-2">Details</th>
+                                    <th class="py-2">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="4" class="text-center py-4 text-xs text-slate-400">No assistance requests found.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            \`;
+
+            document.getElementById('resAstForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const res = await api('/assistance', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        assistanceType: document.getElementById('astType').value,
+                        details: document.getElementById('astDetails').value
+                    })
+                });
+                alert(res.message);
+                setResTab('assistance');
+            };
+        }
+
+        /* ANNOUNCEMENTS, NOTIFICATIONS, FEEDBACK, EMERGENCY & SECURITY */
+        async function renderResAnnouncementsTab(container) {
+            const list = await api('/announcements');
+            let items = list.map(a => \`
+                <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-start mb-2">
+                        <h4 class="font-bold text-slate-800 text-base">\${a.title}</h4>
+                        <span class="text-[10px] px-2 py-0.5 rounded font-bold \${a.priority === 'High' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}">\${a.priority} Priority</span>
+                    </div>
+                    <p class="text-xs text-slate-600 leading-relaxed whitespace-pre-line">\${a.content}</p>
+                    <small class="text-[10px] text-slate-400 mt-3 block">Posted: \${new Date(a.created_at).toLocaleDateString()}</small>
+                </div>
+            \`).join('');
+
+            container.innerHTML = \`<div class="space-y-4 max-w-2xl mx-auto">\${items || '<p class="text-slate-400 text-xs">No active announcements.</p>'}</div>\`;
+        }
+
+        function renderResNotificationsTab(container) {
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs space-y-3">
+                    <h3 class="text-sm font-bold text-slate-800 mb-3">Barangay Activity Notifications</h3>
+                    <div class="p-3 bg-emerald-50 border-l-4 border-emerald-600 rounded">
+                        <p class="font-bold text-emerald-900">Account Approved & Verified</p>
+                        <p class="text-slate-500 text-[11px]">Your resident profile is active. You can now request clearances and generate your digital resident ID card.</p>
+                    </div>
+                </div>
+            \`;
+        }
+
+        function renderResFeedbackTab(container) {
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4">Submit Barangay Service Feedback</h3>
+                    <form id="resFeedbackForm" class="space-y-4">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Rating (1 to 5 Stars)</label>
+                            <select id="fbRating" class="w-full p-2 border border-slate-300 rounded">
+                                <option value="5">5 - Excellent Service</option>
+                                <option value="4">4 - Good</option>
+                                <option value="3">3 - Satisfactory</option>
+                                <option value="2">2 - Needs Improvement</option>
+                                <option value="1">1 - Poor</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Your Comments or Suggestions</label>
+                            <textarea id="fbComments" rows="4" class="w-full p-2 border border-slate-300 rounded" placeholder="Let us know how we can serve the barangay better..."></textarea>
+                        </div>
+                        <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Submit Feedback</button>
+                    </form>
+                </div>
+            \`;
+
+            document.getElementById('resFeedbackForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const res = await api('/feedback', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        rating: parseInt(document.getElementById('fbRating').value),
+                        comments: document.getElementById('fbComments').value
+                    })
+                });
+                alert(res.message);
+                setResTab('dashboard');
+            };
+        }
+
+        function renderResEmergencyTab(container) {
+            container.innerHTML = \`
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto text-xs">
+                    <div class="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-4">
+                        <div class="p-3 bg-rose-600 text-white rounded-full"><i class="fa-solid fa-phone-flip fa-lg"></i></div>
+                        <div>
+                            <h4 class="font-extrabold text-rose-900 text-sm">Barangay Emergency Hotline</h4>
+                            <p class="text-slate-600 font-bold text-sm">0917-000-9111</p>
+                        </div>
+                    </div>
+                    <div class="p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-4">
+                        <div class="p-3 bg-blue-600 text-white rounded-full"><i class="fa-solid fa-shield-halved fa-lg"></i></div>
+                        <div>
+                            <h4 class="font-extrabold text-blue-900 text-sm">Barangay Tanod Outpost</h4>
+                            <p class="text-slate-600 font-bold text-sm">0918-111-2222</p>
+                        </div>
+                    </div>
+                    <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-4">
+                        <div class="p-3 bg-emerald-600 text-white rounded-full"><i class="fa-solid fa-truck-medical fa-lg"></i></div>
+                        <div>
+                            <h4 class="font-extrabold text-emerald-900 text-sm">Health Center / Ambulance</h4>
+                            <p class="text-slate-600 font-bold text-sm">0920-333-4444</p>
+                        </div>
+                    </div>
+                    <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-4">
+                        <div class="p-3 bg-amber-600 text-white rounded-full"><i class="fa-solid fa-fire fa-lg"></i></div>
+                        <div>
+                            <h4 class="font-extrabold text-amber-900 text-sm">Fire Station Station 1</h4>
+                            <p class="text-slate-600 font-bold text-sm">(045) 888-9999</p>
+                        </div>
+                    </div>
+                </div>
+            \`;
+        }
+
+        function renderResSecurityTab(container) {
+            container.innerHTML = \`
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-md mx-auto text-xs space-y-4">
+                    <h3 class="text-sm font-bold text-slate-800 border-b pb-2">Account Security Settings</h3>
+                    <div>
+                        <span class="font-bold text-slate-700 block">Registered Email</span>
+                        <p class="text-slate-500 mt-0.5">\${state.user ? state.user.email : 'N/A'}</p>
+                    </div>
+                    <div>
+                        <span class="font-bold text-slate-700 block">Username</span>
+                        <p class="text-slate-500 mt-0.5">\${state.user ? state.user.username : 'N/A'}</p>
+                    </div>
+                    <p class="text-[11px] text-slate-400">To reset your account password or update credentials, please contact the Barangay Administrator office.</p>
+                </div>
+            \`;
+        }
+
+        /* ==========================================================================
+           4. STAFF / ADMIN PORTAL RENDER (WITH 8-UP BATCH PRINT & QR SCANNER LINK)
+           ========================================================================== */
+        function renderStaffPortal() {
+            const app = document.getElementById('app');
+            const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
+            const logo = state.settings.barangay_logo || DEFAULT_LOGO;
+
+            app.innerHTML = \`
+                <div class="flex h-screen bg-slate-50 overflow-hidden">
+                    <aside class="w-64 bg-slate-900 text-slate-200 flex flex-col justify-between hidden md:flex border-r border-emerald-700">
+                        <div>
+                            <div class="p-4 border-b border-slate-800 flex items-center gap-3 bg-gradient-to-r from-emerald-800 to-blue-800">
+                                <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-10 h-10 rounded-full bg-white p-0.5 object-cover">
+                                <div class="overflow-hidden">
+                                    <h1 class="font-bold text-white text-xs truncate">\${brgyName}</h1>
+                                    <span class="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full uppercase font-bold">Admin Portal</span>
+                                </div>
+                            </div>
+                            <nav class="p-3 space-y-1 text-xs">
+                                <button type="button" onclick="setStaffTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-chart-pie w-4"></i> Admin Dashboard</button>
+                                <button type="button" onclick="setStaffTab('residents')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-users w-4"></i> Resident Records</button>
+                                <button type="button" onclick="setStaffTab('puroks')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-map-location-dot w-4"></i> Purok Management</button>
+                                <button type="button" onclick="setStaffTab('batchPrint')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-print w-4"></i> 8-Up Batch Print IDs</button>
+                                <button type="button" onclick="setStaffTab('qrScanner')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-qrcode w-4"></i> QR Claim Scanner</button>
+                                <button type="button" onclick="setStaffTab('certificates')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-file-export w-4"></i> Certificate Issuance</button>
+                            </nav>
+                        </div>
+                        <div class="p-3 border-t border-slate-800">
+                            <button type="button" onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2 text-xs text-rose-400 hover:bg-slate-800 rounded-lg font-medium">
+                                <i class="fa-solid fa-arrow-right-from-bracket w-4"></i> Sign Out
+                            </button>
+                        </div>
+                    </aside>
+
+                    <main class="flex-1 flex flex-col overflow-hidden">
+                        <header class="bg-gradient-to-r from-emerald-700 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
+                            <h2 id="staffPageTitle" class="text-xl font-bold">Admin Dashboard</h2>
+                            <span class="text-xs font-semibold">\${state.user.fullName} (\${state.user.role})</span>
+                        </header>
+                        <div id="staffContent" class="flex-1 overflow-y-auto p-6"></div>
+                    </main>
+                </div>
+            \`;
+
+            setStaffTab('dashboard');
+        }
+
+        async function setStaffTab(tab) {
+            const container = document.getElementById('staffContent');
+            const title = document.getElementById('staffPageTitle');
+
+            if (tab === 'dashboard') {
+                title.innerText = 'Admin Dashboard & System Analytics';
+                const stats = await api('/dashboard/stats');
+                container.innerHTML = \`
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs mb-6">
+                        <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm"><span class="text-slate-400 block font-bold">TOTAL RESIDENTS</span><h2 class="text-2xl font-black text-emerald-700 mt-1">\${stats.totalResidents}</h2></div>
+                        <div class="bg-white p-4 rounded-xl border border-blue-200 shadow-sm"><span class="text-slate-400 block font-bold">HOUSEHOLDS</span><h2 class="text-2xl font-black text-blue-700 mt-1">\${stats.totalHouseholds}</h2></div>
+                        <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm"><span class="text-slate-400 block font-bold">PENDING REGISTRATIONS</span><h2 class="text-2xl font-black text-amber-600 mt-1">\${stats.pendingApprovals}</h2></div>
+                        <div class="bg-white p-4 rounded-xl border border-blue-200 shadow-sm"><span class="text-slate-400 block font-bold">PENDING CERTS</span><h2 class="text-2xl font-black text-blue-700 mt-1">\${stats.pendingCerts}</h2></div>
+                    </div>
+                \`;
+            } else if (tab === 'puroks') {
+                title.innerText = 'Purok Management & Live Resident Counting';
+                const list = await api('/puroks');
+                let rows = list.map(p => \`
+                    <tr class="border-b border-slate-100 text-xs">
+                        <td class="py-3 px-2 font-bold text-slate-800">\${p.name}</td>
+                        <td class="py-3 px-2 text-slate-500">\${p.description || 'N/A'}</td>
+                        <td class="py-3 px-2 font-extrabold text-emerald-700">\${p.resident_count} Residents</td>
+                    </tr>
+                \`).join('');
+
+                container.innerHTML = \`
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Purok Population Overview</h3>
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Purok Name</th>
+                                    <th class="py-2">Description</th>
+                                    <th class="py-2">Active Resident Population</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows}</tbody>
+                        </table>
+                    </div>
+                \`;
+            } else if (tab === 'batchPrint') {
+                title.innerText = '8-Up Batch Printable ID Sheet (Standard Letter / Bond paper)';
+                const list = await api('/residents?status=ACTIVE');
+                const eight = list.slice(0, 8);
+                const logo = state.settings.barangay_logo || DEFAULT_LOGO;
+                const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
+                const captainSig = state.settings.captain_signature || '';
+                const captainName = state.settings.captain_name || 'HON. BARANGAY CAPTAIN';
+
+                let cardsHtml = eight.map(r => \`
+                    <div class="id-card-national shadow-md">
+                        <div class="flex items-center gap-1 border-b border-emerald-700/40 pb-0.5 bg-gradient-to-r from-emerald-800 to-blue-800 text-white px-2 py-0.5 rounded-t">
+                            <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-5 h-5 rounded-full bg-white p-0.5 object-cover">
+                            <div class="leading-none flex-1">
+                                <p class="text-[5pt] font-extrabold uppercase">REPUBLIKA NG PILIPINAS</p>
+                                <p class="text-[6.5pt] font-black uppercase text-emerald-200 truncate">\${brgyName}</p>
+                                <p class="text-[4.5pt] font-extrabold text-white uppercase tracking-widest">RESIDENT CARD / BRGY ID</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-12 gap-1 my-0.5 px-1 text-[6.5pt] leading-tight flex-1 items-center">
+                            <div class="col-span-3 text-center">
+                                <img src="\${r.photo_url || DEFAULT_USER}" onerror="this.src='\${DEFAULT_USER}'" class="w-[0.65in] h-[0.75in] border border-emerald-700 rounded object-cover mx-auto bg-white">
+                            </div>
+                            <div class="col-span-6 space-y-0.5">
+                                <div><span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Resident ID Number</span><span class="font-extrabold text-blue-900 font-mono text-[6.5pt]">\${r.resident_number || 'N/A'}</span></div>
+                                <div><span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Full Name</span><span class="font-black text-slate-900 uppercase text-[6.5pt] block truncate">\${r.last_name}, \${r.first_name}</span></div>
+                                <div><span class="text-[4.5pt] text-slate-500 font-bold block uppercase">Address</span><span class="font-bold text-slate-800 text-[5.5pt] truncate block">\${r.address || 'Barangay Central'}</span></div>
+                            </div>
+                            <div class="col-span-3 text-center">
+                                \${r.qr_code_url ? \`<img src="\${r.qr_code_url}" class="w-[0.75in] h-[0.75in] border border-slate-300 rounded p-0.5 bg-white">\` : ''}
+                            </div>
+                        </div>
+                        <div class="border-t border-emerald-700/30 pt-0.5 flex justify-between items-end px-2 bg-emerald-50/50 rounded-b">
+                            <span class="text-[4.5pt]">Purok: <strong class="text-emerald-800">\${r.puroks ? r.puroks.name : 'N/A'}</strong></span>
+                            <div class="text-center">
+                                <div class="border-b border-slate-800 w-16 mx-auto"></div>
+                                <span class="text-[4.5pt] font-extrabold text-slate-800 uppercase block">\${captainName}</span>
+                            </div>
+                        </div>
+                    </div>
+                \`).join('');
+
+                container.innerHTML = \`
+                    <div class="mb-4 flex justify-between items-center no-print">
+                        <p class="text-xs text-slate-500">Printing 8 IDs per standard letter/bond paper page layout.</p>
+                        <button onclick="window.print()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg text-xs hover:bg-blue-700"><i class="fa-solid fa-print mr-1"></i> Print Batch Page</button>
+                    </div>
+                    <div id="printableArea" class="id-grid-container bg-white p-4 rounded-xl border">
+                        \${cardsHtml || '<p class="text-xs text-slate-400">No active residents found to print.</p>'}
+                    </div>
+                \`;
+            } else if (tab === 'qrScanner') {
+                title.innerText = 'Dedicated QR Claim Scanner';
+                container.innerHTML = \`
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-md mx-auto text-xs text-center">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Scan Resident ID QR Code to Release Claim</h3>
+                        <div id="qr-reader" class="w-full bg-slate-100 rounded-lg overflow-hidden border mb-4"></div>
+                        <div id="scanResult" class="text-left bg-slate-50 p-3 rounded border text-xs">Point camera at Resident Card QR code...</div>
+                    </div>
+                \`;
+
+                setTimeout(() => {
+                    const html5QrcodeScanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: 250 });
+                    html5QrcodeScanner.render(async (decodedText) => {
+                        document.getElementById('scanResult').innerHTML = \`<p class="text-emerald-700 font-bold">QR Scanned: \${decodedText}</p>\`;
+                    });
+                }, 500);
+            }
+        }
+
+        // Start App
+        window.onload = initApp;
+    </script>
 </body>
-</html>`);
+</html>
+    `);
 });
 
-app.post('/register', async (req, res) => {
-  try {
-    const { first_name, middle_name, last_name, suffix, date_of_birth, gender, civil_status, contact_number, email, password, complete_address, occupation, resident_photo } = req.body;
-    const password_hash = await bcrypt.hash(password, 10);
-    const resident_id_no = `BRGY-2026-${Math.floor(100000 + Math.random() * 900000)}`;
-    const qr_token = `TOKEN-${Math.random().toString(36).substring(2, 15)}-${Date.now()}`;
-
-    const { error } = await supabase.from('residents').insert([{
-      resident_id_no,
-      first_name,
-      middle_name,
-      last_name,
-      suffix,
-      date_of_birth,
-      gender,
-      civil_status,
-      contact_number,
-      email,
-      password_hash,
-      complete_address,
-      occupation,
-      resident_photo: resident_photo || 'https://via.placeholder.com/150',
-      qr_token,
-      resident_status: 'PENDING'
-    }]);
-
-    if (error) throw error;
-    res.send(renderHTML('Registration Submitted', `<div class="card" style="text-align:center; padding: 3rem;"><h2 style="color:var(--dark-green);">Registration Successful!</h2><p style="margin: 1rem 0;">Your registration has been submitted and is pending administrator/staff approval.</p><a href="/login" class="btn">Return to Login</a></div>`));
-  } catch (err) {
-    res.status(400).send(renderHTML('Error', `<div class="card"><div class="alert alert-error">Registration failed: ${err.message}</div><a href="/register" class="btn">Back</a></div>`));
-  }
-});
-
-// ==========================================
-// ADMIN PORTAL ROUTES
-// ==========================================
-
-app.get('/admin/dashboard', async (req, res) => {
-  try {
-    const [resCount, activeCount, pendingRegs, householdCount, purokCount, pendingCerts, pendingAppts, pendingComplaints, recentLogs] = await Promise.all([
-      supabase.from('residents').select('*', { count: 'exact', head: true }),
-      supabase.from('residents').select('*', { count: 'exact', head: true }).eq('resident_status', 'ACTIVE'),
-      supabase.from('residents').select('*', { count: 'exact', head: true }).eq('resident_status', 'PENDING'),
-      supabase.from('households').select('*', { count: 'exact', head: true }),
-      supabase.from('puroks').select('*', { count: 'exact', head: true }),
-      supabase.from('certificate_requests').select('*', { count: 'exact', head: true }).eq('status', 'Pending'),
-      supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'Pending'),
-      supabase.from('complaints').select('*', { count: 'exact', head: true }).eq('status', 'Submitted'),
-      supabase.from('user_activity_logs').select('*').order('created_at', { ascending: false }).limit(5)
-    ]);
-
-    res.send(renderHTML('Admin Dashboard', `
-      <div class="card-header" style="border:none; margin-bottom:1rem;">
-        <h2>Admin & Staff Dashboard</h2>
-      </div>
-      <div class="grid-stats">
-        <div class="stat-card">
-          <h3>Total Residents</h3>
-          <div class="value">${resCount.count || 0}</div>
-        </div>
-        <div class="stat-card green">
-          <h3>Active Residents</h3>
-          <div class="value">${activeCount.count || 0}</div>
-        </div>
-        <div class="stat-card">
-          <h3>Pending Registrations</h3>
-          <div class="value" style="color:var(--warning-yellow);">${pendingRegs.count || 0}</div>
-        </div>
-        <div class="stat-card">
-          <h3>Total Households</h3>
-          <div class="value">${householdCount.count || 0}</div>
-        </div>
-        <div class="stat-card green">
-          <h3>Total Puroks</h3>
-          <div class="value">${purokCount.count || 0}</div>
-        </div>
-        <div class="stat-card">
-          <h3>Pending Requests</h3>
-          <div class="value">${pendingCerts.count || 0}</div>
-        </div>
-        <div class="stat-card">
-          <h3>Pending Appointments</h3>
-          <div class="value">${pendingAppts.count || 0}</div>
-        </div>
-        <div class="stat-card">
-          <h3>Pending Complaints</h3>
-          <div class="value">${pendingComplaints.count || 0}</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <h2>Recent Activity Logs</h2>
-        </div>
-        <table>
-          <thead>
-            <tr><th>User / Identifier</th><th>Action</th><th>Timestamp</th></tr>
-          </thead>
-          <tbody>
-            ${recentLogs.data && recentLogs.data.length > 0 ? recentLogs.data.map(l => `
-              <tr>
-                <td>${l.user_identifier}</td>
-                <td>${l.action}</td>
-                <td>${new Date(l.created_at).toLocaleString()}</td>
-              </tr>
-            `).join('') : '<tr><td colspan="3" style="text-align:center;">No recent activity recorded.</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    `, true, 'dashboard', 'Barangay Admin'));
-  } catch (err) {
-    res.status(500).send(renderHTML('Error', `<div class="card"><div class="alert alert-error">Error loading dashboard: ${err.message}</div></div>`, true, 'dashboard', 'Barangay Admin'));
-  }
-});
-
-// Resident Management Module
-app.get('/admin/residents', async (req, res) => {
-  const statusFilter = req.query.status || 'ACTIVE';
-  const search = req.query.search || '';
-  
-  let query = supabase.from('residents').select('*, puroks(name), households(household_number)').order('created_at', { ascending: false });
-  if (statusFilter !== 'ALL') query = query.eq('resident_status', statusFilter);
-  if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,resident_id_no.ilike.%${search}%`);
-
-  const { data: residents, error } = await query;
-
-  res.send(renderHTML('Resident Management', `
-    <div class="card">
-      <div class="card-header">
-        <h2>Resident Directory & Management</h2>
-        <a href="/admin/residents/add" class="btn btn-green btn-sm">+ Add New Resident</a>
-      </div>
-      <form method="GET" action="/admin/residents" style="display:flex; flex-direction:row; gap:1rem; margin-bottom:1.5rem;">
-        <input type="text" name="search" placeholder="Search by name or ID..." value="${search}" style="flex:1;">
-        <select name="status" style="width: 200px;">
-          <option value="ACTIVE" ${statusFilter === 'ACTIVE' ? 'selected' : ''}>Active</option>
-          <option value="PENDING" ${statusFilter === 'PENDING' ? 'selected' : ''}>Pending Approval</option>
-          <option value="ARCHIVED" ${statusFilter === 'ARCHIVED' ? 'selected' : ''}>Archived</option>
-          <option value="ALL" ${statusFilter === 'ALL' ? 'selected' : ''}>All Statuses</option>
-        </select>
-        <button type="submit" class="btn">Filter</button>
-      </form>
-      <table>
-        <thead>
-          <tr>
-            <th>ID No.</th>
-            <th>Photo</th>
-            <th>Full Name</th>
-            <th>Purok</th>
-            <th>Contact</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${residents && residents.length > 0 ? residents.map(r => `
-            <tr>
-              <td><strong>${r.resident_id_no}</strong></td>
-              <td><img src="${r.resident_photo}" style="width:35px; height:35px; border-radius:50%; object-fit:cover;"></td>
-              <td>${r.last_name},${r.first_name} ${r.middle_name \vert{}\vert{} ''}${r.suffix || ''}</td>
-              <td>${r.puroks ? r.puroks.name : 'N/A'}</td>
-              <td>${r.contact_number || 'N/A'}</td>
-              <td><span class="badge ${r.resident_status === 'ACTIVE' ? 'badge-green' : (r.resident_status === 'PENDING' ? 'badge-yellow' : 'badge-red')}">${r.resident_status}</span></td>
-              <td>
-                ${r.resident_status === 'PENDING' ? `
-                  <a href="/admin/residents/approve/${r.id}" class="btn btn-green btn-sm">Approve</a>
-                  <a href="/admin/residents/reject/${r.id}" class="btn btn-danger btn-sm">Reject</a>
-                ` : `
-                  <a href="/admin/residents/view/${r.id}" class="btn btn-sm">View</a>
-                  <a href="/admin/residents/archive/${r.id}" class="btn btn-secondary btn-sm">Archive</a>
-                `}
-              </td>
-            </tr>
-          `).join('') : '<tr><td colspan="7" style="text-align:center;">No residents found.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'residents', 'Barangay Admin'));
-});
-
-app.get('/admin/residents/approve/:id', async (req, res) => {
-  const { id } = req.params;
-  await supabase.from('residents').update({ resident_status: 'ACTIVE' }).eq('id', id);
-  await supabase.from('user_activity_logs').insert([{ user_identifier: 'Admin', action: `Approved resident registration ID: ${id}` }]);
-  res.redirect('/admin/residents?status=PENDING');
-});
-
-app.get('/admin/residents/reject/:id', async (req, res) => {
-  const { id } = req.params;
-  await supabase.from('residents').update({ resident_status: 'ARCHIVED' }).eq('id', id);
-  await supabase.from('user_activity_logs').insert([{ user_identifier: 'Admin', action: `Rejected resident registration ID: ${id}` }]);
-  res.redirect('/admin/residents?status=PENDING');
-});
-
-app.get('/admin/residents/archive/:id', async (req, res) => {
-  const { id } = req.params;
-  await supabase.from('residents').update({ resident_status: 'ARCHIVED' }).eq('id', id);
-  res.redirect('/admin/residents');
-});
-
-// Household Management
-app.get('/admin/households', async (req, res) => {
-  const { data: households } = await supabase.from('households').select('*, puroks(name)');
-  const { data: puroks } = await supabase.from('puroks').select('*');
-
-  res.send(renderHTML('Household Management', `
-    <div class="card">
-      <div class="card-header">
-        <h2>Household Records</h2>
-      </div>
-      <form action="/admin/households/add" method="POST" style="margin-bottom:2rem; background:var(--card-bg); padding:1rem; border-radius:8px;">
-        <h3 style="margin-bottom:0.75rem; font-size:1rem; color:var(--dark-blue);">Add New Household</h3>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Household Number</label>
-            <input type="text" name="household_number" required placeholder="HH-2026-001">
-          </div>
-          <div class="form-group">
-            <label>Purok</label>
-            <select name="purok_id" required>
-              ${puroks ? puroks.map(p => `<option value="${p.id}">${p.name}</option>`).join('') : ''}
-            </select>
-          </div>
-        </div>
-        <div class="form-group" style="margin-top:1rem;">
-          <label>Address / Street</label>
-          <input type="text" name="address" required placeholder="Complete Household Address">
-        </div>
-        <button type="submit" class="btn btn-green" style="margin-top:1rem; width:fit-content;">Create Household</button>
-      </form>
-      <table>
-        <thead>
-          <tr><th>Household No.</th><th>Purok</th><th>Address</th><th>Status</th></tr>
-        </thead>
-        <tbody>
-          ${households && households.length > 0 ? households.map(h => `
-            <tr>
-              <td><strong>${h.household_number}</strong></td>
-              <td>${h.puroks ? h.puroks.name : 'N/A'}</td>
-              <td>${h.address}</td>
-              <td><span class="badge badge-green">${h.household_status}</span></td>
-            </tr>
-          `).join('') : '<tr><td colspan="4" style="text-align:center;">No households registered.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'households', 'Barangay Admin'));
-});
-
-app.post('/admin/households/add', async (req, res) => {
-  const { household_number, purok_id, address } = req.body;
-  await supabase.from('households').insert([{ household_number, purok_id, address }]);
-  res.redirect('/admin/households');
-});
-
-// Purok Management with dynamic resident count calculation
-app.get('/admin/puroks', async (req, res) => {
-  const { data: puroks } = await supabase.from('puroks').select('*');
-  const purokList = [];
-  if (puroks) {
-    for (const p of puroks) {
-      const { count } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('purok_id', p.id).eq('resident_status', 'ACTIVE');
-      purokList.push({ ...p, residentCount: count || 0 });
-    }
-  }
-
-  res.send(renderHTML('Purok Management', `
-    <div class="card">
-      <div class="card-header">
-        <h2>Purok Management & Resident Counts</h2>
-      </div>
-      <form action="/admin/puroks/add" method="POST" style="margin-bottom:2rem; background:var(--card-bg); padding:1rem; border-radius:8px;">
-        <h3 style="margin-bottom:0.75rem; font-size:1rem; color:var(--dark-blue);">Add New Purok</h3>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Purok Name</label>
-            <input type="text" name="name" required placeholder="Purok 1">
-          </div>
-          <div class="form-group">
-            <label>Description</label>
-            <input type="text" name="description" placeholder="Optional description">
-          </div>
-        </div>
-        <button type="submit" class="btn btn-green" style="margin-top:1rem; width:fit-content;">Add Purok</button>
-      </form>
-      <table>
-        <thead>
-          <tr><th>Purok Name</th><th>Description</th><th>Active Residents Count</th></tr>
-        </thead>
-        <tbody>
-          ${purokList.length > 0 ? purokList.map(p => `
-            <tr>
-              <td><strong>${p.name}</strong></td>
-              <td>${p.description || 'N/A'}</td>
-              <td><span class="badge badge-blue">${p.residentCount} Residents</span></td>
-            </tr>
-          `).join('') : '<tr><td colspan="3" style="text-align:center;">No puroks configured.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'puroks', 'Barangay Admin'));
-});
-
-app.post('/admin/puroks/add', async (req, res) => {
-  const { name, description } = req.body;
-  await supabase.from('puroks').insert([{ name, description }]);
-  res.redirect('/admin/puroks');
-});
-
-// Document Management & Certificate Approval
-app.get('/admin/documents', async (req, res) => {
-  const { data: requests } = await supabase.from('certificate_requests').select('*, residents(first_name, last_name, resident_id_no)').order('created_at', { ascending: false });
-
-  res.send(renderHTML('Document Approval & Management', `
-    <div class="card">
-      <div class="card-header">
-        <h2>Certificate & Document Requests</h2>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Req No.</th><th>Resident</th><th>Type</th><th>Purpose</th><th>Status</th><th>Actions</th></tr>
-        </thead>
-        <tbody>
-          ${requests && requests.length > 0 ? requests.map(r => `
-            <tr>
-              <td><strong>${r.request_number}</strong></td>
-              <td>${r.residents ? `${r.residents.last_name}, ${r.residents.first_name}` : 'N/A'}</td>
-              <td>${r.certificate_type}</td>
-              <td>${r.purpose}</td>
-              <td><span class="badge badge-yellow">${r.status}</span></td>
-              <td>
-                <a href="/admin/documents/approve/${r.id}" class="btn btn-green btn-sm">Approve & Ready</a>
-                <a href="/admin/documents/reject/${r.id}" class="btn btn-danger btn-sm">Reject</a>
-              </td>
-            </tr>
-          `).join('') : '<tr><td colspan="6" style="text-align:center;">No pending certificate requests.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'documents', 'Barangay Admin'));
-});
-
-app.get('/admin/documents/approve/:id', async (req, res) => {
-  const { id } = req.params;
-  await supabase.from('certificate_requests').update({ status: 'Ready for Release' }).eq('id', id);
-  res.redirect('/admin/documents');
-});
-
-app.get('/admin/documents/reject/:id', async (req, res) => {
-  const { id } = req.params;
-  await supabase.from('certificate_requests').update({ status: 'Rejected' }).eq('id', id);
-  res.redirect('/admin/documents');
-});
-
-// Blotter Management
-app.get('/admin/blotter', async (req, res) => {
-  const { data: blotters } = await supabase.from('blotter_records').select('*').order('created_at', { ascending: false });
-
-  res.send(renderHTML('Blotter & Incident Records', `
-    <div class="card">
-      <div class="card-header">
-        <h2>Barangay Blotter Records</h2>
-      </div>
-      <form action="/admin/blotter/add" method="POST" style="margin-bottom:2rem; background:var(--card-bg); padding:1rem; border-radius:8px;">
-        <h3 style="margin-bottom:0.75rem; font-size:1.0rem; color:var(--dark-blue);">File New Blotter Incident</h3>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Case Number</label>
-            <input type="text" name="case_number" required placeholder="BLTR-2026-001">
-          </div>
-          <div class="form-group">
-            <label>Complainant</label>
-            <input type="text" name="complainant" required>
-          </div>
-          <div class="form-group">
-            <label>Respondent</label>
-            <input type="text" name="respondent" required>
-          </div>
-        </div>
-        <div class="form-row" style="margin-top:1rem;">
-          <div class="form-group">
-            <label>Incident Date</label>
-            <input type="date" name="incident_date" required>
-          </div>
-          <div class="form-group">
-            <label>Incident Time</label>
-            <input type="time" name="incident_time" required>
-          </div>
-          <div class="form-group">
-            <label>Location</label>
-            <input type="text" name="location" required>
-          </div>
-        </div>
-        <div class="form-group" style="margin-top:1rem;">
-          <label>Incident Description</label>
-          <textarea name="description" required rows="2"></textarea>
-        </div>
-        <button type="submit" class="btn btn-green" style="margin-top:1rem; width:fit-content;">Save Blotter Record</button>
-      </form>
-      <table>
-        <thead>
-          <tr><th>Case No.</th><th>Complainant vs Respondent</th><th>Date & Time</th><th>Location</th><th>Status</th></tr>
-        </thead>
-        <tbody>
-          ${blotters && blotters.length > 0 ? blotters.map(b => `
-            <tr>
-              <td><strong>${b.case_number}</strong></td>
-              <td>${b.complainant} vs${b.respondent}</td>
-              <td>${b.incident_date}${b.incident_time}</td>
-              <td>${b.location}</td>
-              <td><span class="badge badge-blue">${b.settlement_status || 'Pending'}</span></td>
-            </tr>
-          `).join('') : '<tr><td colspan="5" style="text-align:center;">No blotter records found.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'blotter', 'Barangay Admin'));
-});
-
-app.post('/admin/blotter/add', async (req, res) => {
-  const { case_number, complainant, respondent, incident_date, incident_time, location, description } = req.body;
-  await supabase.from('blotter_records').insert([{ case_number, complainant, respondent, incident_date, incident_time, location, description }]);
-  res.redirect('/admin/blotter');
-});
-
-// Senior Citizens, PWD, and Solo Parents Modules
-app.get('/admin/seniors', async (req, res) => {
-  const { data: seniors } = await supabase.from('residents').select('*').eq('is_senior', true).eq('resident_status', 'ACTIVE');
-  res.send(renderHTML('Senior Citizens Management', `
-    <div class="card">
-      <div class="card-header"><h2>Senior Citizen Registry</h2></div>
-      <table>
-        <thead><tr><th>ID No.</th><th>Name</th><th>Age / DOB</th><th>Contact</th></tr></thead>
-        <tbody>
-          ${seniors && seniors.length > 0 ? seniors.map(s => `
-            <tr>
-              <td><strong>${s.resident_id_no}</strong></td>
-              <td>${s.last_name},${s.first_name}</td>
-              <td>${s.date_of_birth}</td>
-              <td>${s.contact_number || 'N/A'}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="4" style="text-align:center;">No senior citizens registered.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'seniors', 'Barangay Admin'));
-});
-
-app.get('/admin/pwd', async (req, res) => {
-  const { data: pwds } = await supabase.from('residents').select('*').eq('is_pwd', true).eq('resident_status', 'ACTIVE');
-  res.send(renderHTML('PWD Management', `
-    <div class="card">
-      <div class="card-header"><h2>Persons with Disabilities (PWD) Registry</h2></div>
-      <table>
-        <thead><tr><th>ID No.</th><th>Name</th><th>Disability Details</th><th>Contact</th></tr></thead>
-        <tbody>
-          ${pwds && pwds.length > 0 ? pwds.map(p => `
-            <tr>
-              <td><strong>${p.resident_id_no}</strong></td>
-              <td>${p.last_name},${p.first_name}</td>
-              <td>${p.pwd_details || 'N/A'}</td>
-              <td>${p.contact_number || 'N/A'}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="4" style="text-align:center;">No PWD records found.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'pwd', 'Barangay Admin'));
-});
-
-app.get('/admin/solo-parents', async (req, res) => {
-  const { data: solos } = await supabase.from('residents').select('*').eq('is_solo_parent', true).eq('resident_status', 'ACTIVE');
-  res.send(renderHTML('Solo Parent Management', `
-    <div class="card">
-      <div class="card-header"><h2>Solo Parent Registry</h2></div>
-      <table>
-        <thead><tr><th>ID No.</th><th>Name</th><th>Details</th><th>Contact</th></tr></thead>
-        <tbody>
-          ${solos && solos.length > 0 ? solos.map(s => `
-            <tr>
-              <td><strong>${s.resident_id_no}</strong></td>
-              <td>${s.last_name},${s.first_name}</td>
-              <td>${s.solo_parent_details || 'N/A'}</td>
-              <td>${s.contact_number || 'N/A'}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="4" style="text-align:center;">No solo parent records found.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'solo-parents', 'Barangay Admin'));
-});
-
-// User Management
-app.get('/admin/users', async (req, res) => {
-  const { data: users } = await supabase.from('system_users').select('*');
-  res.send(renderHTML('System User Management', `
-    <div class="card">
-      <div class="card-header"><h2>Admin & Staff Accounts</h2></div>
-      <table>
-        <thead><tr><th>Full Name</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th></tr></thead>
-        <tbody>
-          ${users && users.length > 0 ? users.map(u => `
-            <tr>
-              <td><strong>${u.full_name}</strong></td>
-              <td>${u.username}</td>
-              <td>${u.email}</td>
-              <td><span class="badge badge-blue">${u.role}</span></td>
-              <td><span class="badge badge-green">${u.status}</span></td>
-            </tr>
-          `).join('') : '<tr><td colspan="5" style="text-align:center;">No users found.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'users', 'Barangay Admin'));
-});
-
-// Barangay Officials Management
-app.get('/admin/officials', async (req, res) => {
-  const { data: officials } = await supabase.from('barangay_officials').select('*');
-  res.send(renderHTML('Barangay Officials', `
-    <div class="card">
-      <div class="card-header"><h2>Barangay Officials Directory</h2></div>
-      <form action="/admin/officials/add" method="POST" style="margin-bottom:2rem; background:var(--card-bg); padding:1rem; border-radius:8px;">
-        <h3 style="margin-bottom:0.75rem; font-size:1.0rem; color:var(--dark-blue);">Add Official</h3>
-        <div class="form-row">
-          <div class="form-group"><label>Full Name</label><input type="text" name="name" required></div>
-          <div class="form-group"><label>Position</label><input type="text" name="position" required placeholder="Punong Barangay / Kagawad"></div>
-        </div>
-        <button type="submit" class="btn btn-green" style="margin-top:1rem; width:fit-content;">Save Official</button>
-      </form>
-      <table>
-        <thead><tr><th>Name</th><th>Position</th><th>Committee</th><th>Contact</th></tr></thead>
-        <tbody>
-          ${officials && officials.length > 0 ? officials.map(o => `
-            <tr>
-              <td><strong>${o.name}</strong></td>
-              <td>${o.position}</td>
-              <td>${o.committee || 'N/A'}</td>
-              <td>${o.contact_number || 'N/A'}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="4" style="text-align:center;">No officials listed.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'officials', 'Barangay Admin'));
-});
-
-app.post('/admin/officials/add', async (req, res) => {
-  const { name, position } = req.body;
-  await supabase.from('barangay_officials').insert([{ name, position }]);
-  res.redirect('/admin/officials');
-});
-
-// Announcements & Events
-app.get('/admin/announcements', async (req, res) => {
-  const { data: announcements } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
-  res.send(renderHTML('Announcements', `
-    <div class="card">
-      <div class="card-header"><h2>Barangay Announcements</h2></div>
-      <form action="/admin/announcements/add" method="POST" style="margin-bottom:2rem; background:var(--card-bg); padding:1rem; border-radius:8px;">
-        <div class="form-group"><label>Title</label><input type="text" name="title" required></div>
-        <div class="form-group"><label>Content</label><textarea name="content" required rows="3"></textarea></div>
-        <button type="submit" class="btn btn-green" style="margin-top:1rem; width:fit-content;">Publish Announcement</button>
-      </form>
-      <table>
-        <thead><tr><th>Title</th><th>Priority</th><th>Date</th></tr></thead>
-        <tbody>
-          ${announcements && announcements.length > 0 ? announcements.map(a => `
-            <tr>
-              <td><strong>${a.title}</strong></td>
-              <td><span class="badge badge-blue">${a.priority}</span></td>
-              <td>${new Date(a.created_at).toLocaleDateString()}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="3" style="text-align:center;">No announcements.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'announcements', 'Barangay Admin'));
-});
-
-app.post('/admin/announcements/add', async (req, res) => {
-  const { title, content } = req.body;
-  await supabase.from('announcements').insert([{ title, content }]);
-  res.redirect('/admin/announcements');
-});
-
-app.get('/admin/events', async (req, res) => {
-  const { data: events } = await supabase.from('events').select('*').order('created_at', { ascending: false });
-  res.send(renderHTML('Events Management', `
-    <div class="card">
-      <div class="card-header"><h2>Barangay Community Events</h2></div>
-      <form action="/admin/events/add" method="POST" style="margin-bottom:2rem; background:var(--card-bg); padding:1rem; border-radius:8px;">
-        <div class="form-row">
-          <div class="form-group"><label>Event Name</label><input type="text" name="event_name" required></div>
-          <div class="form-group"><label>Location</label><input type="text" name="location" required></div>
-        </div>
-        <div class="form-row" style="margin-top:1rem;">
-          <div class="form-group"><label>Date</label><input type="date" name="event_date" required></div>
-          <div class="form-group"><label>Time</label><input type="time" name="event_time" required></div>
-        </div>
-        <div class="form-group" style="margin-top:1rem;"><label>Description</label><textarea name="description" required rows="2"></textarea></div>
-        <button type="submit" class="btn btn-green" style="margin-top:1rem; width:fit-content;">Create Event</button>
-      </form>
-      <table>
-        <thead><tr><th>Event Name</th><th>Date & Time</th><th>Location</th></tr></thead>
-        <tbody>
-          ${events && events.length > 0 ? events.map(e => `
-            <tr>
-              <td><strong>${e.event_name}</strong></td>
-              <td>${e.event_date}${e.event_time}</td>
-              <td>${e.location}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="3" style="text-align:center;">No events scheduled.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'events', 'Barangay Admin'));
-});
-
-app.post('/admin/events/add', async (req, res) => {
-  const { event_name, description, event_date, event_time, location } = req.body;
-  await supabase.from('events').insert([{ event_name, description, event_date, event_time, location }]);
-  res.redirect('/admin/events');
-});
-
-// Reports Module
-app.get('/admin/reports', async (req, res) => {
-  const { count: totalRes } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('resident_status', 'ACTIVE');
-  const { count: totalHH } = await supabase.from('households').select('*', { count: 'exact', head: true });
-  const { count: totalSeniors } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('is_senior', true);
-
-  res.send(renderHTML('Reports & Analytics', `
-    <div class="card">
-      <div class="card-header"><h2>Barangay Population & Demographic Reports</h2></div>
-      <div class="grid-stats">
-        <div class="stat-card"><h3>Total Active Population</h3><div class="value">${totalRes || 0}</div></div>
-        <div class="stat-card green"><h3>Registered Households</h3><div class="value">${totalHH || 0}</div></div>
-        <div class="stat-card"><h3>Senior Citizens Count</h3><div class="value">${totalSeniors || 0}</div></div>
-      </div>
-      <div style="display:flex; gap:1rem; margin-top:1.5rem;">
-        <button onclick="window.print()" class="btn">Print Report</button>
-      </div>
-    </div>
-  `, true, 'reports', 'Barangay Admin'));
-});
-
-// Activity Logs
-app.get('/admin/activity-logs', async (req, res) => {
-  const { data: logs } = await supabase.from('user_activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
-  res.send(renderHTML('Activity Logs', `
-    <div class="card">
-      <div class="card-header"><h2>System Activity Audit Trail</h2></div>
-      <table>
-        <thead><tr><th>User / Identifier</th><th>Action Performed</th><th>Timestamp</th></tr></thead>
-        <tbody>
-          ${logs && logs.length > 0 ? logs.map(l => `
-            <tr>
-              <td>${l.user_identifier}</td>
-              <td>${l.action}</td>
-              <td>${new Date(l.created_at).toLocaleString()}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="3" style="text-align:center;">No activity logs found.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'activity-logs', 'Barangay Admin'));
-});
-
-// QR Scanner & Verification Page
-app.get('/admin/scanner', (req, res) => {
-  res.send(renderHTML('QR Code Scanner & Verification', `
-    <div class="card" style="max-width: 600px; margin: 0 auto; text-align:center;">
-      <div class="card-header"><h2>Staff QR Verification & Claim Scanner</h2></div>
-      <p style="margin-bottom: 1.5rem; color:var(--text-muted);">Scan resident ID QR code or enter secure verification token manually to verify identity and release requested documents.</p>
-      <form action="/admin/scanner/verify" method="POST">
-        <div class="form-group">
-          <label>Enter QR Token / Resident ID No.</label>
-          <input type="text" name="token" required placeholder="BRGY-2026-XXXXXX or Token">
-        </div>
-        <button type="submit" class="btn btn-green" style="margin-top:1rem; width:100%;">Verify Resident & Document Status</button>
-      </form>
-    </div>
-  `, true, 'scanner', 'Barangay Admin'));
-});
-
-app.post('/admin/scanner/verify', async (req, res) => {
-  const { token } = req.body;
-  const { data: resident, error } = await supabase.from('residents').select('*, puroks(name), households(household_number)').or(`resident_id_no.eq.${token},qr_token.eq.${token}`).single();
-
-  if (error || !resident) {
-    return res.send(renderHTML('Verification Failed', `<div class="card" style="max-width: 600px; margin:0 auto; text-align:center;"><div class="alert alert-error">❌ INVALID QR CODE OR RESIDENT NOT FOUND</div><a href="/admin/scanner" class="btn">Scan Another</a></div>`, true, 'scanner', 'Barangay Admin'));
-  }
-
-  const { data: requests } = await supabase.from('certificate_requests').select('*').eq('resident_id', resident.id).eq('status', 'Ready for Release');
-
-  res.send(renderHTML('Verification Successful', `
-    <div class="card" style="max-width: 700px; margin:0 auto;">
-      <div class="alert alert-success">✓ VERIFIED RESIDENT IDENTIFICATION</div>
-      <div style="display:flex; gap:1.5rem; align-items:center;">
-        <img src="${resident.resident_photo}" style="width:120px; height:130px; border-radius:8px; object-fit:cover; border:2px solid var(--primary-blue);">
-        <div>
-          <h3>${resident.last_name}, ${resident.first_name} ${resident.middle_name || ''}</h3>
-          <p><strong>Resident ID:</strong> ${resident.resident_id_no}</p>
-          <p><strong>Purok:</strong> ${resident.puroks ? resident.puroks.name : 'N/A'}</p>
-          <p><strong>Contact:</strong> ${resident.contact_number || 'N/A'}</p>
-          <p><strong>Status:</strong> <span class="badge badge-green">${resident.resident_status}</span></p>
-        </div>
-      </div>
-      <h3 style="margin-top:1.5rem; margin-bottom:0.75rem; color:var(--dark-blue);">Ready for Release Documents</h3>
-      <table>
-        <thead><tr><th>Request No.</th><th>Type</th><th>Purpose</th><th>Action</th></tr></thead>
-        <tbody>
-          ${requests && requests.length > 0 ? requests.map(req => `
-            <tr>
-              <td><strong>${req.request_number}</strong></td>
-              <td>${req.certificate_type}</td>
-              <td>${req.purpose}</td>
-              <td><a href="/admin/scanner/release/${req.id}" class="btn btn-green btn-sm">Mark Released</a></td>
-            </tr>
-          `).join('') : '<tr><td colspan="4" style="text-align:center;">No documents ready for release for this resident.</td></tr>'}
-        </tbody>
-      </table>
-      <div style="margin-top: 1.5rem;"><a href="/admin/scanner" class="btn">Scan Another Resident</a></div>
-    </div>
-  `, true, 'scanner', 'Barangay Admin'));
-});
-
-app.get('/admin/scanner/release/:id', async (req, res) => {
-  const { id } = req.params;
-  await supabase.from('certificate_requests').update({ status: 'Released' }).eq('id', id);
-  res.redirect('/admin/scanner');
-});
-
-// Bulk 8 IDs per Bond Paper Printing
-app.get('/admin/id-printing', async (req, res) => {
-  const { data: residents } = await supabase.from('residents').select('*, puroks(name)').eq('resident_status', 'ACTIVE').limit(8);
-
-  res.send(renderHTML('Bulk ID Printing (8-in-1 Grid)', `
-    <div class="card">
-      <div class="card-header">
-        <h2>Bulk ID Printing Sheet (8 IDs per Standard Bond Paper)</h2>
-        <button onclick="window.print()" class="btn btn-green">Print 8 IDs Sheet</button>
-      </div>
-      <p style="margin-bottom:1.5rem; color:var(--text-muted);">The grid below automatically formats active approved residents into a standard letter/bond paper grid layout for physical printing.</p>
-      <div class="printable-grid id-card-print-container">
-        ${residents && residents.length > 0 ? residents.map(r => `
-          <div class="barangay-id-card">
-            <div class="id-header">
-              <img src="https://via.placeholder.com/35" alt="Logo">
-              <div>
-                <h4>BARANGAY RESIDENT CARD</h4>
-                <p>Brgy. San Jose, Municipality</p>
-              </div>
-            </div>
-            <div class="id-body">
-              <img src="${r.resident_photo}" class="id-photo">
-              <div class="id-details">
-                <strong>${r.last_name},${r.first_name}</strong>
-                <span>ID: ${r.resident_id_no}</span>
-                <span>DOB: ${r.date_of_birth}</span>
-                <span>Purok: ${r.puroks ? r.puroks.name : 'N/A'}</span>
-                <span>Contact: ${r.contact_number || 'N/A'}</span>
-              </div>
-            </div>
-            <div class="id-footer">
-              <div class="id-signature">
-                <span style="font-size:0.55rem;">Hon. Brgy Captain</span>
-                <div style="border-bottom:1px solid #000; width:60px; margin:2px auto;"></div>
-              </div>
-              <div style="font-size:0.5rem; text-align:right;">Official Resident ID</div>
-            </div>
-          </div>
-        `).join('') : '<p>No active residents available for ID printing.</p>'}
-      </div>
-    </div>
-  `, true, 'id-printing', 'Barangay Admin'));
-});
-
-// Backup & Restore
-app.get('/admin/backup', async (req, res) => {
-  const { data: backups } = await supabase.from('backup_metadata').select('*').order('created_at', { ascending: false });
-  res.send(renderHTML('Backup & Restore', `
-    <div class="card">
-      <div class="card-header"><h2>Database Backup & Restore Management</h2></div>
-      <form action="/admin/backup/create" method="POST" style="margin-bottom:2rem;">
-        <button type="submit" class="btn btn-green">Create New Supabase Database Backup</button>
-      </form>
-      <table>
-        <thead><tr><th>Backup Name</th><th>File Size</th><th>Created At</th></tr></thead>
-        <tbody>
-          ${backups && backups.length > 0 ? backups.map(b => `
-            <tr>
-              <td><strong>${b.backup_name}</strong></td>
-              <td>${b.file_size || '1.2 MB'}</td>
-              <td>${new Date(b.created_at).toLocaleString()}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="3" style="text-align:center;">No backups recorded.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'backup', 'Barangay Admin'));
-});
-
-app.post('/admin/backup/create', async (req, res) => {
-  await supabase.from('backup_metadata').insert([{ backup_name: `Backup-${new Date().toISOString().slice(0,10)}`, file_size: '1.4 MB', created_by: 'Admin' }]);
-  res.redirect('/admin/backup');
-});
-
-// System Settings
-app.get('/admin/settings', async (req, res) => {
-  const { data: settings } = await supabase.from('barangay_settings').select('*').single();
-  res.send(renderHTML('System Settings', `
-    <div class="card" style="max-width: 800px; margin: 0 auto;">
-      <div class="card-header"><h2>Barangay & System Configuration</h2></div>
-      <form action="/admin/settings/update" method="POST">
-        <div class="form-row">
-          <div class="form-group"><label>Barangay Name</label><input type="text" name="barangay_name" value="${settings ? settings.barangay_name : ''}"></div>
-          <div class="form-group"><label>Municipality / City</label><input type="text" name="municipality" value="${settings ? settings.municipality : ''}"></div>
-        </div>
-        <div class="form-row" style="margin-top:1rem;">
-          <div class="form-group"><label>Province</label><input type="text" name="province" value="${settings ? settings.province : ''}"></div>
-          <div class="form-group"><label>Barangay Captain</label><input type="text" name="barangay_captain" value="${settings ? settings.barangay_captain : ''}"></div>
-        </div>
-        <div class="form-group" style="margin-top:1rem;"><label>Barangay Address</label><input type="text" name="barangay_address" value="${settings ? settings.barangay_address : ''}"></div>
-        <button type="submit" class="btn btn-green" style="margin-top:1.5rem; width:fit-content;">Save Settings</button>
-      </form>
-    </div>
-  `, true, 'settings', 'Barangay Admin'));
-});
-
-app.post('/admin/settings/update', async (req, res) => {
-  const { barangay_name, municipality, province, barangay_captain, barangay_address } = req.body;
-  const { data: existing } = await supabase.from('barangay_settings').select('id').single();
-  if (existing) {
-    await supabase.from('barangay_settings').update({ barangay_name, municipality, province, barangay_captain, barangay_address }).eq('id', existing.id);
-  } else {
-    await supabase.from('barangay_settings').insert([{ barangay_name, municipality, province, barangay_captain, barangay_address }]);
-  }
-  res.redirect('/admin/settings');
-});
-
-
-// ==========================================
-// RESIDENT PORTAL ROUTES
-// ==========================================
-
-app.get('/resident/dashboard', async (req, res) => {
-  const rid = req.query.rid;
-  if (!rid) return res.redirect('/login');
-  const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', rid).single();
-  if (!resident) return res.redirect('/login');
-
-  const { data: requests } = await supabase.from('certificate_requests').select('*').eq('resident_id', rid);
-
-  res.send(renderHTML('Resident Dashboard', `
-    <div class="card-header" style="border:none; margin-bottom:1rem;">
-      <h2>Welcome, ${resident.first_name} ${resident.last_name}</h2>
-    </div>
-    <div class="grid-stats">
-      <div class="stat-card"><h3>Resident ID No.</h3><div class="value" style="font-size:1.4rem;">${resident.resident_id_no}</div></div>
-      <div class="stat-card green"><h3>Purok</h3><div class="value" style="font-size:1.4rem;">${resident.puroks ? resident.puroks.name : 'N/A'}</div></div>
-      <div class="stat-card"><h3>Total Requests</h3><div class="value">${requests ? requests.length : 0}</div></div>
-      <div class="stat-card green"><h3>Status</h3><div class="value" style="font-size:1.4rem;"><span class="badge badge-green">${resident.resident_status}</span></div></div>
-    </div>
-  `, true, 'dashboard', 'Resident'));
-});
-
-app.get('/resident/profile', async (req, res) => {
-  const rid = req.query.rid;
-  res.send(renderHTML('My Profile', `<div class="card"><h2>Resident Official Profile</h2><p>View your official barangay resident record.</p></div>`, true, 'profile', 'Resident'));
-});
-
-app.get('/resident/edit-request', async (req, res) => {
-  res.send(renderHTML('Edit Profile Request', `<div class="card"><h2>Submit Profile Correction Request</h2><form><div class="form-group"><label>Requested Corrections</label><textarea rows="3"></textarea></div><button class="btn btn-green">Submit Request</button></form></div>`, true, 'edit-request', 'Resident'));
-});
-
-app.get('/resident/certificates', async (req, res) => {
-  res.send(renderHTML('Certificate Request', `<div class="card"><h2>Request Barangay Certificate</h2><form><div class="form-group"><label>Certificate Type</label><select><option>Certificate of Residency</option><option>Barangay Clearance</option><option>Certificate of Indigency</option></select></div><div class="form-group"><label>Purpose</label><input type="text" required></div><button class="btn btn-green">Submit Certificate Request</button></form></div>`, true, 'certificates', 'Resident'));
-});
-
-app.get('/resident/tracking', async (req, res) => {
-  res.send(renderHTML('Request Tracking', `<div class="card"><h2>Track Certificate Requests</h2><table><thead><tr><th>Type</th><th>Status</th><th>Date</th></tr></thead><tbody><tr><td colspan="3" style="text-align:center;">No active requests</td></tr></tbody></table></div>`, true, 'tracking', 'Resident'));
-});
-
-app.get('/resident/appointments', async (req, res) => {
-  res.send(renderHTML('Appointment Booking', `<div class="card"><h2>Book Official Appointment</h2><p>Schedule your visit to the Barangay Hall.</p></div>`, true, 'appointments', 'Resident'));
-});
-
-app.get('/resident/documents', async (req, res) => {
-  res.send(renderHTML('My Documents', `<div class="card"><h2>My Issued Documents</h2><p>Download official released documents.</p></div>`, true, 'documents', 'Resident'));
-});
-
-app.get('/resident/complaints', async (req, res) => {
-  res.send(renderHTML('Complaints & Reports', `<div class="card"><h2>Submit Community Complaint</h2><form><div class="form-group"><label>Subject</label><input type="text" required></div><div class="form-group"><label>Description</label><textarea rows="3" required></textarea></div><button class="btn btn-green">File Complaint</button></form></div>`, true, 'complaints', 'Resident'));
-});
-
-app.get('/resident/assistance', async (req, res) => {
-  res.send(renderHTML('Assistance Request', `<div class="card"><h2>Request Barangay Assistance</h2><p>Financial, Medical, or Food Assistance application.</p></div>`, true, 'assistance', 'Resident'));
-});
-
-app.get('/resident/announcements', async (req, res) => {
-  res.send(renderHTML('Announcements', `<div class="card"><h2>Barangay Announcements & News</h2><p>Stay updated with the latest community bulletins.</p></div>`, true, 'announcements', 'Resident'));
-});
-
-app.get('/resident/notifications', async (req, res) => {
-  res.send(renderHTML('Notifications', `<div class="card"><h2>Notifications</h2><p>No new notifications.</p></div>`, true, 'notifications', 'Resident'));
-});
-
-app.get('/resident/feedback', async (req, res) => {
-  res.send(renderHTML('Feedback', `<div class="card"><h2>Service Feedback</h2><form><div class="form-group"><label>Rating (1-5)</label><input type="number" min="1" max="5" value="5"></div><div class="form-group"><label>Comments</label><textarea rows="2"></textarea></div><button class="btn btn-green">Submit Feedback</button></form></div>`, true, 'feedback', 'Resident'));
-});
-
-app.get('/resident/emergency', async (req, res) => {
-  const { data: contacts } = await supabase.from('emergency_contacts').select('*');
-  res.send(renderHTML('Emergency Contacts', `
-    <div class="card">
-      <div class="card-header"><h2>Emergency Hotlines & Contacts</h2></div>
-      <table>
-        <thead><tr><th>Name</th><th>Category</th><th>Hotline Number</th><th>Address</th></tr></thead>
-        <tbody>
-          ${contacts && contacts.length > 0 ? contacts.map(c => `
-            <tr>
-              <td><strong>${c.name}</strong></td>
-              <td>${c.category}</td>
-              <td><span class="badge badge-green">${c.hotline_number}</span></td>
-              <td>${c.address || 'N/A'}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="4" style="text-align:center;">No emergency contacts listed.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `, true, 'emergency', 'Resident'));
-});
-
-app.get('/resident/digital-id', async (req, res) => {
-  const rid = req.query.rid;
-  const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', rid).single();
-
-  res.send(renderHTML('My Digital ID', `
-    <div class="card" style="text-align:center;">
-      <div class="card-header"><h2>My Digital Barangay Resident ID</h2></div>
-      <p style="margin-bottom:1.5rem; color:var(--text-muted);">This digital ID is synchronized with your official barangay resident record.</p>
-      <div style="display:flex; justify-content:center;">
-        <div class="barangay-id-card" style="margin: 0 auto;">
-          <div class="id-header">
-            <img src="https://via.placeholder.com/35" alt="Logo">
-            <div>
-              <h4>BARANGAY RESIDENT CARD</h4>
-              <p>Brgy. San Jose, Municipality</p>
-            </div>
-          </div>
-          <div class="id-body">
-            <img src="${resident ? resident.resident_photo : 'https://via.placeholder.com/150'}" class="id-photo">
-            <div class="id-details">
-              <strong>${resident ? resident.last_name + ', ' + resident.first_name : 'Sample Resident'}</strong>
-              <span>ID: ${resident ? resident.resident_id_no : 'BRGY-2026-000000'}</span>
-              <span>DOB: ${resident ? resident.date_of_birth : '2000-01-01'}</span>
-              <span>Purok: ${resident && resident.puroks ? resident.puroks.name : 'N/A'}</span>
-            </div>
-          </div>
-          <div class="id-footer">
-            <div class="id-signature">
-              <span style="font-size:0.55rem;">Hon. Brgy Captain</span>
-              <div style="border-bottom:1px solid #000; width:60px; margin:2px auto;"></div>
-            </div>
-            <div style="font-size:0.5rem; text-align:right;">Official Digital ID</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `, true, 'digital-id', 'Resident'));
-});
-
-app.get('/resident/security', async (req, res) => {
-  res.send(renderHTML('Account Security', `<div class="card"><h2>Account Security & Password</h2><form><div class="form-group"><label>Current Password</label><input type="password" required></div><div class="form-group"><label>New Password</label><input type="password" required></div><button class="btn btn-green">Update Password</button></form></div>`, true, 'security', 'Resident'));
-});
-
-
-// Server Listener
+/* ==========================================================================
+   START SERVER
+   ========================================================================== */
 app.listen(PORT, () => {
-  console.log(`Barangay Resident Management System running on port ${PORT}`);
+    console.log(`====================================================`);
+    console.log(`BARANGAY MANAGEMENT SYSTEM SERVER RUNNING ON PORT ${PORT}`);
+    console.log(`Theme: Blue (#2563eb), Green (#059669), White (#ffffff)`);
+    console.log(`====================================================`);
 });
