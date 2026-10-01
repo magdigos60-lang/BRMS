@@ -166,36 +166,75 @@ const renderSystemHead = (title) => `
     .stat-card.green {
       border-left: 5px solid var(--accent-green);
     }
-    /* Barangay ID Printed Layout (CR80 standard ratio) */
+
+    /* Standardized CR80 ID Card Frame (3.375in x 2.125in) */
     .id-card-frame {
       width: 3.375in;
       height: 2.125in;
-      border-radius: 8px;
+      border-radius: 10px;
       border: 2px solid #0d6efd;
       background: #ffffff;
       position: relative;
       overflow: hidden;
       font-size: 8pt;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.12);
       display: inline-block;
-      margin: 5px;
+      margin: 6px;
+      box-sizing: border-box;
     }
     .id-card-header {
-      background: linear-gradient(90deg, #0a4b9c, #198754);
+      background: linear-gradient(90deg, #0a4b9c 0%, #198754 100%);
       color: white;
-      padding: 4px;
-      text-align: center;
+      padding: 4px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 0.42in;
+    }
+    .id-header-logo {
+      width: 0.32in;
+      height: 0.32in;
+      object-fit: cover;
+      border-radius: 50%;
+      border: 1px solid white;
+    }
+    .id-card-body {
+      padding: 6px;
+      display: flex;
+      gap: 8px;
+      height: calc(2.125in - 0.72in);
     }
     .id-photo {
-      width: 0.85in;
-      height: 0.85in;
+      width: 1.05in;
+      height: 1.05in;
       object-fit: cover;
-      border: 1px solid #0d6efd;
-      border-radius: 4px;
+      border: 2px solid #0d6efd;
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+    .id-details {
+      flex-grow: 1;
+      font-size: 7.2pt;
+      line-height: 1.2;
+      overflow: hidden;
     }
     .id-qr {
-      width: 0.65in;
-      height: 0.65in;
+      width: 1.05in;
+      height: 1.05in;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+    .id-card-footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 0.30in;
+      padding: 0 8px 3px 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      background: #ffffff;
     }
     .print-sheet-8 {
       display: grid;
@@ -204,6 +243,7 @@ const renderSystemHead = (title) => `
       width: 8.5in;
       margin: auto;
     }
+
     @media print {
       .no-print { display: none !important; }
       body { background: white !important; }
@@ -451,7 +491,7 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: LOGIN & REGISTER PAGES
+// ROUTE 2: REDESIGNED & ENHANCED LOGIN PAGE
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
@@ -460,40 +500,91 @@ app.get('/login', async (req, res) => {
   res.send(`
     ${renderSystemHead('Login')}
     <style>
-      .login-bg {
-        background: linear-gradient(rgba(10, 75, 156, 0.75), rgba(25, 135, 84, 0.75)), url('${bgImg}');
+      .login-wrapper {
+        min-height: 100vh;
+        background: linear-gradient(135deg, rgba(10, 75, 156, 0.82), rgba(25, 135, 84, 0.82)), url('${bgImg}');
         background-size: cover;
         background-position: center;
-        min-height: 100vh;
+        background-attachment: fixed;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .glass-login-card {
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        border-radius: 18px;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25);
+        max-width: 440px;
+        width: 100%;
+        padding: 40px 32px;
+        transition: transform 0.3s ease;
+      }
+      .glass-login-card:hover {
+        transform: translateY(-3px);
+      }
+      .brand-logo-img {
+        width: 90px;
+        height: 90px;
+        object-fit: cover;
+        border-radius: 50%;
+        border: 3px solid #0d6efd;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+      }
+      .form-control-lg {
+        font-size: 0.98rem;
+        padding: 12px 16px;
+        border-radius: 10px;
+      }
+      .input-group-text {
+        border-top-left-radius: 10px;
+        border-bottom-left-radius: 10px;
+      }
+      .btn-glow {
+        border-radius: 10px;
+        padding: 12px;
+        font-size: 1.05rem;
+        letter-spacing: 0.5px;
+        box-shadow: 0 4px 14px rgba(13, 110, 253, 0.35);
+        transition: all 0.25s ease;
+      }
+      .btn-glow:hover {
+        box-shadow: 0 6px 20px rgba(13, 110, 253, 0.5);
       }
     </style>
-    <div class="login-bg d-flex justify-content-center align-items-center min-vh-100 p-3">
-      <div class="card card-custom p-4 shadow-lg" style="max-width: 420px; width: 100%;">
+    <div class="login-wrapper">
+      <div class="glass-login-card">
         <div class="text-center mb-4">
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="mb-2 rounded-circle" style="width: 80px; height: 80px; object-fit: cover;">` : '<i class="bi bi-building text-primary-blue fs-1"></i>'}
-          <h4 class="fw-bold text-primary-blue">${settings.barangay_name || 'BARANGAY MANAGEMENT'}</h4>
-          <span class="badge bg-accent-green px-3 py-1">Official Portal</span>
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-primary-blue display-3 mb-2"></i>'}
+          <h3 class="fw-bold text-dark m-0">${settings.barangay_name || 'BARANGAY MANAGEMENT'}</h3>
+          <p class="text-muted small mt-1">Official Resident & Executive Portal</p>
+          <span class="badge bg-accent-green px-3 py-1 rounded-pill mt-1"><i class="bi bi-shield-check me-1"></i> Official System</span>
         </div>
+
         <form action="/api/login" method="POST">
           <div class="mb-3">
-            <label class="form-label fw-semibold">Username or Email</label>
+            <label class="form-label fw-semibold text-secondary small">USERNAME OR EMAIL</label>
             <div class="input-group">
-              <span class="input-group-text bg-light"><i class="bi bi-person"></i></span>
-              <input type="text" name="identifier" class="form-control" required placeholder="Enter username or email">
+              <span class="input-group-text bg-light border-end-0"><i class="bi bi-person-fill text-primary-blue fs-5"></i></span>
+              <input type="text" name="identifier" class="form-control form-control-lg border-start-0 bg-light" required placeholder="Enter username or email">
             </div>
           </div>
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Password</label>
+          <div class="mb-4">
+            <label class="form-label fw-semibold text-secondary small">PASSWORD</label>
             <div class="input-group">
-              <span class="input-group-text bg-light"><i class="bi bi-lock"></i></span>
-              <input type="password" name="password" class="form-control" required placeholder="Enter password">
+              <span class="input-group-text bg-light border-end-0"><i class="bi bi-lock-fill text-primary-blue fs-5"></i></span>
+              <input type="password" name="password" class="form-control form-control-lg border-start-0 bg-light" required placeholder="Enter your password">
             </div>
           </div>
-          <button type="submit" class="btn btn-primary-custom w-100 py-2 fw-bold mt-2">Sign In</button>
+          <button type="submit" class="btn btn-primary-custom btn-glow w-100 fw-bold"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
         </form>
+
         <div class="text-center mt-4 border-top pt-3">
-          <p class="small text-muted mb-1">Are you a resident without an account?</p>
-          <a href="/register" class="text-accent-green fw-bold text-decoration-none"><i class="bi bi-person-plus me-1"></i> Register as Resident</a>
+          <p class="small text-muted mb-1">Don't have an account yet?</p>
+          <a href="/register" class="text-accent-green fw-bold text-decoration-none"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
         </div>
       </div>
     </div>
@@ -642,7 +733,6 @@ app.get('/register', async (req, res) => {
   `);
 });
 
-// FIX: Explicit field extraction, default string fallbacks, and validation
 app.post('/api/register', async (req, res) => {
   try {
     const first_name = (req.body.first_name || '').trim();
@@ -1299,51 +1389,60 @@ app.get('/api/admin/certificate/update/:id', authenticateToken, requireRole(['Su
 });
 
 // ==========================================
-// ROUTE 8: BARANGAY ID GENERATION & BULK PRINTING (8 IDS PER SHEET)
+// ROUTE 8: ENHANCED BARANGAY ID GENERATION (MAXIMIZED SPACE & ENLARGED LOGO/QR)
 // ==========================================
 app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
   const { data: residents } = await supabase.from('residents').select('*, puroks(name)').eq('resident_status', 'Active');
 
+  // Pre-generate QR codes asynchronously
+  const residentCards = await Promise.all((residents || []).slice(0, 8).map(async (r) => {
+    const qrDataUrl = await QRCode.toDataURL(r.qr_token || r.id, { margin: 0, width: 250 });
+    return { ...r, qrDataUrl };
+  }));
+
   const html = `
     <div class="card card-custom p-4 no-print">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay Resident Card Generator</h4>
-        <button class="btn btn-accent-custom fw-bold" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print Selected (8-Grid Paper)</button>
+        <button class="btn btn-accent-custom fw-bold" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print Selected Grid (8 IDs)</button>
       </div>
-      <p class="text-muted">Select active residents to construct standard physical card printable sheets.</p>
+      <p class="text-muted">Generate standard CR80 physical cards with optimized print layouts, high-visibility QR codes, and enlarged seal images.</p>
     </div>
 
-    <!-- Printable 8-ID Sheet Grid -->
+    <!-- Printable 8-ID Grid Sheet -->
     <div class="mt-4">
       <div class="print-sheet-8">
-        ${(residents || []).slice(0, 8).map(r => `
+        ${residentCards.map(r => `
           <div class="id-card-frame">
-            <div class="id-card-header d-flex align-items-center justify-content-between px-2">
-              ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" style="width:20px; height:20px; object-fit:cover;">` : ''}
-              <div class="text-center" style="font-size: 6.5pt; line-height:1.1;">
-                <strong>${settings.barangay_name || 'BARANGAY CENTRAL'}</strong><br>
-                <span>BARANGAY RESIDENT CARD</span>
+            <div class="id-card-header">
+              ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
+              <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
+                <strong style="font-size: 7.5pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
+                <span style="font-size: 5.5pt; letter-spacing:0.5px;">OFFICIAL RESIDENT IDENTIFICATION</span>
               </div>
-              <small style="font-size:5pt;">OFFICIAL</small>
+              <span class="badge bg-white text-dark px-1" style="font-size: 5pt; font-weight: 800;">VERIFIED</span>
             </div>
-            <div class="p-2 d-flex gap-2">
-              <img src="${r.photo_url || 'https://via.placeholder.com/80'}" class="id-photo">
-              <div style="font-size: 6.5pt; line-height: 1.2;">
-                <div><strong class="text-primary-blue">${r.resident_number}</strong></div>
-                <div class="fw-bold text-uppercase">${r.first_name}${r.last_name}</div>
-                <div>DOB: ${r.date_of_birth} \vert{} Sex:${r.gender}</div>
-                <div>Purok: ${r.puroks ? r.puroks.name : '-'}</div>
-                <div>Status: <span class="text-success fw-bold">VERIFIED</span></div>
+
+            <div class="id-card-body">
+              <img src="${r.photo_url || 'https://via.placeholder.com/150'}" class="id-photo">
+              <div class="id-details">
+                <div class="text-primary-blue fw-bold" style="font-size: 8pt;">${r.resident_number}</div>
+                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${r.first_name}${r.last_name}</div>
+                <div class="text-muted mt-1">DOB: <strong>${r.date_of_birth}</strong></div>
+                <div class="text-muted">Sex: <strong>${r.gender}</strong> | Civil: <strong>${r.civil_status || 'Single'}</strong></div>
+                <div class="text-muted">Purok: <strong>${r.puroks ? r.puroks.name : '-'}</strong></div>
               </div>
+              <img src="${r.qrDataUrl}" class="id-qr">
             </div>
-            <div class="px-2 d-flex justify-content-between align-items-end" style="position:absolute; bottom:4px; width:100%;">
-              <div style="font-size: 4.5pt; max-width:1.8in;" class="text-muted">
-                Property of Barangay. If found, return to Barangay Hall.
+
+            <div class="id-card-footer">
+              <div style="font-size: 4.5pt; max-width:1.8in;" class="text-muted lh-1">
+                If found, please return to Barangay Hall. Property of Barangay Administration.
               </div>
-              <div class="text-center">
-                ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:15px;"><br>` : ''}
-                <span style="font-size:5pt; border-top:1px solid #000;">Barangay Captain</span>
+              <div class="text-center" style="min-width: 0.9in;">
+                ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:16px; object-fit:contain;"><br>` : ''}
+                <span style="font-size: 5pt; border-top: 1px solid #333; display: block; font-weight: 600;">Barangay Captain</span>
               </div>
             </div>
           </div>
@@ -2175,7 +2274,7 @@ app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Ad
 });
 
 // ==========================================
-// ROUTE 22: RESIDENT PORTAL (MODULES 12 - 15)
+// ROUTE 22: RESIDENT PORTAL & DIGITAL ID VIEW
 // ==========================================
 app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
@@ -2262,41 +2361,46 @@ app.post('/api/resident/request-profile-update', authenticateToken, requireRole(
   res.redirect('/resident/profile');
 });
 
-// Resident Digital ID Display
+// Resident Digital ID Display (Enhanced Screen Size & Layout)
 app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
 
-  const qrDataUrl = await QRCode.toDataURL(resident.qr_token || resident.id);
+  const qrDataUrl = await QRCode.toDataURL(resident.qr_token || resident.id, { margin: 0, width: 300 });
 
   const html = `
     <div class="text-center py-4">
       <h4 class="fw-bold text-primary-blue mb-3">Official Digital Resident ID</h4>
 
-      <div class="id-card-frame shadow-lg text-start" style="width:3.8in; height:2.4in;">
-        <div class="id-card-header d-flex align-items-center justify-content-between px-2 py-1">
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" style="width:25px; height:25px; object-fit:cover;">` : ''}
-          <div class="text-center" style="font-size: 7.5pt; line-height:1.1;">
-            <strong>${settings.barangay_name || 'BARANGAY CENTRAL'}</strong><br>
-            <span>BARANGAY RESIDENT CARD</span>
+      <div class="id-card-frame shadow-lg text-start" style="width: 3.6in; height: 2.25in; border-width: 3px;">
+        <div class="id-card-header">
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
+          <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
+            <strong style="font-size: 8pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
+            <span style="font-size: 6pt; letter-spacing:0.5px;">OFFICIAL RESIDENT IDENTIFICATION</span>
           </div>
-          <small style="font-size:6pt;">VERIFIED</small>
+          <span class="badge bg-white text-dark px-1" style="font-size: 5.5pt; font-weight: 800;">VERIFIED</span>
         </div>
-        <div class="p-2 d-flex gap-2">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/90'}" class="id-photo" style="width:1in; height:1in;">
-          <div style="font-size: 7pt; line-height: 1.3;">
-            <div><strong class="text-primary-blue fs-6">${resident.resident_number}</strong></div>
-            <div class="fw-bold text-uppercase fs-6">${resident.first_name} ${resident.last_name}</div>
-            <div>DOB: ${resident.date_of_birth} | Sex: ${resident.gender}</div>
-            <div>Purok: ${resident.puroks ? resident.puroks.name : '-'}</div>
-            <div>Address: ${resident.address}</div>
+
+        <div class="id-card-body">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
+          <div class="id-details">
+            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident.resident_number}</div>
+            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident.first_name} ${resident.last_name}</div>
+            <div class="text-muted mt-1">DOB: <strong>${resident.date_of_birth}</strong></div>
+            <div class="text-muted">Sex: <strong>${resident.gender}</strong> | Civil: <strong>${resident.civil_status || 'Single'}</strong></div>
+            <div class="text-muted">Purok: <strong>${resident.puroks ? resident.puroks.name : '-'}</strong></div>
           </div>
+          <img src="${qrDataUrl}" class="id-qr" style="width: 1.1in; height: 1.1in;">
         </div>
-        <div class="px-2 d-flex justify-content-between align-items-end" style="position:absolute; bottom:6px; width:100%;">
-          <img src="${qrDataUrl}" style="width:0.6in; height:0.6in;">
-          <div class="text-center me-2">
-            ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:20px;"><br>` : ''}
-            <span style="font-size:6pt; border-top:1px solid #000;">Barangay Captain</span>
+
+        <div class="id-card-footer">
+          <div style="font-size: 4.8pt; max-width:2.0in;" class="text-muted lh-1">
+            If found, please return to Barangay Hall. Property of Barangay Administration.
+          </div>
+          <div class="text-center" style="min-width: 1.0in;">
+            ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:18px; object-fit:contain;"><br>` : ''}
+            <span style="font-size: 5.5pt; border-top: 1px solid #333; display: block; font-weight: 600;">Barangay Captain</span>
           </div>
         </div>
       </div>
