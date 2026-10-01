@@ -1,4 +1,4 @@
-[cite: 2]/**
+/**
  * BARANGAY RESIDENT MANAGEMENT SYSTEM
  * Single Monolithic Server Application (Express.js + Supabase JavaScript Client)
  * Designed for Deployment on Render + Supabase Database
