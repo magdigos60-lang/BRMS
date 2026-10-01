@@ -2030,7 +2030,7 @@ app.post('/api/admin/event/add', authenticateToken, requireRole(['Super Admin', 
 });
 
 // ==========================================
-// ROUTE 15: BARANGAY OFFICIALS MANAGEMENT (UPDATED WITH DELETE & PICTURE INCLUSION)
+// ROUTE 15: BARANGAY OFFICIALS MANAGEMENT
 // ==========================================
 app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   const settings = await getSettings();
@@ -2046,24 +2046,24 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
       <div class="row g-3">
         ${(officials || []).map(o => `
           <div class="col-md-3">
-            <div class="card card-custom p-3 text-center h-100 shadow-sm">
-              <img src="${o.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:90px; height:90px; object-fit:cover; border: 3px solid #2ecc71;">
+            <div class="card card-custom p-3 text-center h-100">
+              <img src="${o.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 3px solid #2ecc71;">
               <h6 class="fw-bold text-primary-blue m-0">${o.name}</h6>
-              <span class="badge bg-accent-green mb-2 text-white">${o.position}</span>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height:25px; object-fit:contain;" alt="Signature">` : ''}
+              <span class="badge bg-accent-green mb-2 text-white">${o.position}</span>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-1" style="height:25px; object-fit:contain;">` : ''}
               
-              <form action="/api/admin/official/upload-photo/${o.id}" method="POST" enctype="multipart/form-data" class="mt-3">
+              <form action="/api/admin/official/upload-photo/${o.id}" method="POST" enctype="multipart/form-data" class="mt-2">
                 <input type="file" name="photo" class="form-control form-control-sm mb-1" accept="image/*" required>
-                <button type="submit" class="btn btn-sm btn-outline-primary w-100 mb-2">Upload Photo</button>
+                <button type="submit" class="btn btn-sm btn-outline-primary w-100">Upload Photo</button>
               </form>
 
-              <a href="/api/admin/official/delete/${o.id}" class="btn btn-sm btn-outline-danger w-100 mt-auto" onclick="return confirm('Are you sure you want to delete this official?')"><i class="bi bi-trash me-1"></i> Delete Official</a>
+              <a href="/api/admin/official/delete/${o.id}" class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="return confirm('Are you sure you want to delete this official?')"><i class="bi bi-trash me-1"></i> Delete Official</a>
             </div>
           </div>
         `).join('') || '<div class="col-12 text-center text-muted">No officials configured.</div>'}
       </div>
     </div>
 
-    <!-- Modal Add Official with Picture Support -->
+    <!-- Modal Add Official -->
     <div class="modal fade" id="addOfficialModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
