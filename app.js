@@ -1,4 +1,4 @@
-/**
+[cite: 2]/**
  * BARANGAY RESIDENT MANAGEMENT SYSTEM
  * Single Monolithic Server Application (Express.js + Supabase JavaScript Client)
  * Designed for Deployment on Render + Supabase Database
@@ -89,7 +89,7 @@ const DEFAULT_LOGIN_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/4
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
-// Palette Refined: Light Green, Light Blue, Deep Navy
+// Palette Inspired by Design Specs: Deep Blue, Vibrant Blue, Emerald Green, Light Mint
 // ==========================================
 const renderSystemHead = (title) => `
 <!DOCTYPE html>
@@ -106,6 +106,7 @@ const renderSystemHead = (title) => `
       --primary-blue: #134074;
       --accent-green: #00a86b;
       --light-green: #eef7f2;
+      --light-blue: #e0ecf8;
       --soft-mint: #8da9c4;
       --pure-white: #ffffff;
       --bg-light: #f4f7f6;
@@ -119,6 +120,8 @@ const renderSystemHead = (title) => `
     .bg-primary-blue { background-color: var(--primary-blue) !important; }
     .bg-dark-blue { background-color: var(--primary-navy) !important; }
     .bg-accent-green { background-color: var(--accent-green) !important; }
+    .bg-light-green { background-color: var(--light-green) !important; }
+    .bg-light-blue { background-color: var(--light-blue) !important; }
     .text-primary-blue { color: var(--primary-blue) !important; }
     .text-accent-green { color: var(--accent-green) !important; }
     
@@ -375,6 +378,7 @@ app.use(async (req, res, next) => {
   next();
 });
 
+// Helper: Fetch Global Barangay Settings
 const getSettings = async () => {
   const { data } = await supabase.from('system_settings').select('*').single();
   return data || {};
@@ -448,12 +452,14 @@ app.post('/api/setup', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
 
+    // Insert Admin User
     const { data: user, error: userError } = await supabase.from('users').insert([{
       username, email, password_hash, full_name, role: 'Super Admin', status: 'Active'
     }]).select().single();
 
     if (userError) throw userError;
 
+    // Save System Settings
     if (existingSettings) {
       await supabase.from('system_settings').update({
         barangay_name, municipality, province, setup_completed: true, updated_at: new Date()
@@ -464,6 +470,7 @@ app.post('/api/setup', async (req, res) => {
       }]);
     }
 
+    // Default Puroks Insertion
     await supabase.from('puroks').insert([
       { name: 'Purok 1', description: 'Zone 1' },
       { name: 'Purok 2', description: 'Zone 2' },
@@ -489,12 +496,13 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (LIGHT GREEN & LIGHT BLUE PALETTE + OFFICIALS SHOWCASE)
+// ROUTE 2: REDESIGNED LOGIN PAGE (WITH LIGHT GREEN/BLUE THEME & SCROLLABLE OFFICIALS)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
   const bgImg = settings.login_background || DEFAULT_LOGIN_BG;
   
+  // Fetch Barangay Officials for the landing/scrollable showcase
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
   res.send(`
@@ -509,7 +517,7 @@ app.get('/login', async (req, res) => {
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(135deg, rgba(238, 247, 242, 0.92), rgba(141, 169, 196, 0.85)), url('${bgImg}');
+        background: linear-gradient(135deg, rgba(141, 169, 196, 0.85), rgba(238, 247, 242, 0.9)), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -520,38 +528,33 @@ app.get('/login', async (req, res) => {
         padding: 40px 20px;
         position: relative;
       }
-      .fillup-box-card {
-        background: rgba(255, 255, 255, 0.96);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 2px solid #8da9c4;
-        border-radius: 24px;
-        box-shadow: 0 15px 35px rgba(19, 64, 116, 0.15);
-        max-width: 440px;
+      .glass-login-card {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 2px solid #e0ecf8;
+        border-radius: 20px;
+        box-shadow: 0 20px 40px rgba(11, 37, 69, 0.15);
+        max-width: 450px;
         width: 100%;
-        padding: 40px 32px;
+        padding: 42px 36px;
         transition: transform 0.3s ease;
       }
-      .fillup-box-card:hover {
-        transform: translateY(-3px);
+      .glass-login-card:hover {
+        transform: translateY(-4px);
       }
       .brand-logo-img {
-        width: 90px;
-        height: 90px;
+        width: 95px;
+        height: 95px;
         object-fit: cover;
         border-radius: 50%;
         border: 3px solid #00a86b;
-        box-shadow: 0 4px 12px rgba(0,168,107,0.25);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
       }
       .form-control-lg {
-        font-size: 0.96rem;
+        font-size: 0.98rem;
         padding: 12px 16px;
         border-radius: 10px;
-        border: 1px solid #ced4da;
-      }
-      .form-control-lg:focus {
-        border-color: #00a86b;
-        box-shadow: 0 0 0 0.2rem rgba(0, 168, 107, 0.25);
       }
       .input-group-text {
         border-top-left-radius: 10px;
@@ -560,64 +563,66 @@ app.get('/login', async (req, res) => {
         color: #134074 !important;
         border: 1px solid #ced4da;
       }
-      .btn-login-custom {
+      .btn-glow {
         background-color: #134074;
         border: none;
         border-radius: 10px;
-        padding: 12px;
+        padding: 13px;
         font-size: 1.05rem;
-        font-weight: 600;
         letter-spacing: 0.5px;
-        box-shadow: 0 4px 12px rgba(19, 64, 116, 0.3);
+        box-shadow: 0 4px 15px rgba(19, 64, 116, 0.3);
         transition: all 0.25s ease;
       }
-      .btn-login-custom:hover {
+      .btn-glow:hover {
         background-color: #0b2545;
-        box-shadow: 0 6px 16px rgba(11, 37, 69, 0.4);
+        box-shadow: 0 6px 20px rgba(11, 37, 69, 0.4);
       }
       .scroll-down-hint {
         position: absolute;
-        bottom: 20px;
-        color: #134074;
+        bottom: 25px;
+        color: #0b2545;
         text-align: center;
         animation: bounce 2s infinite;
         text-decoration: none;
         font-weight: 600;
+        background: rgba(255, 255, 255, 0.7);
+        padding: 6px 16px;
+        border-radius: 20px;
       }
       @keyframes bounce {
         0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-        40% { transform: translateY(-8px); }
-        60% { transform: translateY(-4px); }
+        40% { transform: translateY(-10px); }
+        60% { transform: translateY(-5px); }
       }
       .officials-section {
         padding: 80px 20px;
-        background-color: #ffffff;
+        background-color: #e0ecf8;
       }
       .official-card {
         border-radius: 16px;
-        border: 1px solid #eef7f2;
-        background: #f4f7f6;
+        border: 1px solid #8da9c4;
+        background: white;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
       }
       .official-card:hover {
         transform: translateY(-6px);
-        box-shadow: 0 10px 20px rgba(19, 64, 116, 0.1);
+        box-shadow: 0 12px 24px rgba(11, 37, 69, 0.12);
       }
       .official-photo {
-        width: 120px;
-        height: 120px;
+        width: 125px;
+        height: 125px;
         object-fit: cover;
         border-radius: 50%;
         border: 4px solid #00a86b;
       }
     </style>
 
-    <!-- SECTION 1: LOGIN FILL-UP BOX WITH LOGO -->
+    <!-- SECTION 1: LOGIN CARD CONTAINER -->
     <div class="login-section">
-      <div class="fillup-box-card">
+      <div class="glass-login-card">
         <div class="text-center mb-4">
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-primary-blue display-3 mb-2"></i>'}
-          <h3 class="fw-bold m-0" style="color: #0b2545 !important;">${settings.barangay_name || 'BARANGAY PORTAL'}</h3>
+          <h3 class="fw-bold text-dark m-0" style="color: #0b2545 !important;">${settings.barangay_name || 'BARANGAY PORTAL'}</h3>
           <p class="text-muted small mt-1">Resident & Administration System</p>
           <span class="badge bg-accent-green px-3 py-2 rounded-pill mt-1"><i class="bi bi-shield-check me-1"></i> Official Portal</span>
         </div>
@@ -637,7 +642,7 @@ app.get('/login', async (req, res) => {
               <input type="password" name="password" class="form-control form-control-lg border-start-0" required placeholder="Enter your password">
             </div>
           </div>
-          <button type="submit" class="btn btn-login-custom w-100 text-white"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
+          <button type="submit" class="btn btn-primary btn-glow w-100 fw-bold text-white"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
         </form>
 
         <div class="text-center mt-4 border-top pt-3">
@@ -646,13 +651,13 @@ app.get('/login', async (req, res) => {
         </div>
       </div>
 
-      <a href="#officials-section" class="scroll-down-hint">
+      <a href="#officials-section" class="scroll-down-hint shadow-sm">
         <span class="d-block small">Scroll down to view Barangay Officials</span>
-        <i class="bi bi-chevron-down fs-4"></i>
+        <i class="bi bi-chevron-down"></i>
       </a>
     </div>
 
-    <!-- SECTION 2: SCROLLABLE BARANGAY OFFICIALS SHOWCASE WITH PICTURES -->
+    <!-- SECTION 2: SCROLLABLE BARANGAY OFFICIALS SHOWCASE -->
     <div id="officials-section" class="officials-section">
       <div class="container">
         <div class="text-center mb-5">
@@ -1108,7 +1113,7 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
                   </td>
                 </tr>
               `;
-            }).join('') || '<tr><td colspan="6" class="text-center py-4 text-muted">No resident records found.</td></tr>'}
+            }).join('') || '<tr><td colspan="6" class="text-center py-4 text-muted">No resident records found. Register or approve your first resident to get started.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1159,6 +1164,7 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
   res.send(renderAppLayout(req, 'residents', html, settings));
 });
 
+// Admin API Actions: Resident
 app.post('/api/admin/resident/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   const { first_name, middle_name, last_name, date_of_birth, gender, civil_status, purok_id, address, contact_number, email } = req.body;
   try {
@@ -1204,6 +1210,7 @@ app.get('/api/admin/resident/archive/:id', authenticateToken, requireRole(['Supe
   }
 });
 
+// View Resident Record Details
 app.get('/admin/resident/view/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name), households(household_number)').eq('id', req.params.id).single();
@@ -2398,7 +2405,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
   res.send(renderAppLayout(req, 'res-dashboard', html, settings));
 });
 
-// Resident Profile & Picture Change Feature
+// Resident Profile & Picture Update
 app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
