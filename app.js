@@ -102,51 +102,54 @@ async function logActivity(userId, userName, action, details, ip) {
    API ENDPOINTS
    ========================================================================== */
 
-// SETUP / INIT CHECK (Checks if initial admin setup is required before access)
+// SETUP / INIT CHECK: Require creating the first admin account if none exists
 app.get('/api/setup/status', async (req, res) => {
     try {
         if (!supabase) return res.json({ configured: false, needsAdmin: true });
         
         const { data, error } = await supabase.from('users').select('id').eq('role', 'super_admin');
         if (error) throw error;
+        
         res.json({ configured: true, needsAdmin: data.length === 0 });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// FIRST ADMIN ACCOUNT CREATION (Requires Admin Setup before entering)
+// INITIAL FIRST ADMIN CREATION (PUBLIC SETUP)
 app.post('/api/setup/admin', async (req, res) => {
     try {
         const { fullName, username, email, password, confirmPassword } = req.body;
         
-        if (!fullName || !username || !password) {
-            return res.status(400).json({ error: 'Full name, username, and password are required.' });
+        if (!fullName || !username || !email || !password) {
+            return res.status(400).json({ error: 'All administrative fields are required.' });
         }
 
-        if (password && confirmPassword && password !== confirmPassword) {
+        if (confirmPassword && password !== confirmPassword) {
             return res.status(400).json({ error: 'Passwords do not match.' });
         }
 
-        const { data: existingAdmin, error: checkErr } = await supabase.from('users').select('id').eq('role', 'super_admin');
-        if (checkErr) throw checkErr;
-        if (existingAdmin && existingAdmin.length > 0) {
-            return res.status(400).json({ error: 'Super Admin account already setup. Please log in.' });
+        // Check if an admin already exists to prevent public takeover
+        const { data: existingAdmins } = await supabase.from('users').select('id').eq('role', 'super_admin');
+        if (existingAdmins && existingAdmins.length > 0) {
+            return res.status(400).json({ error: 'First admin account already exists. Please log in.' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
         const { data, error } = await supabase.from('users').insert([{
             full_name: fullName,
             username: username,
-            email: email || username,
+            email: email,
             password_hash: hashedPassword,
-            role: 'super_admin'
+            role: 'super_admin',
+            is_active: true
         }]).select();
 
         if (error) throw error;
+        const userId = data[0].id;
 
-        await logActivity(data[0].id, fullName, 'SYSTEM_INIT', 'Initial Super Admin Account Created', req.ip);
-        res.json({ success: true, message: 'First Administrator account created successfully! You may now sign in.' });
+        await logActivity(userId, fullName, 'SYSTEM_INIT', 'First Super Admin Account Created', req.ip);
+        res.json({ success: true, message: 'First administrator account created successfully! You can now log in.' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -212,8 +215,8 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// ADMIN CREATES ADDITIONAL ACCOUNT
-app.post('/api/admin/create-account', authenticateToken, requireRole(['super_admin', 'captain']), async (req, res) => {
+// ADMIN ACCOUNT CREATION ENDPOINT (For authenticated admins to create new staff/admin accounts)
+app.post('/api/admin/create-account', authenticateToken, requireRole(['super_admin']), async (req, res) => {
     try {
         const { fullName, username, email, password, role } = req.body;
         if (!fullName || !username || !email || !password || !role) {
@@ -232,7 +235,8 @@ app.post('/api/admin/create-account', authenticateToken, requireRole(['super_adm
             username,
             email,
             password_hash: hashedPassword,
-            role: role || 'staff'
+            role: role || 'staff',
+            is_active: true
         }]).select();
 
         if (error) throw error;
@@ -1048,6 +1052,8 @@ app.get('*', (req, res) => {
                 state.settings = settings || {};
 
                 const setupStatus = await fetch('/api/setup/status').then(r => r.json());
+                
+                // FORCE FIRST ADMIN CREATION BEFORE ENTRY
                 if (setupStatus.needsAdmin) {
                     renderSetupAdmin();
                     return;
@@ -1074,7 +1080,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           1. INITIAL ADMIN SETUP RENDER
+           1. INITIAL ADMIN SETUP RENDER (MANDATORY CREATION OF FIRST ADMIN)
            ========================================================================== */
         function renderSetupAdmin() {
             const app = document.getElementById('app');
@@ -1086,27 +1092,27 @@ app.get('*', (req, res) => {
                                 <i class="fa-solid fa-user-shield fa-2x"></i>
                             </div>
                             <h1 class="text-2xl font-bold text-slate-800">CREATE FIRST ADMIN ACCOUNT</h1>
-                            <p class="text-xs text-slate-500 mt-1">Setup the initial administrator account before entering the system.</p>
+                            <p class="text-xs text-slate-500 mt-1">Setup the master administrator account before accessing the system.</p>
                         </div>
                         <form id="adminSetupForm" class="space-y-4">
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Full Name *</label>
                                 <input type="text" id="setupFullName" placeholder="e.g. Mark Jerald" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Username / Email</label>
-                                <input type="text" id="setupUsername" placeholder="admin@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Username / Email *</label>
+                                <input type="text" id="setupUsername" placeholder="e.g. markjerald@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Password</label>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Password *</label>
                                 <input type="password" id="setupPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Confirm Password</label>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Confirm Password *</label>
                                 <input type="password" id="setupConfirmPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
-                            <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-lg hover:opacity-90 transition">
-                                Create Admin Account
+                            <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-lg hover:opacity-90 transition flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-user-plus"></i> Create Admin Account
                             </button>
                         </form>
                     </div>
@@ -1115,24 +1121,27 @@ app.get('*', (req, res) => {
 
             document.getElementById('adminSetupForm').onsubmit = async (e) => {
                 e.preventDefault();
-                const pwd = document.getElementById('setupPassword').value;
-                const confirmPwd = document.getElementById('setupConfirmPassword').value;
+                const fullName = document.getElementById('setupFullName').value;
+                const username = document.getElementById('setupUsername').value;
+                const password = document.getElementById('setupPassword').value;
+                const confirmPassword = document.getElementById('setupConfirmPassword').value;
 
-                if (pwd !== confirmPwd) {
-                    alert('Passwords do not match.');
+                if (password !== confirmPassword) {
+                    alert("Passwords do not match.");
                     return;
                 }
 
                 const res = await api('/setup/admin', {
                     method: 'POST',
                     body: JSON.stringify({
-                        fullName: document.getElementById('setupFullName').value,
-                        username: document.getElementById('setupUsername').value,
-                        email: document.getElementById('setupUsername').value,
-                        password: pwd,
-                        confirmPassword: confirmPwd
+                        fullName,
+                        username,
+                        email: username,
+                        password,
+                        confirmPassword
                     })
                 });
+
                 if (res.success) {
                     alert(res.message);
                     renderLogin();
@@ -1238,10 +1247,14 @@ app.get('*', (req, res) => {
                 btnStaff.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
                 btnResident.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
                 prompt.classList.add('hidden');
+                document.getElementById('loginUsername').value = '';
+                document.getElementById('loginPassword').value = '';
             } else {
                 btnResident.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
                 btnStaff.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
                 prompt.classList.remove('hidden');
+                document.getElementById('loginUsername').value = '';
+                document.getElementById('loginPassword').value = '';
             }
         }
 
@@ -1354,7 +1367,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           3. RESIDENT PORTAL RENDER
+           3. RESIDENT PORTAL RENDER (BLUE, GREEN & WHITE THEME + ALL 13 FEATURES)
            ========================================================================== */
         function renderResidentPortal() {
             const app = document.getElementById('app');
@@ -1643,7 +1656,7 @@ app.get('*', (req, res) => {
                                     </div>
                                 </div>
 
-                                <!-- Bottom Signature & Official Seal Line -->
+                                <!-- Bottom Signature -->
                                 <div class="border-t border-emerald-700/30 pt-0.5 flex justify-between items-end px-2 bg-emerald-50/50 rounded-b">
                                     <div class="text-[5.5pt]">
                                         <span class="text-slate-500">Purok:</span> <strong class="text-emerald-800">\${r.puroks ? r.puroks.name : 'N/A'}</strong>
@@ -2097,7 +2110,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           4. STAFF / ADMIN PORTAL RENDER
+           4. STAFF / ADMIN PORTAL RENDER (WITH ADMIN CREATE ACCOUNT & BATCH PRINT)
            ========================================================================== */
         function renderStaffPortal() {
             const app = document.getElementById('app');
@@ -2117,7 +2130,7 @@ app.get('*', (req, res) => {
                             </div>
                             <nav class="p-3 space-y-1 text-xs">
                                 <button type="button" onclick="setStaffTab('dashboard')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-chart-pie w-4"></i> Admin Dashboard</button>
-                                <button type="button" onclick="setStaffTab('createAccount')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-user-plus w-4"></i> Admin Create Account</button>
+                                <button type="button" onclick="setStaffTab('createAccount')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-user-plus w-4"></i> Create Admin Account</button>
                                 <button type="button" onclick="setStaffTab('residents')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-users w-4"></i> Resident Records</button>
                                 <button type="button" onclick="setStaffTab('puroks')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-map-location-dot w-4"></i> Purok Management</button>
                                 <button type="button" onclick="setStaffTab('batchPrint')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-blue-900/50 hover:text-emerald-400 font-medium transition"><i class="fa-solid fa-print w-4"></i> 8-Up Batch Print IDs</button>
@@ -2135,12 +2148,7 @@ app.get('*', (req, res) => {
                     <main class="flex-1 flex flex-col overflow-hidden">
                         <header class="bg-gradient-to-r from-emerald-700 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
                             <h2 id="staffPageTitle" class="text-xl font-bold">Admin Dashboard</h2>
-                            <div class="flex items-center gap-3">
-                                <span class="text-xs font-semibold">\${state.user.fullName} (\${state.user.role})</span>
-                                <button type="button" onclick="setStaffTab('createAccount')" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition flex items-center gap-1">
-                                    <i class="fa-solid fa-user-plus"></i> Create Account
-                                </button>
-                            </div>
+                            <span class="text-xs font-semibold">\${state.user.fullName} (\${state.user.role})</span>
                         </header>
                         <div id="staffContent" class="flex-1 overflow-y-auto p-6"></div>
                     </main>
@@ -2166,10 +2174,10 @@ app.get('*', (req, res) => {
                     </div>
                 \`;
             } else if (tab === 'createAccount') {
-                title.innerText = 'Admin: Create New System Account';
+                title.innerText = 'Admin: Create New Account';
                 container.innerHTML = \`
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-user-plus text-emerald-600 mr-2"></i> Create Staff / Administrator Account</h3>
+                        <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-user-plus text-emerald-600 mr-2"></i> Create Staff or Admin Account</h3>
                         <form id="adminCreateAccountForm" class="space-y-4">
                             <div>
                                 <label class="block font-semibold text-slate-700 mb-1">Full Name *</label>
@@ -2190,13 +2198,15 @@ app.get('*', (req, res) => {
                             <div>
                                 <label class="block font-semibold text-slate-700 mb-1">Account Role *</label>
                                 <select id="newAccRole" class="w-full p-2 border border-slate-300 rounded">
-                                    <option value="staff">Staff</option>
-                                    <option value="secretary">Secretary</option>
-                                    <option value="captain">Barangay Captain</option>
                                     <option value="super_admin">Super Administrator</option>
+                                    <option value="captain">Barangay Captain</option>
+                                    <option value="secretary">Secretary</option>
+                                    <option value="staff">Staff</option>
                                 </select>
                             </div>
-                            <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Create Account</button>
+                            <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-user-plus"></i> Create Account
+                            </button>
                         </form>
                     </div>
                 \`;
@@ -2216,36 +2226,6 @@ app.get('*', (req, res) => {
                     alert(res.message);
                     document.getElementById('adminCreateAccountForm').reset();
                 };
-            } else if (tab === 'residents') {
-                title.innerText = 'Resident Records Management';
-                const list = await api('/residents?status=ACTIVE');
-                let rows = list.map(r => \`
-                    <tr class="border-b border-slate-100 text-xs">
-                        <td class="py-3 px-2 font-mono font-bold text-emerald-700">\${r.resident_number || 'N/A'}</td>
-                        <td class="py-3 px-2 font-bold text-slate-800">\${r.first_name} \${r.last_name}</td>
-                        <td class="py-3 px-2">\${r.puroks ? r.puroks.name : 'N/A'}</td>
-                        <td class="py-3 px-2">\${r.contact_number || 'N/A'}</td>
-                        <td class="py-3 px-2 font-bold text-emerald-600">\${r.status}</td>
-                    </tr>
-                \`).join('');
-
-                container.innerHTML = \`
-                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Active Resident Database</h3>
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                    <th class="py-2">Resident #</th>
-                                    <th class="py-2">Full Name</th>
-                                    <th class="py-2">Purok</th>
-                                    <th class="py-2">Contact</th>
-                                    <th class="py-2">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No active residents.</td></tr>'}</tbody>
-                        </table>
-                    </div>
-                \`;
             } else if (tab === 'puroks') {
                 title.innerText = 'Purok Management & Live Resident Counting';
                 const list = await api('/puroks');
@@ -2278,6 +2258,7 @@ app.get('*', (req, res) => {
                 const eight = list.slice(0, 8);
                 const logo = state.settings.barangay_logo || DEFAULT_LOGO;
                 const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
+                const captainSig = state.settings.captain_signature || '';
                 const captainName = state.settings.captain_name || 'HON. BARANGAY CAPTAIN';
 
                 let cardsHtml = eight.map(r => \`
@@ -2338,36 +2319,6 @@ app.get('*', (req, res) => {
                         document.getElementById('scanResult').innerHTML = \`<p class="text-emerald-700 font-bold">QR Scanned: \${decodedText}</p>\`;
                     });
                 }, 500);
-            } else if (tab === 'certificates') {
-                title.innerText = 'Certificate Requests Management';
-                const requests = await api('/certificates/requests');
-                let rows = requests.map(r => \`
-                    <tr class="border-b border-slate-100 text-xs">
-                        <td class="py-3 px-2 font-mono font-bold text-blue-700">\${r.request_number}</td>
-                        <td class="py-3 px-2 font-bold text-slate-800">\${r.residents ? r.residents.first_name + ' ' + r.residents.last_name : 'N/A'}</td>
-                        <td class="py-3 px-2 font-bold text-slate-800">\${r.certificate_type}</td>
-                        <td class="py-3 px-2 text-slate-600">\${r.purpose}</td>
-                        <td class="py-3 px-2 font-bold \${r.status === 'READY_FOR_RELEASE' ? 'text-emerald-600' : 'text-amber-600'}">\${r.status}</td>
-                    </tr>
-                \`).join('');
-
-                container.innerHTML = \`
-                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                        <h3 class="text-sm font-bold text-slate-800 mb-4">Submitted Certificate Requests</h3>
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="border-b text-slate-400 text-[11px] uppercase">
-                                    <th class="py-2">Req #</th>
-                                    <th class="py-2">Resident</th>
-                                    <th class="py-2">Type</th>
-                                    <th class="py-2">Purpose</th>
-                                    <th class="py-2">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No requests available.</td></tr>'}</tbody>
-                        </table>
-                    </div>
-                \`;
             }
         }
 
