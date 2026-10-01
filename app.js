@@ -89,7 +89,7 @@ const DEFAULT_LOGIN_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/4
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
-// Theme strictly adheres to: Blue (Primary), Green (Accent), White (Cards/BG)
+// Theme palette derived from reference design: Emerald Green (#00a86b/green-cyan) & Deep Navy Blue (#0a192f)
 // ==========================================
 const renderSystemHead = (title) => `
 <!DOCTYPE html>
@@ -102,13 +102,14 @@ const renderSystemHead = (title) => `
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
   <style>
     :root {
-      --primary-blue: #0d6efd;
-      --dark-blue: #0a4b9c;
-      --accent-green: #198754;
-      --light-green: #e8f5e9;
+      --primary-blue: #0b2545;
+      --dark-blue: #134074;
+      --accent-green: #00b4d8;
+      --emerald-green: #00a86b;
+      --light-green: #e6f7f2;
       --pure-white: #ffffff;
-      --bg-light: #f4f6f9;
-      --text-dark: #2c3e50;
+      --bg-light: #f0f4f8;
+      --text-dark: #1d2d44;
     }
     body {
       background-color: var(--bg-light);
@@ -117,30 +118,30 @@ const renderSystemHead = (title) => `
     }
     .bg-primary-blue { background-color: var(--primary-blue) !important; }
     .bg-dark-blue { background-color: var(--dark-blue) !important; }
-    .bg-accent-green { background-color: var(--accent-green) !important; }
+    .bg-accent-green { background-color: var(--emerald-green) !important; }
     .text-primary-blue { color: var(--primary-blue) !important; }
-    .text-accent-green { color: var(--accent-green) !important; }
+    .text-accent-green { color: var(--emerald-green) !important; }
     .btn-primary-custom {
-      background-color: var(--primary-blue);
+      background: linear-gradient(135deg, #00a86b 0%, #00b4d8 100%);
       color: white;
       border: none;
     }
     .btn-primary-custom:hover {
-      background-color: var(--dark-blue);
+      background: linear-gradient(135deg, #008f5a 0%, #0096c7 100%);
       color: white;
     }
     .btn-accent-custom {
-      background-color: var(--accent-green);
+      background-color: var(--emerald-green);
       color: white;
       border: none;
     }
     .btn-accent-custom:hover {
-      background-color: #146c43;
+      background-color: #008f5a;
       color: white;
     }
     .sidebar {
       min-height: 100vh;
-      background: linear-gradient(180deg, #0a4b9c 0%, #0d6efd 100%);
+      background: linear-gradient(180deg, #0b2545 0%, #134074 100%);
       color: white;
     }
     .sidebar .nav-link {
@@ -151,12 +152,13 @@ const renderSystemHead = (title) => `
       border-radius: 6px;
     }
     .sidebar .nav-link:hover, .sidebar .nav-link.active {
-      background-color: rgba(255, 255, 255, 0.2);
+      background-color: rgba(0, 168, 107, 0.3);
       color: white;
+      border-left: 4px solid var(--emerald-green);
     }
     .card-custom {
       background-color: var(--pure-white);
-      border-radius: 10px;
+      border-radius: 12px;
       border: 1px solid #e2e8f0;
       box-shadow: 0 4px 6px rgba(0,0,0,0.03);
     }
@@ -164,7 +166,7 @@ const renderSystemHead = (title) => `
       border-left: 5px solid var(--primary-blue);
     }
     .stat-card.green {
-      border-left: 5px solid var(--accent-green);
+      border-left: 5px solid var(--emerald-green);
     }
 
     /* Standardized CR80 ID Card Frame (3.375in x 2.125in) */
@@ -172,7 +174,7 @@ const renderSystemHead = (title) => `
       width: 3.375in;
       height: 2.125in;
       border-radius: 10px;
-      border: 2px solid #0d6efd;
+      border: 2px solid #00a86b;
       background: #ffffff;
       position: relative;
       overflow: hidden;
@@ -183,7 +185,7 @@ const renderSystemHead = (title) => `
       box-sizing: border-box;
     }
     .id-card-header {
-      background: linear-gradient(90deg, #0a4b9c 0%, #198754 100%);
+      background: linear-gradient(90deg, #0b2545 0%, #00a86b 100%);
       color: white;
       padding: 4px 8px;
       display: flex;
@@ -208,7 +210,7 @@ const renderSystemHead = (title) => `
       width: 1.05in;
       height: 1.05in;
       object-fit: cover;
-      border: 2px solid #0d6efd;
+      border: 2px solid #00a86b;
       border-radius: 6px;
       flex-shrink: 0;
     }
@@ -491,13 +493,13 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (WITH SCROLLABLE BARANGAY OFFICIALS SHOWCASE)
+// ROUTE 2: REDESIGNED LOGIN PAGE (MODERN EMERALD GREEN & DEEP NAVY BLUE THEME + OFFICIALS SHOWCASE)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
   const bgImg = settings.login_background || DEFAULT_LOGIN_BG;
   
-  // Fetch Barangay Officials for the landing/scrollable showcase
+  // Fetch Barangay Officials for the scrollable showcase
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
   res.send(`
@@ -507,12 +509,13 @@ app.get('/login', async (req, res) => {
         scroll-behavior: smooth;
       }
       body {
-        background-color: #f8f9fa;
+        background-color: #0b192c;
+        color: #e0e6ed;
         overflow-x: hidden;
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(135deg, rgba(10, 75, 156, 0.82), rgba(25, 135, 84, 0.82)), url('${bgImg}');
+        background: linear-gradient(135deg, rgba(11, 25, 44, 0.88), rgba(0, 168, 107, 0.75)), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -524,55 +527,81 @@ app.get('/login', async (req, res) => {
         position: relative;
       }
       .glass-login-card {
-        background: rgba(255, 255, 255, 0.94);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.6);
-        border-radius: 18px;
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25);
+        background: rgba(11, 25, 44, 0.85);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(0, 168, 107, 0.35);
+        border-radius: 20px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 30px rgba(0, 168, 107, 0.15);
         max-width: 440px;
         width: 100%;
-        padding: 40px 32px;
-        transition: transform 0.3s ease;
+        padding: 42px 36px;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
       }
       .glass-login-card:hover {
-        transform: translateY(-3px);
+        transform: translateY(-4px);
+        box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(0, 168, 107, 0.25);
       }
       .brand-logo-img {
-        width: 90px;
-        height: 90px;
+        width: 95px;
+        height: 95px;
         object-fit: cover;
         border-radius: 50%;
-        border: 3px solid #0d6efd;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+        border: 3px solid #00a86b;
+        box-shadow: 0 0 15px rgba(0, 168, 107, 0.4);
       }
       .form-control-lg {
-        font-size: 0.98rem;
+        font-size: 0.95rem;
         padding: 12px 16px;
         border-radius: 10px;
+        background-color: rgba(255, 255, 255, 0.07) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        color: #ffffff !important;
+      }
+      .form-control-lg::placeholder {
+        color: #a0aec0 !important;
+      }
+      .form-control-lg:focus {
+        border-color: #00a86b !important;
+        box-shadow: 0 0 10px rgba(0, 168, 107, 0.3) !important;
       }
       .input-group-text {
         border-top-left-radius: 10px;
         border-bottom-left-radius: 10px;
+        background-color: rgba(0, 168, 107, 0.15) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-end-0: none !important;
+        color: #00a86b !important;
       }
-      .btn-glow {
+      .btn-emerald-glow {
+        background: linear-gradient(135deg, #00a86b 0%, #00b4d8 100%);
+        border: none;
         border-radius: 10px;
-        padding: 12px;
+        padding: 14px;
         font-size: 1.05rem;
+        font-weight: 700;
+        color: white;
         letter-spacing: 0.5px;
-        box-shadow: 0 4px 14px rgba(13, 110, 253, 0.35);
-        transition: all 0.25s ease;
+        box-shadow: 0 6px 20px rgba(0, 168, 107, 0.4);
+        transition: all 0.3s ease;
       }
-      .btn-glow:hover {
-        box-shadow: 0 6px 20px rgba(13, 110, 253, 0.5);
+      .btn-emerald-glow:hover {
+        background: linear-gradient(135deg, #008f5a 0%, #0096c7 100%);
+        box-shadow: 0 8px 25px rgba(0, 168, 107, 0.6);
+        color: white;
+        transform: translateY(-2px);
       }
       .scroll-down-hint {
         position: absolute;
-        bottom: 20px;
-        color: white;
+        bottom: 25px;
+        color: #00a86b;
         text-align: center;
         animation: bounce 2s infinite;
         text-decoration: none;
+        transition: color 0.2s;
+      }
+      .scroll-down-hint:hover {
+        color: #00b4d8;
       }
       @keyframes bounce {
         0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
@@ -580,24 +609,28 @@ app.get('/login', async (req, res) => {
         60% { transform: translateY(-5px); }
       }
       .officials-section {
-        padding: 80px 20px;
-        background-color: #ffffff;
+        padding: 90px 20px;
+        background: linear-gradient(180deg, #0b192c 0%, #102a45 100%);
       }
       .official-card {
-        border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: 16px;
+        border: 1px solid rgba(0, 168, 107, 0.2);
+        backdrop-filter: blur(10px);
+        transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
       }
       .official-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+        transform: translateY(-6px);
+        box-shadow: 0 12px 30px rgba(0, 168, 107, 0.2);
+        border-color: rgba(0, 168, 107, 0.6);
       }
       .official-photo {
-        width: 120px;
-        height: 120px;
+        width: 130px;
+        height: 130px;
         object-fit: cover;
         border-radius: 50%;
-        border: 4px solid var(--primary-blue);
+        border: 4px solid #00a86b;
+        box-shadow: 0 0 15px rgba(0, 168, 107, 0.3);
       }
     </style>
 
@@ -605,33 +638,33 @@ app.get('/login', async (req, res) => {
     <div class="login-section">
       <div class="glass-login-card">
         <div class="text-center mb-4">
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-primary-blue display-3 mb-2"></i>'}
-          <h3 class="fw-bold text-dark m-0">${settings.barangay_name || 'BARANGAY MANAGEMENT'}</h3>
-          <p class="text-muted small mt-1">Official Resident & Executive Portal</p>
-          <span class="badge bg-accent-green px-3 py-1 rounded-pill mt-1"><i class="bi bi-shield-check me-1"></i> Official System</span>
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-accent-green display-3 mb-2"></i>'}
+          <h3 class="fw-bold text-white m-0">${settings.barangay_name || 'BARANGAY MANAGEMENT'}</h3>
+          <p class="text-white-50 small mt-1">Official Resident & Executive Portal</p>
+          <span class="badge bg-accent-green px-3 py-1 rounded-pill mt-1" style="background-color: #00a86b !important;"><i class="bi bi-shield-check me-1"></i> Official System</span>
         </div>
 
         <form action="/api/login" method="POST">
           <div class="mb-3">
-            <label class="form-label fw-semibold text-secondary small">USERNAME OR EMAIL</label>
+            <label class="form-label fw-semibold text-white-50 small">USERNAME OR EMAIL</label>
             <div class="input-group">
-              <span class="input-group-text bg-light border-end-0"><i class="bi bi-person-fill text-primary-blue fs-5"></i></span>
-              <input type="text" name="identifier" class="form-control form-control-lg border-start-0 bg-light" required placeholder="Enter username or email">
+              <span class="input-group-text"><i class="bi bi-person-fill fs-5"></i></span>
+              <input type="text" name="identifier" class="form-control form-control-lg border-start-0" required placeholder="Enter username or email">
             </div>
           </div>
           <div class="mb-4">
-            <label class="form-label fw-semibold text-secondary small">PASSWORD</label>
+            <label class="form-label fw-semibold text-white-50 small">PASSWORD</label>
             <div class="input-group">
-              <span class="input-group-text bg-light border-end-0"><i class="bi bi-lock-fill text-primary-blue fs-5"></i></span>
-              <input type="password" name="password" class="form-control form-control-lg border-start-0 bg-light" required placeholder="Enter your password">
+              <span class="input-group-text"><i class="bi bi-lock-fill fs-5"></i></span>
+              <input type="password" name="password" class="form-control form-control-lg border-start-0" required placeholder="Enter your password">
             </div>
           </div>
-          <button type="submit" class="btn btn-primary-custom btn-glow w-100 fw-bold"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
+          <button type="submit" class="btn btn-emerald-glow w-100"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
         </form>
 
-        <div class="text-center mt-4 border-top pt-3">
-          <p class="small text-muted mb-1">Don't have an account yet?</p>
-          <a href="/register" class="text-accent-green fw-bold text-decoration-none"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
+        <div class="text-center mt-4 border-top border-secondary pt-3">
+          <p class="small text-white-50 mb-1">Don't have an account yet?</p>
+          <a href="/register" class="text-accent-green fw-bold text-decoration-none" style="color: #00b4d8 !important;"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
         </div>
       </div>
 
@@ -645,23 +678,23 @@ app.get('/login', async (req, res) => {
     <div id="officials-section" class="officials-section">
       <div class="container">
         <div class="text-center mb-5">
-          <h2 class="fw-bold text-primary-blue"><i class="bi bi-person-lines-fill me-2"></i>Barangay Officials</h2>
-          <p class="text-muted">Serving our community with integrity, dedication, and leadership.</p>
-          <div class="mx-auto bg-accent-green" style="height: 3px; width: 60px; border-radius: 2px;"></div>
+          <h2 class="fw-bold text-white"><i class="bi bi-person-lines-fill me-2 text-accent-green" style="color: #00a86b !important;"></i>Barangay Officials</h2>
+          <p class="text-white-50">Serving our community with integrity, dedication, and leadership.</p>
+          <div class="mx-auto" style="height: 3px; width: 70px; border-radius: 2px; background: linear-gradient(90deg, #00a86b, #00b4d8);"></div>
         </div>
 
         <div class="row g-4 justify-content-center">
           ${(officials || []).map(o => `
             <div class="col-md-4 col-lg-3">
-              <div class="card official-card p-4 text-center h-100 shadow-sm">
-                <img src="${o.photo_url || 'https://via.placeholder.com/120'}" class="official-photo mx-auto mb-3">
-                <h5 class="fw-bold text-dark mb-1">${o.name}</h5>
-                <span class="badge bg-primary-blue px-3 py-2 rounded-pill mt-1 mb-2">${o.position}</span>
-                ${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height: 30px; object-fit: contain;" alt="Signature">` : ''}
+              <div class="card official-card p-4 text-center h-100">
+                <img src="${o.photo_url || 'https://via.placeholder.com/130'}" class="official-photo mx-auto mb-3">
+                <h5 class="fw-bold text-white mb-1">${o.name}</h5>
+                <span class="badge px-3 py-2 rounded-pill mt-1 mb-2" style="background-color: rgba(0, 168, 107, 0.2); color: #00a86b; border: 1px solid #00a86b;">${o.position}</span>
+                ${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height: 30px; filter: brightness(0) invert(1); opacity: 0.8; object-fit: contain;" alt="Signature">` : ''}
               </div>
             </div>
           `).join('') || `
-            <div class="col-12 text-center text-muted py-5">
+            <div class="col-12 text-center text-white-50 py-5">
               <i class="bi bi-people fs-1 text-secondary"></i>
               <p class="mt-2">No official records added yet.</p>
             </div>
@@ -1210,7 +1243,7 @@ app.get('/admin/resident/view/:id', authenticateToken, requireRole(['Super Admin
     <div class="row g-4">
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 140px; height: 140px; object-fit: cover; border: 3px solid #0d6efd;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 140px; height: 140px; object-fit: cover; border: 3px solid #00a86b;">
           <h5 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h5>
           <span class="text-primary-blue fw-bold">${resident.resident_number}</span>
           <p class="text-muted small">${resident.puroks ? resident.puroks.name : 'No Purok'}</p>
@@ -2026,7 +2059,7 @@ app.post('/api/admin/event/add', authenticateToken, requireRole(['Super Admin', 
 });
 
 // ==========================================
-// ROUTE 17: BARANGAY OFFICIALS MANAGEMENT
+// ROUTE 17: BARANGAY OFFICIALS MANAGEMENT (ADMIN WITH PHOTO & SIGNATURE UPLOAD)
 // ==========================================
 app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   const settings = await getSettings();
@@ -2035,20 +2068,28 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
   const html = `
     <div class="card card-custom p-4">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-person-lines-fill me-2"></i>Barangay Council & Officials</h4>
+        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-person-lines-fill me-2"></i>Barangay Council & Officials Management</h4>
         <button class="btn btn-accent-custom fw-bold" data-bs-toggle="modal" data-bs-target="#addOfficialModal"><i class="bi bi-person-plus me-1"></i> Add Official</button>
       </div>
 
       <div class="row g-3">
         ${(officials || []).map(o => `
           <div class="col-md-3">
-            <div class="card card-custom p-3 text-center">
-              <img src="${o.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
+            <div class="card card-custom p-3 text-center h-100">
+              <img src="${o.photo_url || 'https://via.placeholder.com/120'}" class="rounded-circle mx-auto mb-2" style="width:100px; height:100px; object-fit:cover; border: 3px solid #00a86b;">
               <h6 class="fw-bold text-primary-blue m-0">${o.name}</h6>
-              <small class="badge bg-accent-green mb-2">${o.position}</small>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height:25px;">` : ''}
+              <span class="badge bg-accent-green my-2">${o.position}</span>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height:30px; object-fit:contain;">` : ''}
+              
+              <!-- Update Official Media Form -->
+              <form action="/api/admin/official/upload-media/${o.id}" method="POST" enctype="multipart/form-data" class="mt-3 pt-2 border-top">
+                <label class="form-label small text-muted d-block text-start mb-1">Update Photo/Signature:</label>
+                <input type="file" name="photo" class="form-control form-control-sm mb-1" accept="image/*" title="Upload Official Photo">
+                <input type="file" name="signature" class="form-control form-control-sm mb-2" accept="image/*" title="Upload Signature">
+                <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-upload me-1"></i> Save Media</button>
+              </form>
             </div>
           </div>
-        `).join('') || '<div class="col-12 text-center text-muted">No officials configured.</div>'}
+        `).join('') || '<div class="col-12 text-center text-muted py-4">No official records configured. Click "Add Official" to add barangay leadership.</div>'}
       </div>
     </div>
 
@@ -2056,13 +2097,13 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
     <div class="modal fade" id="addOfficialModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
-          <form action="/api/admin/official/add" method="POST">
+          <form action="/api/admin/official/add" method="POST" enctype="multipart/form-data">
             <div class="modal-header bg-primary-blue text-white">
               <h5 class="modal-title fw-bold">Add Barangay Official</h5>
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3"><label class="form-label">Full Name *</label><input type="text" name="name" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label">Full Name *</label><input type="text" name="name" class="form-control" required placeholder="e.g. Hon. Juan Cruz"></div>
               <div class="mb-3">
                 <label class="form-label">Position *</label>
                 <select name="position" class="form-select" required>
@@ -2073,9 +2114,18 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
                   <option value="SK Chairman">SK Chairman</option>
                 </select>
               </div>
+              <div class="mb-3">
+                <label class="form-label">Official Photo</label>
+                <input type="file" name="photo" class="form-control" accept="image/*">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Digital Signature</label>
+                <input type="file" name="signature" class="form-control" accept="image/*">
+              </div>
             </div>
             <div class="modal-footer">
-              <button type="submit" class="btn btn-primary-custom">Save Official</button>
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-primary-custom">Save Official Record</button>
             </div>
           </form>
         </div>
@@ -2086,10 +2136,51 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
   res.send(renderAppLayout(req, 'officials', html, settings));
 });
 
-app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
-  const { name, position } = req.body;
-  await supabase.from('barangay_officials').insert([{ name, position }]);
-  res.redirect('/admin/officials');
+app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.fields([{ name: 'photo' }, { name: 'signature' }]), async (req, res) => {
+  try {
+    const { name, position } = req.body;
+    let photo_url = '';
+    let signature_url = '';
+
+    if (req.files && req.files['photo']) {
+      const pFile = req.files['photo'][0];
+      photo_url = `data:${pFile.mimetype};base64,${pFile.buffer.toString('base64')}`;
+    }
+
+    if (req.files && req.files['signature']) {
+      const sFile = req.files['signature'][0];
+      signature_url = `data:${sFile.mimetype};base64,${sFile.buffer.toString('base64')}`;
+    }
+
+    await supabase.from('barangay_officials').insert([{ name, position, photo_url, signature_url }]);
+    await logActivity(req.user.id, 'Add Official', `Added barangay official: ${name} (${position})`);
+    res.redirect('/admin/officials');
+  } catch (err) {
+    res.status(500).send('Error adding official: ' + err.message);
+  }
+});
+
+app.post('/api/admin/official/upload-media/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.fields([{ name: 'photo' }, { name: 'signature' }]), async (req, res) => {
+  try {
+    const updateData = {};
+    if (req.files && req.files['photo']) {
+      const pFile = req.files['photo'][0];
+      updateData.photo_url = `data:${pFile.mimetype};base64,${pFile.buffer.toString('base64')}`;
+    }
+    if (req.files && req.files['signature']) {
+      const sFile = req.files['signature'][0];
+      updateData.signature_url = `data:${sFile.mimetype};base64,${sFile.buffer.toString('base64')}`;
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      await supabase.from('barangay_officials').update(updateData).eq('id', req.params.id);
+      await logActivity(req.user.id, 'Update Official Media', `Updated media for official ID: ${req.params.id}`);
+    }
+
+    res.redirect('/admin/officials');
+  } catch (err) {
+    res.status(500).send('Error updating media: ' + err.message);
+  }
 });
 
 // ==========================================
@@ -2389,9 +2480,9 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
-          <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
-          <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
+          <img src="${resident ? resident.photo_url || 'https://via.placeholder.com/100' : 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #00a86b;">
+          <h6 class="fw-bold m-0">${resident ? `${resident.first_name}${resident.last_name}` : 'Resident Name'}</h6>
+          <span class="text-primary-blue small fw-bold">${resident ? resident.resident_number : 'BRGY-000000'}</span>
           <div class="mt-3">
             <a href="/resident/digital-id" class="btn btn-sm btn-accent-custom w-100 fw-bold"><i class="bi bi-qr-code me-1"></i> View Full Digital ID</a>
           </div>
@@ -2403,7 +2494,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
   res.send(renderAppLayout(req, 'res-dashboard', html, settings));
 });
 
-// Resident Profile & Edit Request / Photo Upload
+// Resident Profile & Edit Request / Photo Upload (UPDATED FOR PHOTO UPDATE)
 app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
@@ -2411,30 +2502,32 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
   const html = `
     <div class="card card-custom p-4" style="max-width: 700px; margin: auto;">
       <div class="text-center mb-4">
-        <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 130px; height: 130px; object-fit: cover; border: 3px solid #0d6efd;">
-        <h4 class="fw-bold text-primary-blue m-0">${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</h4>
-        <span class="badge bg-accent-green mt-1">${resident.resident_number}</span>
+        <img src="${resident ? resident.photo_url || 'https://via.placeholder.com/150' : 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 130px; height: 130px; object-fit: cover; border: 3px solid #00a86b;">
+        <h4 class="fw-bold text-primary-blue m-0">${resident ? `${resident.first_name} ${resident.middle_name \vert{}\vert{} ''}${resident.last_name}` : 'Resident'}</h4>
+        <span class="badge bg-accent-green mt-1">${resident ? resident.resident_number : ''}</span>
       </div>
 
+      <!-- Enhanced Profile Picture Upload Form -->
       <div class="card p-3 mb-4 bg-light border">
-        <h6 class="fw-bold text-primary-blue mb-2"><i class="bi bi-camera me-1"></i> Update Your Profile Picture</h6>
+        <h6 class="fw-bold text-primary-blue mb-2"><i class="bi bi-camera me-1"></i> Change Profile Picture</h6>
         <form action="/api/resident/upload-photo" method="POST" enctype="multipart/form-data">
           <div class="input-group">
             <input type="file" name="photo" class="form-control" accept="image/*" required>
             <button type="submit" class="btn btn-primary-custom fw-bold"><i class="bi bi-upload me-1"></i> Upload Photo</button>
           </div>
+          <small class="text-muted mt-1 d-block">Supported formats: JPG, PNG, WEBP (Max size: 10MB)</small>
         </form>
       </div>
 
       <h5 class="fw-bold text-primary-blue mb-3"><i class="bi bi-person me-2"></i>My Resident Official Profile</h5>
       <div class="row g-3">
-        <div class="col-6"><strong>Full Name:</strong> ${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</div>
-        <div class="col-6"><strong>Resident ID:</strong> ${resident.resident_number}</div>
-        <div class="col-6"><strong>Date of Birth:</strong> ${resident.date_of_birth}</div>
-        <div class="col-6"><strong>Gender:</strong> ${resident.gender}</div>
-        <div class="col-6"><strong>Civil Status:</strong> ${resident.civil_status}</div>
-        <div class="col-6"><strong>Purok Zone:</strong> ${resident.puroks ? resident.puroks.name : '-'}</div>
-        <div class="col-12"><strong>Address:</strong> ${resident.address}</div>
+        <div class="col-6"><strong>Full Name:</strong> ${resident ? `${resident.first_name} ${resident.middle_name \vert{}\vert{} ''}${resident.last_name}` : '-'}</div>
+        <div class="col-6"><strong>Resident ID:</strong> ${resident ? resident.resident_number : '-'}</div>
+        <div class="col-6"><strong>Date of Birth:</strong> ${resident ? resident.date_of_birth : '-'}</div>
+        <div class="col-6"><strong>Gender:</strong> ${resident ? resident.gender : '-'}</div>
+        <div class="col-6"><strong>Civil Status:</strong> ${resident ? resident.civil_status : '-'}</div>
+        <div class="col-6"><strong>Purok Zone:</strong> ${resident && resident.puroks ? resident.puroks.name : '-'}</div>
+        <div class="col-12"><strong>Address:</strong> ${resident ? resident.address : '-'}</div>
       </div>
 
       <hr class="my-4">
@@ -2473,7 +2566,7 @@ app.post('/api/resident/request-profile-update', authenticateToken, requireRole(
   res.redirect('/resident/profile');
 });
 
-// Resident Digital ID Display (Enhanced Screen Size & Layout)
+// Resident Digital ID Display
 app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
@@ -2495,13 +2588,13 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
         </div>
 
         <div class="id-card-body">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
+          <img src="${resident ? resident.photo_url || 'https://via.placeholder.com/150' : 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
           <div class="id-details">
-            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident.resident_number}</div>
-            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident.first_name} ${resident.last_name}</div>
-            <div class="text-muted mt-1">DOB: <strong>${resident.date_of_birth}</strong></div>
-            <div class="text-muted">Sex: <strong>${resident.gender}</strong> | Civil: <strong>${resident.civil_status || 'Single'}</strong></div>
-            <div class="text-muted">Purok: <strong>${resident.puroks ? resident.puroks.name : '-'}</strong></div>
+            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident ? resident.resident_number : '-'}</div>
+            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident ? `${resident.first_name}${resident.last_name}` : '-'}</div>
+            <div class="text-muted mt-1">DOB: <strong>${resident ? resident.date_of_birth : '-'}</strong></div>
+            <div class="text-muted">Sex: <strong>${resident ? resident.gender : '-'}</strong> | Civil: <strong>${resident ? resident.civil_status || 'Single' : '-'}</strong></div>
+            <div class="text-muted">Purok: <strong>${resident && resident.puroks ? resident.puroks.name : '-'}</strong></div>
           </div>
           <img src="${qrDataUrl}" class="id-qr" style="width: 1.1in; height: 1.1in;">
         </div>
