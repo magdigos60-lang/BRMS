@@ -496,7 +496,7 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (LIGHT GREEN & LIGHT BLUE THEME + SCROLLABLE OFFICIALS WITH PICTURES)
+// ROUTE 2: REDESIGNED LOGIN PAGE (GREEN & BLUE GRADIENT THEME + SCROLLABLE OFFICIALS WITH PICTURES)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
@@ -516,7 +516,7 @@ app.get('/login', async (req, res) => {
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(135deg, rgba(46, 204, 113, 0.75), rgba(32, 84, 147, 0.75)), url('${bgImg}');
+        background: linear-gradient(135deg, rgba(46, 204, 113, 0.85), rgba(32, 84, 147, 0.88)), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -579,12 +579,12 @@ app.get('/login', async (req, res) => {
       .scroll-down-hint {
         position: absolute;
         bottom: 25px;
-        color: #205493;
+        color: #ffffff;
         text-align: center;
         animation: bounce 2s infinite;
         text-decoration: none;
         font-weight: 700;
-        background: rgba(255, 255, 255, 0.8);
+        background: rgba(32, 84, 147, 0.7);
         padding: 8px 18px;
         border-radius: 30px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.1);
@@ -2881,7 +2881,7 @@ app.get('/resident/feedback', authenticateToken, requireRole(['Resident']), asyn
           <select name="rating" class="form-select" required>
             <option value="5">5 Stars - Excellent</option>
             <option value="4">4 Stars - Very Good</option>
-            <option value="3">3 Stars - Satisfactory</option>
+            <option value="3">3Stars - Satisfactory</option>
             <option value="2">2 Stars - Poor</option>
             <option value="1">1 Star - Very Poor</option>
           </select>
