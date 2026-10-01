@@ -22,10 +22,10 @@ const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 const JWT_SECRET = process.env.JWT_SECRET || 'brms-fallback-secret-2026';
 
-// Background Image URL from User Request
+// Background Image URL
 const CUSTOM_BG_URL = "https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg?stp=dst-jpg_tt6&cstp=mx1857x2048&ctp=s1857x2048&_nc_cat=107&ccb=1-7&_nc_sid=cc71e4&_nc_eui2=AeH-CrVk3UW0Tqq0z_SDhKwemnbseM68ydCadux4zrzJ0I4R6gykVtH1GEMMnjk_E0vUUupJBZ3vwMdzuIfYXMgZ&_nc_ohc=fKl5LR1-2YwQ7kNvwH7PIf8&_nc_oc=AdqAy1CtUXak56hu0R2Ufzy_6npapuoitUaMuup0g9veAD0bOy9PFjySTvVXJasGWis&_nc_zt=23&_nc_ht=scontent.fcrk3-3.fna&_nc_gid=SU-DBALnvlE-vtQ4KjJx4g&_nc_ss=7b2a8&oh=00_AQK7MxJys6gqu1LJrVhDYZ2WNBpKcThfTEtIUXEWUeB_Qw&oe=6ABBAEB1";
 
-// Default SVG Placeholders for Logo & User Photo to prevent missing images on reset
+// Default SVG Placeholders
 const DEFAULT_LOGO_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23059669'/><path d='M50 15 L80 35 L80 75 L50 95 L20 75 L20 35 Z' fill='%232563eb' stroke='%23ffffff' stroke-width='3'/><text x='50' y='58' font-size='22' font-weight='bold' text-anchor='middle' fill='%23ffffff'>BRGY</text></svg>";
 const DEFAULT_USER_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%23cbd5e1'/><circle cx='50' cy='38' r='20' fill='%23475569'/><path d='M20 85 C20 65 35 55 50 55 C65 55 80 65 80 85 Z' fill='%23475569'/></svg>";
 
@@ -102,17 +102,14 @@ async function logActivity(userId, userName, action, details, ip) {
    API ENDPOINTS
    ========================================================================== */
 
-// SETUP / INIT CHECK (Updated to automatically seed/ensure admin: markjerald@gov.ph / 123456)
 app.get('/api/setup/status', async (req, res) => {
     try {
         if (!supabase) return res.json({ configured: false, needsAdmin: true });
         
-        // Check if admin markjerald@gov.ph exists
         const { data: adminData, error: adminErr } = await supabase.from('users').select('id').eq('username', 'markjerald@gov.ph');
         if (adminErr) throw adminErr;
 
         if (!adminData || adminData.length === 0) {
-            // Auto-create or ensure default admin account exists
             const hashedPassword = await bcrypt.hash('123456', 10);
             await supabase.from('users').insert([{
                 full_name: 'Mark Jerald Admin',
@@ -134,7 +131,6 @@ app.get('/api/setup/status', async (req, res) => {
 app.post('/api/setup/admin', async (req, res) => {
     try {
         const { fullName, username, email, password, confirmPassword } = req.body;
-        // Use default requested credentials if fields are empty
         const finalUsername = username || 'markjerald@gov.ph';
         const finalEmail = email || 'markjerald@gov.ph';
         const finalPassword = password || '123456';
@@ -149,7 +145,6 @@ app.post('/api/setup/admin', async (req, res) => {
         const hashedPassword = await bcrypt.hash(finalPassword, 10);
 
         if (existingAdmin && existingAdmin.length > 0) {
-            // Update existing admin credentials
             const { data, error } = await supabase.from('users').update({
                 full_name: finalFullName,
                 email: finalEmail,
@@ -177,7 +172,6 @@ app.post('/api/setup/admin', async (req, res) => {
     }
 });
 
-// AUTHENTICATION (LOGIN)
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { username, password, portalType } = req.body;
@@ -237,7 +231,6 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// ADMIN ACCOUNT CREATION ENDPOINT (Added feature for Admin to create account)
 app.post('/api/admin/create-account', authenticateToken, requireRole(['super_admin']), async (req, res) => {
     try {
         const { fullName, username, email, password, role } = req.body;
@@ -268,7 +261,6 @@ app.post('/api/admin/create-account', authenticateToken, requireRole(['super_adm
     }
 });
 
-// UPDATE RESIDENT PROFILE PICTURE & DETAILS
 app.post('/api/resident/profile/update', authenticateToken, upload.single('photo'), async (req, res) => {
     try {
         const { contactNumber, email, address, civilStatus } = req.body;
@@ -296,7 +288,6 @@ app.post('/api/resident/profile/update', authenticateToken, upload.single('photo
     }
 });
 
-// PUBLIC RESIDENT REGISTRATION
 app.post('/api/public/register', upload.single('photo'), async (req, res) => {
     try {
         const {
@@ -361,7 +352,6 @@ app.post('/api/public/register', upload.single('photo'), async (req, res) => {
     }
 });
 
-// SYSTEM SETTINGS
 app.get('/api/settings', async (req, res) => {
     try {
         const { data, error } = await supabase.from('system_settings').select('*');
@@ -407,7 +397,6 @@ app.post('/api/settings', authenticateToken, requireRole(['super_admin']), uploa
     }
 });
 
-// DASHBOARD STATS
 app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
     try {
         const { count: totalResidents } = await supabase.from('residents').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE');
@@ -442,7 +431,6 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
     }
 });
 
-// RESIDENTS MANAGEMENT
 app.get('/api/residents', authenticateToken, async (req, res) => {
     try {
         const { status = 'ACTIVE', search = '', purokId = '' } = req.query;
@@ -523,7 +511,6 @@ app.post('/api/residents/:id/restore', authenticateToken, requireRole(['super_ad
     }
 });
 
-// PUROKS WITH RESIDENT COUNT
 app.get('/api/puroks', async (req, res) => {
     try {
         const { data: puroks, error } = await supabase.from('puroks').select('*').order('name');
@@ -561,7 +548,6 @@ app.post('/api/puroks', authenticateToken, requireRole(['super_admin', 'captain'
     }
 });
 
-// HOUSEHOLDS
 app.get('/api/households', authenticateToken, async (req, res) => {
     try {
         const { data, error } = await supabase.from('households').select('*, puroks(name), head:residents(first_name, last_name)').order('household_number');
@@ -587,7 +573,6 @@ app.post('/api/households', authenticateToken, requireRole(['super_admin', 'capt
     }
 });
 
-// CERTIFICATE REQUESTS & ISSUANCE
 app.get('/api/certificates/requests', authenticateToken, async (req, res) => {
     try {
         let query = supabase.from('certificate_requests').select('*, residents(first_name, last_name, resident_number, address)');
@@ -659,7 +644,6 @@ app.post('/api/certificates/approve', authenticateToken, requireRole(['super_adm
     }
 });
 
-// ASSISTANCE REQUESTS
 app.get('/api/assistance', authenticateToken, async (req, res) => {
     try {
         let query = supabase.from('assistance_requests').select('*, residents(first_name, last_name, contact_number)');
@@ -697,7 +681,6 @@ app.post('/api/assistance', authenticateToken, async (req, res) => {
     }
 });
 
-// PROFILE EDIT REQUESTS
 app.post('/api/resident/edit-request', authenticateToken, async (req, res) => {
     try {
         const { requestedChanges } = req.body;
@@ -717,7 +700,6 @@ app.post('/api/resident/edit-request', authenticateToken, async (req, res) => {
     }
 });
 
-// FEEDBACK & COMPLAINTS
 app.get('/api/feedback', authenticateToken, async (req, res) => {
     try {
         const { data, error } = await supabase.from('feedback').select('*, residents(first_name, last_name)').order('created_at', { ascending: false });
@@ -746,7 +728,6 @@ app.post('/api/feedback', authenticateToken, async (req, res) => {
     }
 });
 
-// QR CLAIM SCANNING & RELEASE
 app.get('/api/qr/claim-info/:residentId', authenticateToken, requireRole(['super_admin', 'captain', 'secretary', 'staff']), async (req, res) => {
     try {
         const { residentId } = req.params;
@@ -782,7 +763,6 @@ app.post('/api/qr/release-claim', authenticateToken, requireRole(['super_admin',
     }
 });
 
-// ANNOUNCEMENTS
 app.get('/api/announcements', async (req, res) => {
     try {
         const { data, error } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
@@ -809,7 +789,6 @@ app.post('/api/announcements', authenticateToken, requireRole(['super_admin', 'c
     }
 });
 
-// BLOTTER CASES
 app.get('/api/blotter', authenticateToken, async (req, res) => {
     try {
         const { data, error } = await supabase.from('blotter_cases').select('*').order('created_at', { ascending: false });
@@ -844,7 +823,6 @@ app.post('/api/blotter', authenticateToken, async (req, res) => {
     }
 });
 
-// APPOINTMENTS
 app.get('/api/appointments', authenticateToken, async (req, res) => {
     try {
         let query = supabase.from('appointments').select('*, residents(first_name, last_name, contact_number)');
@@ -884,7 +862,6 @@ app.post('/api/appointments', authenticateToken, async (req, res) => {
     }
 });
 
-// ACTIVITY LOGS
 app.get('/api/logs', authenticateToken, requireRole(['super_admin']), async (req, res) => {
     try {
         const { data, error } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(200);
@@ -895,7 +872,6 @@ app.get('/api/logs', authenticateToken, requireRole(['super_admin']), async (req
     }
 });
 
-// PUBLIC VERIFICATION ROUTE
 app.get('/verify/resident/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -984,7 +960,6 @@ app.get('*', (req, res) => {
             --primary-blue: #2563eb;
         }
         
-        /* STRICT BLUE, GREEN & WHITE THEME CUSTOM STYLES */
         .bg-login-custom {
             background-image: linear-gradient(rgba(5, 150, 105, 0.88), rgba(37, 99, 235, 0.88)), 
                               url('${CUSTOM_BG_URL}');
@@ -992,7 +967,6 @@ app.get('*', (req, res) => {
             background-position: center;
         }
 
-        /* NATIONAL ID LAYOUT - FULL UTILIZATION, NO WASTED SPACE */
         .id-card-national {
             width: 3.375in;
             height: 2.125in;
@@ -1031,14 +1005,12 @@ app.get('*', (req, res) => {
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased font-sans">
 
-    <!-- APP CONTAINER -->
     <div id="app" class="min-h-screen flex flex-col"></div>
 
     <script>
         const DEFAULT_LOGO = "${DEFAULT_LOGO_SVG}";
         const DEFAULT_USER = "${DEFAULT_USER_SVG}";
 
-        // Global State
         let state = {
             token: localStorage.getItem('brms_token') || null,
             user: JSON.parse(localStorage.getItem('brms_user')) || null,
@@ -1048,7 +1020,6 @@ app.get('*', (req, res) => {
             resActiveTab: 'profile'
         };
 
-        // API Helper
         async function api(endpoint, options = {}) {
             const headers = options.headers || {};
             if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
@@ -1066,7 +1037,6 @@ app.get('*', (req, res) => {
             }
         }
 
-        // Initialize App
         async function initApp() {
             try {
                 const settings = await fetch('/api/settings').then(r => r.json());
@@ -1098,9 +1068,6 @@ app.get('*', (req, res) => {
             renderLogin();
         }
 
-        /* ==========================================================================
-           1. INITIAL ADMIN SETUP RENDER
-           ========================================================================== */
         function renderSetupAdmin() {
             const app = document.getElementById('app');
             app.innerHTML = \`
@@ -1152,9 +1119,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* ==========================================================================
-           2. LOGIN & REGISTRATION RENDER
-           ========================================================================== */
         function renderLogin() {
             const app = document.getElementById('app');
             const logo = state.settings.barangay_logo || DEFAULT_LOGO;
@@ -1165,7 +1129,6 @@ app.get('*', (req, res) => {
             app.innerHTML = \`
                 <div class="min-h-screen bg-login-custom flex items-center justify-center p-4">
                     <div class="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 border border-white/20">
-                        <!-- Left Info Banner -->
                         <div class="bg-gradient-to-br from-emerald-700 to-blue-800 p-8 text-white flex flex-col justify-between">
                             <div class="text-center md:text-left">
                                 <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-20 h-20 mx-auto md:mx-0 rounded-full bg-white p-1 mb-4 shadow-md object-cover">
@@ -1183,7 +1146,6 @@ app.get('*', (req, res) => {
                             </div>
                         </div>
 
-                        <!-- Right Login Form -->
                         <div class="p-8 flex flex-col justify-center bg-white">
                             <div class="flex border-b border-slate-200 mb-6">
                                 <button id="btnPortalStaff" type="button" onclick="switchLoginPortal('staff')" class="flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600">Staff / Admin Login</button>
@@ -1369,9 +1331,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* ==========================================================================
-           3. RESIDENT PORTAL RENDER (BLUE, GREEN & WHITE THEME + ALL 13 FEATURES)
-           ========================================================================== */
         function renderResidentPortal() {
             const app = document.getElementById('app');
             const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
@@ -1380,7 +1339,6 @@ app.get('*', (req, res) => {
 
             app.innerHTML = \`
                 <div class="flex h-screen bg-slate-50 overflow-hidden">
-                    <!-- Resident Sidebar -->
                     <aside class="w-64 bg-slate-900 text-slate-200 flex flex-col justify-between hidden md:flex border-r border-emerald-700">
                         <div>
                             <div class="p-4 border-b border-slate-800 flex items-center gap-3 bg-gradient-to-r from-emerald-800 to-blue-800">
@@ -1414,7 +1372,6 @@ app.get('*', (req, res) => {
                         </div>
                     </aside>
 
-                    <!-- Main Resident Content Area -->
                     <main class="flex-1 flex flex-col overflow-hidden">
                         <header class="bg-gradient-to-r from-emerald-700 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
                             <h2 id="resPageTitle" class="text-xl font-bold">Resident Dashboard</h2>
@@ -1424,9 +1381,7 @@ app.get('*', (req, res) => {
                             </div>
                         </header>
 
-                        <div id="resContent" class="flex-1 overflow-y-auto p-6">
-                            <!-- Dynamic Resident Content -->
-                        </div>
+                        <div id="resContent" class="flex-1 overflow-y-auto p-6"></div>
                     </main>
                 </div>
             \`;
@@ -1484,7 +1439,6 @@ app.get('*', (req, res) => {
             }
         }
 
-        /* RESIDENT TAB IMPLEMENTATIONS */
         function renderResDashboardTab(container) {
             const res = state.resident || {};
             container.innerHTML = \`
@@ -1548,7 +1502,6 @@ app.get('*', (req, res) => {
             });
         }
 
-        /* RESIDENT PROFILE & NATIONAL ID STYLE ID CARD */
         function renderResProfileTab(container) {
             const r = state.resident || {};
             const photo = r.photo_url || DEFAULT_USER;
@@ -1559,7 +1512,6 @@ app.get('*', (req, res) => {
 
             container.innerHTML = \`
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <!-- Left: Profile Details & Photo Update -->
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm lg:col-span-1 text-xs">
                         <div class="text-center mb-4">
                             <img src="\${photo}" onerror="this.src='\${DEFAULT_USER}'" class="w-28 h-28 mx-auto rounded-full object-cover border-4 border-emerald-600 shadow-md">
@@ -1598,17 +1550,14 @@ app.get('*', (req, res) => {
                         </form>
                     </div>
 
-                    <!-- Right: NATIONAL ID STYLE BARANGAY RESIDENT CARD -->
                     <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
                         <div class="flex justify-between items-center mb-4">
                             <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-id-card text-emerald-600 mr-2"></i> Official Barangay Resident Card (National ID Layout)</h3>
                             <button type="button" onclick="window.print()" class="px-3 py-1 bg-blue-600 text-white rounded text-xs font-bold hover:bg-blue-700 no-print"><i class="fa-solid fa-print mr-1"></i> Print ID</button>
                         </div>
 
-                        <!-- ID CARD CONTAINER (PHILIPPINE NATIONAL ID SPECIFICATION: 3.375" x 2.125", ZERO WASTED SPACE) -->
                         <div id="printableArea" class="flex justify-center p-4 bg-slate-100 rounded-xl">
                             <div class="id-card-national shadow-lg">
-                                <!-- Top Bar / Header -->
                                 <div class="flex items-center gap-1.5 border-b border-emerald-700/40 pb-1 bg-gradient-to-r from-emerald-800 to-blue-800 text-white px-2 py-1 rounded-t">
                                     <img src="\${logo}" onerror="this.src='\${DEFAULT_LOGO}'" class="w-7 h-7 rounded-full bg-white p-0.5 object-cover">
                                     <div class="leading-none flex-1">
@@ -1618,15 +1567,12 @@ app.get('*', (req, res) => {
                                     </div>
                                 </div>
 
-                                <!-- Body Grid: Dense Photo, Data, and Large QR Code -->
                                 <div class="grid grid-cols-12 gap-1 my-1 px-1 text-[7pt] leading-tight flex-1 items-center">
-                                    <!-- Photo Left -->
                                     <div class="col-span-3 text-center">
                                         <img src="\${photo}" onerror="this.src='\${DEFAULT_USER}'" class="w-[0.75in] h-[0.9in] border-2 border-emerald-700 rounded object-cover mx-auto bg-white">
                                         <span class="text-[5pt] font-bold text-emerald-800 block mt-0.5">REGISTERED</span>
                                     </div>
 
-                                    <!-- Personal Details Middle -->
                                     <div class="col-span-6 space-y-0.5">
                                         <div>
                                             <span class="text-[5pt] text-slate-500 font-bold block uppercase">Resident ID Number</span>
@@ -1652,14 +1598,12 @@ app.get('*', (req, res) => {
                                         </div>
                                     </div>
 
-                                    <!-- LARGE QR Code Right -->
                                     <div class="col-span-3 text-center flex flex-col items-center justify-center">
                                         \${r.qr_code_url ? \`<img src="\${r.qr_code_url}" class="w-[0.9in] h-[0.9in] border border-slate-300 rounded p-0.5 bg-white shadow-sm">\` : \`<div class="w-[0.9in] h-[0.9in] border border-dashed text-[6pt] flex items-center justify-center text-slate-400">QR Code</div>\`}
                                         <span class="text-[4.5pt] text-slate-400 font-mono mt-0.5">SCAN TO VERIFY</span>
                                     </div>
                                 </div>
 
-                                <!-- Bottom Signature & Official Seal Line -->
                                 <div class="border-t border-emerald-700/30 pt-0.5 flex justify-between items-end px-2 bg-emerald-50/50 rounded-b">
                                     <div class="text-[5.5pt]">
                                         <span class="text-slate-500">Purok:</span> <strong class="text-emerald-800">\${r.puroks ? r.puroks.name : 'N/A'}</strong>
@@ -1688,7 +1632,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* EDIT PROFILE REQUEST */
         function renderResEditProfileTab(container) {
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
@@ -1716,7 +1659,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* CERTIFICATE REQUEST */
         function renderResCertRequestTab(container) {
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
@@ -1755,7 +1697,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* REQUEST TRACKING */
         async function renderResTrackingTab(container) {
             const requests = await api('/certificates/requests');
             let rows = requests.map(r => \`
@@ -1789,7 +1730,6 @@ app.get('*', (req, res) => {
             \`;
         }
 
-        /* APPOINTMENT BOOKING */
         async function renderResAppointmentsTab(container) {
             const appts = await api('/appointments');
             let rows = appts.map(a => \`
@@ -1864,7 +1804,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* MY DOCUMENTS */
         async function renderResDocumentsTab(container) {
             const requests = await api('/certificates/requests');
             const readyDocs = requests.filter(r => r.status === 'READY_FOR_RELEASE' || r.status === 'RELEASED');
@@ -1889,7 +1828,6 @@ app.get('*', (req, res) => {
             \`;
         }
 
-        /* COMPLAINTS & REPORTS */
         function renderResComplaintsTab(container) {
             container.innerHTML = \`
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-xl mx-auto text-xs">
@@ -1927,7 +1865,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* ASSISTANCE REQUEST */
         async function renderResAssistanceTab(container) {
             const list = await api('/assistance');
             let rows = list.map(a => \`
@@ -1993,7 +1930,6 @@ app.get('*', (req, res) => {
             };
         }
 
-        /* ANNOUNCEMENTS, NOTIFICATIONS, FEEDBACK, EMERGENCY & SECURITY */
         async function renderResAnnouncementsTab(container) {
             const list = await api('/announcements');
             let items = list.map(a => \`
@@ -2112,9 +2048,6 @@ app.get('*', (req, res) => {
             \`;
         }
 
-        /* ==========================================================================
-           4. STAFF / ADMIN PORTAL RENDER (WITH ADMIN CREATE ACCOUNT & BATCH PRINT)
-           ========================================================================== */
         function renderStaffPortal() {
             const app = document.getElementById('app');
             const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
@@ -2323,7 +2256,6 @@ app.get('*', (req, res) => {
             }
         }
 
-        // Start App
         window.onload = initApp;
     </script>
 </body>
@@ -2331,9 +2263,6 @@ app.get('*', (req, res) => {
     `);
 });
 
-/* ==========================================================================
-   START SERVER
-   ========================================================================== */
 app.listen(PORT, () => {
     console.log(`====================================================`);
     console.log(`BARANGAY MANAGEMENT SYSTEM SERVER RUNNING ON PORT ${PORT}`);
