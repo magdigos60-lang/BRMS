@@ -32,6 +32,7 @@ const app = express();
 
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 
+// Universal Body Parsing Middlewares
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
@@ -216,7 +217,6 @@ const renderSystemHead = (title) => `
 const renderSystemFooter = () => `
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    // Universal Modal Helper
     function showNotification(title, message, isError = false) {
       alert((isError ? 'Error: ' : 'Info: ') + message);
     }
@@ -464,7 +464,7 @@ app.get('/login', async (req, res) => {
         background: linear-gradient(rgba(10, 75, 156, 0.75), rgba(25, 135, 84, 0.75)), url('${bgImg}');
         background-size: cover;
         background-position: center;
-        min-vh-100;
+        min-height: 100vh;
       }
     </style>
     <div class="login-bg d-flex justify-content-center align-items-center min-vh-100 p-3">
@@ -549,20 +549,21 @@ app.get('/register', async (req, res) => {
               <h3 class="fw-bold text-primary-blue"><i class="bi bi-person-badge me-2"></i>Resident Public Registration</h3>
               <p class="text-muted">Complete the official form. Registrations undergo approval by Barangay Officials.</p>
             </div>
-            <form action="/api/register" method="POST" enctype="multipart/form-data">
+            <!-- Standard URL Encoded Form Submission -->
+            <form action="/api/register" method="POST">
               <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">Personal Information</h6>
               <div class="row">
                 <div class="col-md-4 mb-3">
                   <label class="form-label">First Name *</label>
-                  <input type="text" name="first_name" class="form-control" required>
+                  <input type="text" name="first_name" class="form-control" required placeholder="First Name">
                 </div>
                 <div class="col-md-4 mb-3">
                   <label class="form-label">Middle Name</label>
-                  <input type="text" name="middle_name" class="form-control">
+                  <input type="text" name="middle_name" class="form-control" placeholder="Middle Name">
                 </div>
                 <div class="col-md-4 mb-3">
                   <label class="form-label">Last Name *</label>
-                  <input type="text" name="last_name" class="form-control" required>
+                  <input type="text" name="last_name" class="form-control" required placeholder="Last Name">
                 </div>
               </div>
               <div class="row">
@@ -612,7 +613,7 @@ app.get('/register', async (req, res) => {
                 </div>
                 <div class="col-md-6 mb-3">
                   <label class="form-label">Occupation</label>
-                  <input type="text" name="occupation" class="form-control">
+                  <input type="text" name="occupation" class="form-control" placeholder="Occupation">
                 </div>
               </div>
 
@@ -620,7 +621,7 @@ app.get('/register', async (req, res) => {
               <div class="row">
                 <div class="col-md-6 mb-3">
                   <label class="form-label">Email Address (Username) *</label>
-                  <input type="email" name="email" class="form-control" required>
+                  <input type="email" name="email" class="form-control" required placeholder="name@email.com">
                 </div>
                 <div class="col-md-6 mb-3">
                   <label class="form-label">Account Password *</label>
@@ -641,10 +642,27 @@ app.get('/register', async (req, res) => {
   `);
 });
 
+// FIX: Explicit field extraction, default string fallbacks, and validation
 app.post('/api/register', async (req, res) => {
-  const { first_name, middle_name, last_name, suffix, date_of_birth, gender, civil_status, purok_id, address, contact_number, occupation, email, password } = req.body;
-
   try {
+    const first_name = (req.body.first_name || '').trim();
+    const middle_name = (req.body.middle_name || '').trim();
+    const last_name = (req.body.last_name || '').trim();
+    const suffix = (req.body.suffix || '').trim();
+    const date_of_birth = req.body.date_of_birth;
+    const gender = req.body.gender || 'Male';
+    const civil_status = req.body.civil_status || 'Single';
+    const purok_id = req.body.purok_id || null;
+    const address = (req.body.address || '').trim();
+    const contact_number = (req.body.contact_number || '').trim();
+    const occupation = (req.body.occupation || '').trim();
+    const email = (req.body.email || '').trim().toLowerCase();
+    const password = req.body.password;
+
+    if (!first_name || !last_name || !date_of_birth || !address || !email || !password) {
+      return res.status(400).send('<script>alert("Please fill in all required fields."); window.history.back();</script>');
+    }
+
     const { data: existingUser } = await supabase.from('users').select('*').eq('email', email).single();
     if (existingUser) {
       return res.status(400).send('<script>alert("Email is already registered."); window.location="/register";</script>');
@@ -655,15 +673,26 @@ app.post('/api/register', async (req, res) => {
     const sequenceNum = String((countRes.count || 0) + 1).padStart(6, '0');
     const resident_number = `BRGY-${year}-${sequenceNum}`;
 
-    // Calculate Seniority
     const dob = new Date(date_of_birth);
     const age = new Date().getFullYear() - dob.getFullYear();
     const is_senior_citizen = age >= 60;
 
     const { data: resident, error: resErr } = await supabase.from('residents').insert([{
-      resident_number, first_name, middle_name, last_name, suffix, date_of_birth, gender,
-      civil_status, purok_id, address, contact_number, occupation, email,
-      resident_status: 'Pending', is_senior_citizen
+      resident_number, 
+      first_name, 
+      middle_name, 
+      last_name, 
+      suffix, 
+      date_of_birth, 
+      gender,
+      civil_status, 
+      purok_id, 
+      address, 
+      contact_number, 
+      occupation, 
+      email,
+      resident_status: 'Pending', 
+      is_senior_citizen
     }]).select().single();
 
     if (resErr) throw resErr;
@@ -672,8 +701,13 @@ app.post('/api/register', async (req, res) => {
     const password_hash = await bcrypt.hash(password, salt);
 
     await supabase.from('users').insert([{
-      username: email, email, password_hash, full_name: `${first_name} ${last_name}`,
-      role: 'Resident', status: 'Pending', resident_id: resident.id
+      username: email, 
+      email, 
+      password_hash, 
+      full_name: `${first_name} ${last_name}`,
+      role: 'Resident', 
+      status: 'Pending', 
+      resident_id: resident.id
     }]);
 
     res.send(`
@@ -1069,7 +1103,6 @@ app.get('/admin/puroks', authenticateToken, requireRole(['Super Admin', 'Baranga
   const { data: puroks } = await supabase.from('puroks').select('*');
   const { data: residents } = await supabase.from('residents').select('purok_id').eq('resident_status', 'Active');
 
-  // Calculate actual counts dynamically
   const purokCounts = {};
   (residents || []).forEach(r => {
     if (r.purok_id) purokCounts[r.purok_id] = (purokCounts[r.purok_id] || 0) + 1;
@@ -1324,7 +1357,6 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
 
 // ==========================================
 // ROUTE 9: QR SCANNER PAGE (/scanner)
-// Service / Resident / Document Verification Route
 // ==========================================
 app.get('/scanner', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1337,7 +1369,6 @@ app.get('/scanner', authenticateToken, requireRole(['Super Admin', 'Barangay Adm
         <p class="text-muted small">Verify resident authenticity or retrieve pending certificate release requests.</p>
       </div>
 
-      <!-- Manual Verification Input Fallback -->
       <form action="/api/scanner/verify" method="POST" class="mb-4">
         <div class="input-group">
           <input type="text" name="qr_token" class="form-control" placeholder="Scan or enter QR Verification Token..." required>
@@ -1358,12 +1389,10 @@ app.post('/api/scanner/verify', authenticateToken, requireRole(['Super Admin', '
   const { qr_token } = req.body;
   const settings = await getSettings();
 
-  // Search in Residents
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('qr_token', qr_token).single();
 
   let resultHtml = '';
   if (resident) {
-    // Check if resident has pending certificates
     const { data: cert } = await supabase.from('certificate_requests').select('*').eq('resident_id', resident.id).eq('status', 'READY_FOR_RELEASE').single();
 
     resultHtml = `
@@ -2131,12 +2160,12 @@ app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Ad
 
   const updateData = { barangay_name, municipality, province, barangay_captain, updated_at: new Date() };
 
-  if (req.files['logo']) {
+  if (req.files && req.files['logo']) {
     const logoFile = req.files['logo'][0];
     updateData.barangay_logo = `data:${logoFile.mimetype};base64,${logoFile.buffer.toString('base64')}`;
   }
 
-  if (req.files['signature']) {
+  if (req.files && req.files['signature']) {
     const sigFile = req.files['signature'][0];
     updateData.captain_signature = `data:${sigFile.mimetype};base64,${sigFile.buffer.toString('base64')}`;
   }
