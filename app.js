@@ -491,31 +491,43 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED & ENHANCED LOGIN PAGE
+// ROUTE 2: REDESIGNED LOGIN PAGE (WITH GRADIENT BOX & OFFICIALS SHOWCASE)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
   const bgImg = settings.login_background || DEFAULT_LOGIN_BG;
+  
+  // Fetch Barangay Officials for the landing/scrollable showcase
+  const { data: officials } = await supabase.from('barangay_officials').select('*');
 
   res.send(`
     ${renderSystemHead('Login')}
     <style>
-      .login-wrapper {
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        background-color: #f8f9fa;
+        overflow-x: hidden;
+      }
+      .login-section {
         min-height: 100vh;
         background: linear-gradient(135deg, rgba(10, 75, 156, 0.82), rgba(25, 135, 84, 0.82)), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 20px;
+        padding: 40px 20px;
+        position: relative;
       }
       .glass-login-card {
-        background: rgba(255, 255, 255, 0.92);
+        background: linear-gradient(135deg, rgba(232, 245, 233, 0.95), rgba(227, 242, 253, 0.95));
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.8);
         border-radius: 18px;
         box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25);
         max-width: 440px;
@@ -554,8 +566,43 @@ app.get('/login', async (req, res) => {
       .btn-glow:hover {
         box-shadow: 0 6px 20px rgba(13, 110, 253, 0.5);
       }
+      .scroll-down-hint {
+        position: absolute;
+        bottom: 20px;
+        color: white;
+        text-align: center;
+        animation: bounce 2s infinite;
+        text-decoration: none;
+      }
+      @keyframes bounce {
+        0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-10px); }
+        60% { transform: translateY(-5px); }
+      }
+      .officials-section {
+        padding: 80px 20px;
+        background-color: #ffffff;
+      }
+      .official-card {
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+      .official-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+      }
+      .official-photo {
+        width: 120px;
+        height: 120px;
+        object-fit: cover;
+        border-radius: 50%;
+        border: 4px solid var(--primary-blue);
+      }
     </style>
-    <div class="login-wrapper">
+
+    <!-- SECTION 1: LOGIN CARD CONTAINER -->
+    <div class="login-section">
       <div class="glass-login-card">
         <div class="text-center mb-4">
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-primary-blue display-3 mb-2"></i>'}
@@ -585,6 +632,40 @@ app.get('/login', async (req, res) => {
         <div class="text-center mt-4 border-top pt-3">
           <p class="small text-muted mb-1">Don't have an account yet?</p>
           <a href="/register" class="text-accent-green fw-bold text-decoration-none"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
+        </div>
+      </div>
+
+      <a href="#officials-section" class="scroll-down-hint fw-bold">
+        <span class="d-block small">Scroll down to view Barangay Officials</span>
+        <i class="bi bi-chevron-down fs-4"></i>
+      </a>
+    </div>
+
+    <!-- SECTION 2: SCROLLABLE BARANGAY OFFICIALS SHOWCASE -->
+    <div id="officials-section" class="officials-section">
+      <div class="container">
+        <div class="text-center mb-5">
+          <h2 class="fw-bold text-primary-blue"><i class="bi bi-person-lines-fill me-2"></i>Barangay Officials</h2>
+          <p class="text-muted">Serving our community with integrity, dedication, and leadership.</p>
+          <div class="mx-auto bg-accent-green" style="height: 3px; width: 60px; border-radius: 2px;"></div>
+        </div>
+
+        <div class="row g-4 justify-content-center">
+          ${(officials || []).map(o => `
+            <div class="col-md-4 col-lg-3">
+              <div class="card official-card p-4 text-center h-100 shadow-sm">
+                <img src="${o.photo_url || 'https://via.placeholder.com/120'}" class="official-photo mx-auto mb-3">
+                <h5 class="fw-bold text-dark mb-1">${o.name}</h5>
+                <span class="badge bg-primary-blue px-3 py-2 rounded-pill mt-1 mb-2">${o.position}</span>
+                ${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height: 30px; object-fit: contain;" alt="Signature">` : ''}
+              </div>
+            </div>
+          `).join('') || `
+            <div class="col-12 text-center text-muted py-5">
+              <i class="bi bi-people fs-1 text-secondary"></i>
+              <p class="mt-2">No official records added yet.</p>
+            </div>
+          `}
         </div>
       </div>
     </div>
@@ -2308,7 +2389,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
+          <img src="${resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
           <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
           <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
           <div class="mt-3">
@@ -2322,14 +2403,30 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
   res.send(renderAppLayout(req, 'res-dashboard', html, settings));
 });
 
-// Resident Profile & Edit Request
+// Resident Profile & Edit Request / Photo Upload
 app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
 
   const html = `
     <div class="card card-custom p-4" style="max-width: 700px; margin: auto;">
-      <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-person me-2"></i>My Resident Official Profile</h4>
+      <div class="text-center mb-4">
+        <img src="${resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 130px; height: 130px; object-fit: cover; border: 3px solid #0d6efd;">
+        <h4 class="fw-bold text-primary-blue m-0">${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</h4>
+        <span class="badge bg-accent-green mt-1">${resident.resident_number}</span>
+      </div>
+
+      <div class="card p-3 mb-4 bg-light border">
+        <h6 class="fw-bold text-primary-blue mb-2"><i class="bi bi-camera me-1"></i> Update Your Profile Picture</h6>
+        <form action="/api/resident/upload-photo" method="POST" enctype="multipart/form-data">
+          <div class="input-group">
+            <input type="file" name="photo" class="form-control" accept="image/*" required>
+            <button type="submit" class="btn btn-primary-custom fw-bold"><i class="bi bi-upload me-1"></i> Upload Photo</button>
+          </div>
+        </form>
+      </div>
+
+      <h5 class="fw-bold text-primary-blue mb-3"><i class="bi bi-person me-2"></i>My Resident Official Profile</h5>
       <div class="row g-3">
         <div class="col-6"><strong>Full Name:</strong> ${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</div>
         <div class="col-6"><strong>Resident ID:</strong> ${resident.resident_number}</div>
@@ -2353,6 +2450,21 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
   `;
 
   res.send(renderAppLayout(req, 'res-profile', html, settings));
+});
+
+// Resident Upload Profile Photo Handler
+app.post('/api/resident/upload-photo', authenticateToken, requireRole(['Resident']), upload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).send('<script>alert("Please select an image file to upload."); window.history.back();</script>');
+    const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+
+    await supabase.from('residents').update({ photo_url: base64Data }).eq('id', req.user.resident_id);
+    await logActivity(req.user.id, 'Resident Photo Self-Update', `Resident updated their own profile photo.`);
+    res.redirect('/resident/profile');
+  } catch (err) {
+    console.error('Error uploading photo:', err);
+    res.status(500).send('Error uploading photo: ' + err.message);
+  }
 });
 
 app.post('/api/resident/request-profile-update', authenticateToken, requireRole(['Resident']), async (req, res) => {
@@ -2383,7 +2495,7 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
         </div>
 
         <div class="id-card-body">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
+          <img src="${resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
           <div class="id-details">
             <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident.resident_number}</div>
             <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident.first_name} ${resident.last_name}</div>
