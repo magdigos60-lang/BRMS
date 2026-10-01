@@ -84,7 +84,7 @@ const logActivity = async (userId, action, details = '', ip = '') => {
 // ==========================================
 // CONSTANTS & LOGIC CONSTANTS
 // ==========================================
-const DEFAULT_LOGIN_BG = 'https://images.unsplash.com/photo-1541888946425-d0fbb186a5b3?auto=format&fit=crop&w=1920&q=80';
+const DEFAULT_LOGIN_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg?stp=dst-jpg_tt6&cstp=mx1857x2048&ctp=s1857x2048&_nc_cat=107&ccb=1-7&_nc_sid=cc71e4&_nc_eui2=AeH-CrVk3UW0Tqq0z_SDhKwemnbseM68ydCadux4zrzJ0I4R6gykVtH1GEMMnjk_E0vUUupJBZ3vwMdzuIfYXMgZ&_nc_ohc=dQMK5ddUuHcQ7kNvwGa1gPS&_nc_oc=AdoFKxV7tJpE4hgQ4pRI2MUvCVRMJBztcvXKVR66-nYuAHhEYRtmWNOf2aAis5Et9sE&_nc_zt=23&_nc_ht=scontent.fcrk3-3.fna&_nc_gid=xdfM6qfHMw-bCjf2oW_Nzw&_nc_ss=7b2a8&oh=00_AQMFazlU8aRub-iyfGwAHzijoCAXz8cAE0ZoQgTtFlJvjw&oe=6AC35F71';
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
