@@ -89,6 +89,7 @@ const DEFAULT_LOGIN_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/4
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
+// Theme Palette: Light Green & Light Blue System Styling
 // ==========================================
 const renderSystemHead = (title) => `
 <!DOCTYPE html>
@@ -101,14 +102,19 @@ const renderSystemHead = (title) => `
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
   <style>
     :root {
-      --primary-navy: #0e2f56;
-      --primary-blue: #154c79;
-      --accent-green: #20a068;
-      --light-green: #eaf6f0;
-      --soft-mint: #93b5c6;
+      --light-blue-bg: #e0f2fe;
+      --light-blue-accent: #38bdf8;
+      --primary-blue: #0284c7;
+      --dark-blue: #0369a1;
+      
+      --light-green-bg: #e8f5e9;
+      --light-green-accent: #4ade80;
+      --primary-green: #16a34a;
+      --dark-green: #15803d;
+
       --pure-white: #ffffff;
-      --bg-light: #f4f7f6;
-      --text-dark: #1b2a38;
+      --bg-light: #f0fdf4;
+      --text-dark: #0f172a;
     }
     body {
       background-color: var(--bg-light);
@@ -116,59 +122,76 @@ const renderSystemHead = (title) => `
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     .bg-primary-blue { background-color: var(--primary-blue) !important; }
-    .bg-dark-blue { background-color: var(--primary-navy) !important; }
-    .bg-accent-green { background-color: var(--accent-green) !important; }
+    .bg-dark-blue { background-color: var(--dark-blue) !important; }
+    .bg-accent-green { background-color: var(--primary-green) !important; }
     .text-primary-blue { color: var(--primary-blue) !important; }
-    .text-accent-green { color: var(--accent-green) !important; }
+    .text-accent-green { color: var(--primary-green) !important; }
     
     .btn-primary-custom {
       background-color: var(--primary-blue);
       color: white;
       border: none;
+      border-radius: 8px;
     }
     .btn-primary-custom:hover {
-      background-color: var(--primary-navy);
+      background-color: var(--dark-blue);
       color: white;
     }
     .btn-accent-custom {
-      background-color: var(--accent-green);
+      background-color: var(--primary-green);
       color: white;
       border: none;
+      border-radius: 8px;
     }
     .btn-accent-custom:hover {
-      background-color: #198254;
+      background-color: var(--dark-green);
       color: white;
     }
     .sidebar {
       min-height: 100vh;
-      background: linear-gradient(180deg, var(--primary-navy) 0%, var(--primary-blue) 100%);
+      background: linear-gradient(180deg, #0284c7 0%, #16a34a 100%);
       color: white;
     }
     .sidebar .nav-link {
-      color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.9);
       font-weight: 500;
       padding: 10px 18px;
       margin: 2px 10px;
-      border-radius: 6px;
+      border-radius: 8px;
     }
     .sidebar .nav-link:hover, .sidebar .nav-link.active {
-      background-color: var(--accent-green);
+      background-color: rgba(255, 255, 255, 0.25);
       color: white;
+      backdrop-filter: blur(4px);
     }
     .card-custom {
       background-color: var(--pure-white);
-      border-radius: 12px;
-      border: 1px solid #e0e6ed;
-      box-shadow: 0 4px 10px rgba(14, 47, 86, 0.05);
+      border-radius: 16px;
+      border: 1px solid #dcfce7;
+      box-shadow: 0 4px 12px rgba(2, 132, 199, 0.06);
     }
     .stat-card {
       border-left: 5px solid var(--primary-blue);
     }
     .stat-card.green {
-      border-left: 5px solid var(--accent-green);
+      border-left: 5px solid var(--primary-green);
     }
 
-    /* Standardized CR80 ID Card Frame */
+    /* Refined Input Field Box Design (Reference: Clean Form Fill Boxes) */
+    .form-control, .form-select {
+      border: 1.5px solid #bbf7d0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background-color: #ffffff;
+      transition: all 0.2s ease-in-out;
+    }
+    .form-control:focus, .form-select:focus {
+      border-color: var(--primary-blue);
+      box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.2);
+      background-color: #ffffff;
+    }
+
+    /* Standardized CR80 ID Card Frame (3.375in x 2.125in) */
     .id-card-frame {
       width: 3.375in;
       height: 2.125in;
@@ -184,7 +207,7 @@ const renderSystemHead = (title) => `
       box-sizing: border-box;
     }
     .id-card-header {
-      background: linear-gradient(90deg, var(--primary-navy) 0%, var(--accent-green) 100%);
+      background: linear-gradient(90deg, var(--primary-blue) 0%, var(--primary-green) 100%);
       color: white;
       padding: 4px 8px;
       display: flex;
@@ -399,34 +422,34 @@ app.get('/setup', async (req, res) => {
         <form action="/api/setup" method="POST">
           <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">1. Barangay Details</h6>
           <div class="mb-3">
-            <label class="form-label">Barangay Name</label>
+            <label class="form-label fw-semibold">Barangay Name</label>
             <input type="text" name="barangay_name" class="form-control" required placeholder="e.g. Barangay Central">
           </div>
           <div class="row">
             <div class="col-md-6 mb-3">
-              <label class="form-label">Municipality / City</label>
+              <label class="form-label fw-semibold">Municipality / City</label>
               <input type="text" name="municipality" class="form-control" required placeholder="Angeles City">
             </div>
             <div class="col-md-6 mb-3">
-              <label class="form-label">Province</label>
+              <label class="form-label fw-semibold">Province</label>
               <input type="text" name="province" class="form-control" required placeholder="Pampanga">
             </div>
           </div>
           <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-4">2. Super Admin Credentials</h6>
           <div class="mb-3">
-            <label class="form-label">Full Name</label>
+            <label class="form-label fw-semibold">Full Name</label>
             <input type="text" name="full_name" class="form-control" required placeholder="Hon. Admin Name">
           </div>
           <div class="mb-3">
-            <label class="form-label">Username</label>
+            <label class="form-label fw-semibold">Username</label>
             <input type="text" name="username" class="form-control" required placeholder="admin">
           </div>
           <div class="mb-3">
-            <label class="form-label">Email Address</label>
+            <label class="form-label fw-semibold">Email Address</label>
             <input type="email" name="email" class="form-control" required placeholder="admin@barangay.gov.ph">
           </div>
           <div class="mb-3">
-            <label class="form-label">Password</label>
+            <label class="form-label fw-semibold">Password</label>
             <input type="password" name="password" class="form-control" required minlength="6">
           </div>
           <button type="submit" class="btn btn-primary-custom w-100 py-2 mt-3 fw-bold">Complete System Setup</button>
@@ -492,13 +515,12 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (WITH BLUE/GREEN PALETTE & OFFICIALS SHOWCASE)
+// ROUTE 2: REDESIGNED LOGIN PAGE (LIGHT BLUE & LIGHT GREEN PALETTE + SCROLLABLE BARANGAY OFFICIALS)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
-  const bgImg = settings.login_background || DEFAULT_LOGIN_BG;
   
-  // Fetch Barangay Officials for the scrollable showcase
+  // Fetch Barangay Officials for the landing/scrollable showcase
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
   res.send(`
@@ -508,133 +530,155 @@ app.get('/login', async (req, res) => {
         scroll-behavior: smooth;
       }
       body {
-        background-color: #0b2341;
+        background: linear-gradient(135deg, #e0f2fe 0%, #e8f5e9 100%);
         overflow-x: hidden;
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(135deg, rgba(14, 47, 86, 0.90), rgba(32, 160, 104, 0.85)), url('${bgImg}');
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 40px 20px;
+        padding: 50px 20px;
         position: relative;
       }
       .glass-login-card {
-        background: rgba(255, 255, 255, 0.96);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 2px solid rgba(255, 255, 255, 0.8);
-        border-radius: 20px;
-        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
-        max-width: 440px;
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 2px solid #bae6fd;
+        border-radius: 24px;
+        box-shadow: 0 15px 35px rgba(2, 132, 199, 0.12);
+        max-width: 460px;
         width: 100%;
         padding: 40px 36px;
         transition: transform 0.3s ease;
       }
       .glass-login-card:hover {
-        transform: translateY(-4px);
+        transform: translateY(-3px);
       }
       .brand-logo-img {
         width: 90px;
         height: 90px;
         object-fit: cover;
         border-radius: 50%;
-        border: 3px solid #20a068;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+        border: 3px solid #16a34a;
+        box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
       }
-      .form-control-lg {
-        font-size: 0.95rem;
-        padding: 12px 16px;
-        border-radius: 10px;
+      .styled-fill-box {
+        position: relative;
+        margin-bottom: 22px;
       }
-      .input-group-text {
+      .styled-fill-box label {
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: #0369a1;
+        margin-bottom: 6px;
+        display: block;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+      }
+      .styled-fill-box .input-group-text {
+        background-color: #e0f2fe;
+        border: 1.5px solid #bbf7d0;
+        border-right: none;
+        color: #0284c7;
         border-top-left-radius: 10px;
         border-bottom-left-radius: 10px;
-        background-color: #eaf6f0 !important;
-        color: #154c79 !important;
-        border: 1px solid #ced4da;
       }
-      .btn-glow {
-        background: linear-gradient(90deg, #154c79 0%, #20a068 100%);
+      .styled-fill-box .form-control {
+        border: 1.5px solid #bbf7d0;
+        border-left: none;
+        border-top-right-radius: 10px;
+        border-bottom-right-radius: 10px;
+        padding: 12px 16px;
+        font-size: 0.95rem;
+      }
+      .styled-fill-box .form-control:focus {
+        border-color: #38bdf8;
+        box-shadow: none;
+      }
+      .btn-login-theme {
+        background: linear-gradient(90deg, #0284c7 0%, #16a34a 100%);
         border: none;
         border-radius: 10px;
         padding: 13px;
         font-size: 1.05rem;
+        font-weight: 700;
         letter-spacing: 0.5px;
-        box-shadow: 0 4px 15px rgba(32, 160, 104, 0.35);
+        color: white;
+        box-shadow: 0 4px 15px rgba(2, 132, 199, 0.3);
         transition: all 0.25s ease;
       }
-      .btn-glow:hover {
-        background: linear-gradient(90deg, #0e2f56 0%, #198254 100%);
-        box-shadow: 0 6px 20px rgba(14, 47, 86, 0.5);
+      .btn-login-theme:hover {
+        opacity: 0.95;
+        box-shadow: 0 6px 20px rgba(22, 163, 74, 0.4);
       }
       .scroll-down-hint {
         position: absolute;
-        bottom: 20px;
-        color: white;
+        bottom: 25px;
+        color: #0284c7;
         text-align: center;
         animation: bounce 2s infinite;
         text-decoration: none;
+        font-weight: 600;
       }
       @keyframes bounce {
         0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-        40% { transform: translateY(-10px); }
-        60% { transform: translateY(-5px); }
+        40% { transform: translateY(-8px); }
+        60% { transform: translateY(-4px); }
       }
       .officials-section {
         padding: 80px 20px;
-        background-color: #f4f8f5;
+        background-color: #ffffff;
+        border-top: 3px solid #bbf7d0;
       }
       .official-card {
-        border-radius: 16px;
-        border: 1px solid #d4e8dd;
-        background: white;
+        border-radius: 20px;
+        border: 1.5px solid #e0f2fe;
+        background: #f0fdf4;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
       }
       .official-card:hover {
         transform: translateY(-6px);
-        box-shadow: 0 12px 24px rgba(14, 47, 86, 0.12);
+        box-shadow: 0 12px 24px rgba(2, 132, 199, 0.12);
       }
       .official-photo {
-        width: 120px;
-        height: 120px;
+        width: 130px;
+        height: 130px;
         object-fit: cover;
         border-radius: 50%;
-        border: 4px solid #20a068;
+        border: 4px solid #38bdf8;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.08);
       }
     </style>
 
-    <!-- SECTION 1: LOGIN CONTAINER -->
+    <!-- SECTION 1: LIGHT GREEN & BLUE LOGIN CONTAINER -->
     <div class="login-section">
       <div class="glass-login-card">
         <div class="text-center mb-4">
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-primary-blue display-3 mb-2"></i>'}
-          <h3 class="fw-bold text-dark m-0" style="color: #0e2f56 !important;">${settings.barangay_name || 'BARANGAY PORTAL'}</h3>
+          <h3 class="fw-bold text-dark m-0" style="color: #0369a1 !important;">${settings.barangay_name || 'BARANGAY PORTAL'}</h3>
           <p class="text-muted small mt-1">Resident & Administration System</p>
           <span class="badge bg-accent-green px-3 py-2 rounded-pill mt-1"><i class="bi bi-shield-check me-1"></i> Official Portal</span>
         </div>
 
         <form action="/api/login" method="POST">
-          <div class="mb-3">
-            <label class="form-label fw-semibold text-secondary small">USERNAME OR EMAIL</label>
+          <div class="styled-fill-box">
+            <label>Username or Email Address</label>
             <div class="input-group">
               <span class="input-group-text"><i class="bi bi-person-fill fs-5"></i></span>
-              <input type="text" name="identifier" class="form-control form-control-lg border-start-0" required placeholder="Enter username or email">
+              <input type="text" name="identifier" class="form-control" required placeholder="Enter your username or email">
             </div>
           </div>
-          <div class="mb-4">
-            <label class="form-label fw-semibold text-secondary small">PASSWORD</label>
+          <div class="styled-fill-box">
+            <label>Account Password</label>
             <div class="input-group">
               <span class="input-group-text"><i class="bi bi-lock-fill fs-5"></i></span>
-              <input type="password" name="password" class="form-control form-control-lg border-start-0" required placeholder="Enter your password">
+              <input type="password" name="password" class="form-control" required placeholder="Enter your password">
             </div>
           </div>
-          <button type="submit" class="btn btn-primary btn-glow w-100 fw-bold text-white"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
+          <button type="submit" class="btn btn-login-theme w-100 mt-2"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
         </form>
 
         <div class="text-center mt-4 border-top pt-3">
@@ -643,7 +687,7 @@ app.get('/login', async (req, res) => {
         </div>
       </div>
 
-      <a href="#officials-section" class="scroll-down-hint fw-bold">
+      <a href="#officials-section" class="scroll-down-hint">
         <span class="d-block small">Scroll down to view Barangay Officials</span>
         <i class="bi bi-chevron-down fs-4"></i>
       </a>
@@ -653,16 +697,16 @@ app.get('/login', async (req, res) => {
     <div id="officials-section" class="officials-section">
       <div class="container">
         <div class="text-center mb-5">
-          <h2 class="fw-bold" style="color: #0e2f56;"><i class="bi bi-person-lines-fill me-2 text-accent-green"></i>Barangay Officials</h2>
+          <h2 class="fw-bold text-primary-blue"><i class="bi bi-person-lines-fill me-2 text-accent-green"></i>Barangay Officials</h2>
           <p class="text-muted">Dedicated to serving our community with transparency, integrity, and diligence.</p>
-          <div class="mx-auto bg-accent-green" style="height: 4px; width: 70px; border-radius: 2px;"></div>
+          <div class="mx-auto bg-accent-green" style="height: 4px; width: 80px; border-radius: 2px;"></div>
         </div>
 
         <div class="row g-4 justify-content-center">
           ${(officials || []).map(o => `
             <div class="col-md-4 col-lg-3">
-              <div class="card official-card p-4 text-center h-100 shadow-sm">
-                <img src="${o.photo_url || 'https://via.placeholder.com/120'}" class="official-photo mx-auto mb-3" alt="${o.name}">
+              <div class="card official-card p-4 text-center h-100">
+                <img src="${o.photo_url || 'https://via.placeholder.com/130'}" class="official-photo mx-auto mb-3" alt="${o.name}">
                 <h5 class="fw-bold text-dark mb-1">${o.name}</h5>
                 <span class="badge bg-primary-blue px-3 py-2 rounded-pill mt-1 mb-2">${o.position}</span>
                 ${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height: 32px; object-fit: contain;" alt="Signature">` : ''}
@@ -733,36 +777,36 @@ app.get('/register', async (req, res) => {
               <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">Personal Information</h6>
               <div class="row">
                 <div class="col-md-4 mb-3">
-                  <label class="form-label">First Name *</label>
+                  <label class="form-label fw-semibold">First Name *</label>
                   <input type="text" name="first_name" class="form-control" required placeholder="First Name">
                 </div>
                 <div class="col-md-4 mb-3">
-                  <label class="form-label">Middle Name</label>
+                  <label class="form-label fw-semibold">Middle Name</label>
                   <input type="text" name="middle_name" class="form-control" placeholder="Middle Name">
                 </div>
                 <div class="col-md-4 mb-3">
-                  <label class="form-label">Last Name *</label>
+                  <label class="form-label fw-semibold">Last Name *</label>
                   <input type="text" name="last_name" class="form-control" required placeholder="Last Name">
                 </div>
               </div>
               <div class="row">
                 <div class="col-md-3 mb-3">
-                  <label class="form-label">Suffix</label>
+                  <label class="form-label fw-semibold">Suffix</label>
                   <input type="text" name="suffix" class="form-control" placeholder="e.g. Jr., III">
                 </div>
                 <div class="col-md-3 mb-3">
-                  <label class="form-label">Date of Birth *</label>
+                  <label class="form-label fw-semibold">Date of Birth *</label>
                   <input type="date" name="date_of_birth" class="form-control" required>
                 </div>
                 <div class="col-md-3 mb-3">
-                  <label class="form-label">Gender *</label>
+                  <label class="form-label fw-semibold">Gender *</label>
                   <select name="gender" class="form-select" required>
                     <option value="Male">Male</option>
                     <option value="Female">Female</option>
                   </select>
                 </div>
                 <div class="col-md-3 mb-3">
-                  <label class="form-label">Civil Status *</label>
+                  <label class="form-label fw-semibold">Civil Status *</label>
                   <select name="civil_status" class="form-select" required>
                     <option value="Single">Single</option>
                     <option value="Married">Married</option>
@@ -775,23 +819,23 @@ app.get('/register', async (req, res) => {
               <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-3">Address & Contact</h6>
               <div class="row">
                 <div class="col-md-6 mb-3">
-                  <label class="form-label">Purok *</label>
+                  <label class="form-label fw-semibold">Purok *</label>
                   <select name="purok_id" class="form-select" required>
                     ${(puroks || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
                   </select>
                 </div>
                 <div class="col-md-6 mb-3">
-                  <label class="form-label">Complete House Address *</label>
+                  <label class="form-label fw-semibold">Complete House Address *</label>
                   <input type="text" name="address" class="form-control" required placeholder="House No., Street Name">
                 </div>
               </div>
               <div class="row">
                 <div class="col-md-6 mb-3">
-                  <label class="form-label">Contact Number *</label>
+                  <label class="form-label fw-semibold">Contact Number *</label>
                   <input type="text" name="contact_number" class="form-control" required placeholder="09XXXXXXXXX">
                 </div>
                 <div class="col-md-6 mb-3">
-                  <label class="form-label">Occupation</label>
+                  <label class="form-label fw-semibold">Occupation</label>
                   <input type="text" name="occupation" class="form-control" placeholder="Occupation">
                 </div>
               </div>
@@ -799,11 +843,11 @@ app.get('/register', async (req, res) => {
               <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-3">Account Credentials</h6>
               <div class="row">
                 <div class="col-md-6 mb-3">
-                  <label class="form-label">Email Address (Username) *</label>
+                  <label class="form-label fw-semibold">Email Address (Username) *</label>
                   <input type="email" name="email" class="form-control" required placeholder="name@email.com">
                 </div>
                 <div class="col-md-6 mb-3">
-                  <label class="form-label">Account Password *</label>
+                  <label class="form-label fw-semibold">Account Password *</label>
                   <input type="password" name="password" class="form-control" required minlength="6">
                 </div>
               </div>
@@ -1122,25 +1166,25 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
             </div>
             <div class="modal-body">
               <div class="row g-3">
-                <div class="col-md-4"><label class="form-label">First Name *</label><input type="text" name="first_name" class="form-control" required></div>
-                <div class="col-md-4"><label class="form-label">Middle Name</label><input type="text" name="middle_name" class="form-control"></div>
-                <div class="col-md-4"><label class="form-label">Last Name *</label><input type="text" name="last_name" class="form-control" required></div>
-                <div class="col-md-4"><label class="form-label">Date of Birth *</label><input type="date" name="date_of_birth" class="form-control" required></div>
+                <div class="col-md-4"><label class="form-label fw-semibold">First Name *</label><input type="text" name="first_name" class="form-control" required></div>
+                <div class="col-md-4"><label class="form-label fw-semibold">Middle Name</label><input type="text" name="middle_name" class="form-control"></div>
+                <div class="col-md-4"><label class="form-label fw-semibold">Last Name *</label><input type="text" name="last_name" class="form-control" required></div>
+                <div class="col-md-4"><label class="form-label fw-semibold">Date of Birth *</label><input type="date" name="date_of_birth" class="form-control" required></div>
                 <div class="col-md-4">
-                  <label class="form-label">Gender *</label>
+                  <label class="form-label fw-semibold">Gender *</label>
                   <select name="gender" class="form-select"><option value="Male">Male</option><option value="Female">Female</option></select>
                 </div>
                 <div class="col-md-4">
-                  <label class="form-label">Civil Status *</label>
+                  <label class="form-label fw-semibold">Civil Status *</label>
                   <select name="civil_status" class="form-select"><option value="Single">Single</option><option value="Married">Married</option><option value="Widowed">Widowed</option></select>
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label">Purok *</label>
+                  <label class="form-label fw-semibold">Purok *</label>
                   <select name="purok_id" class="form-select">${(puroks || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('')}</select>
                 </div>
-                <div class="col-md-6"><label class="form-label">Address *</label><input type="text" name="address" class="form-control" required></div>
-                <div class="col-md-6"><label class="form-label">Contact Number</label><input type="text" name="contact_number" class="form-control"></div>
-                <div class="col-md-6"><label class="form-label">Email</label><input type="email" name="email" class="form-control"></div>
+                <div class="col-md-6"><label class="form-label fw-semibold">Address *</label><input type="text" name="address" class="form-control" required></div>
+                <div class="col-md-6"><label class="form-label fw-semibold">Contact Number</label><input type="text" name="contact_number" class="form-control"></div>
+                <div class="col-md-6"><label class="form-label fw-semibold">Email</label><input type="email" name="email" class="form-control"></div>
               </div>
             </div>
             <div class="modal-footer">
@@ -1214,7 +1258,7 @@ app.get('/admin/resident/view/:id', authenticateToken, requireRole(['Super Admin
     <div class="row g-4">
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 140px; height: 140px; object-fit: cover; border: 3px solid #154c79;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 140px; height: 140px; object-fit: cover; border: 3px solid #0284c7;">
           <h5 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h5>
           <span class="text-primary-blue fw-bold">${resident.resident_number}</span>
           <p class="text-muted small">${resident.puroks ? resident.puroks.name : 'No Purok'}</p>
@@ -1315,8 +1359,8 @@ app.get('/admin/puroks', authenticateToken, requireRole(['Super Admin', 'Baranga
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3"><label class="form-label">Purok Name *</label><input type="text" name="name" class="form-control" required placeholder="e.g. Purok 4"></div>
-              <div class="mb-3"><label class="form-label">Description</label><textarea name="description" class="form-control"></textarea></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Purok Name *</label><input type="text" name="name" class="form-control" required placeholder="e.g. Purok 4"></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Description</label><textarea name="description" class="form-control"></textarea></div>
             </div>
             <div class="modal-footer">
               <button type="submit" class="btn btn-primary-custom">Save Purok</button>
@@ -1387,12 +1431,12 @@ app.get('/admin/households', authenticateToken, requireRole(['Super Admin', 'Bar
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3"><label class="form-label">Head of Household Name *</label><input type="text" name="head_resident_name" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Head of Household Name *</label><input type="text" name="head_resident_name" class="form-control" required></div>
               <div class="mb-3">
-                <label class="form-label">Purok Zone *</label>
+                <label class="form-label fw-semibold">Purok Zone *</label>
                 <select name="purok_id" class="form-select">${(puroks || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('')}</select>
               </div>
-              <div class="mb-3"><label class="form-label">Address *</label><input type="text" name="address" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Address *</label><input type="text" name="address" class="form-control" required></div>
             </div>
             <div class="modal-footer">
               <button type="submit" class="btn btn-primary-custom">Save Household</button>
@@ -1510,7 +1554,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
               <img src="${r.photo_url || 'https://via.placeholder.com/150'}" class="id-photo">
               <div class="id-details">
                 <div class="text-primary-blue fw-bold" style="font-size: 8pt;">${r.resident_number}</div>
-                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${r.first_name}${r.last_name}</div>
+                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${r.first_name} ${r.last_name}</div>
                 <div class="text-muted mt-1">DOB: <strong>${r.date_of_birth}</strong></div>
                 <div class="text-muted">Sex: <strong>${r.gender}</strong> | Civil: <strong>${r.civil_status || 'Single'}</strong></div>
                 <div class="text-muted">Purok: <strong>${r.puroks ? r.puroks.name : '-'}</strong></div>
@@ -1784,11 +1828,11 @@ app.get('/admin/blotters', authenticateToken, requireRole(['Super Admin', 'Baran
             </div>
             <div class="modal-body">
               <div class="row g-3">
-                <div class="col-md-6"><label class="form-label">Complainant Name *</label><input type="text" name="complainant_name" class="form-control" required></div>
-                <div class="col-md-6"><label class="form-label">Respondent Name *</label><input type="text" name="respondent_name" class="form-control" required></div>
-                <div class="col-md-6"><label class="form-label">Incident Date *</label><input type="date" name="incident_date" class="form-control" required></div>
-                <div class="col-md-6"><label class="form-label">Location *</label><input type="text" name="location" class="form-control" required></div>
-                <div class="col-12"><label class="form-label">Description of Incident *</label><textarea name="description" class="form-control" rows="3" required></textarea></div>
+                <div class="col-md-6"><label class="form-label fw-semibold">Complainant Name *</label><input type="text" name="complainant_name" class="form-control" required></div>
+                <div class="col-md-6"><label class="form-label fw-semibold">Respondent Name *</label><input type="text" name="respondent_name" class="form-control" required></div>
+                <div class="col-md-6"><label class="form-label fw-semibold">Incident Date *</label><input type="date" name="incident_date" class="form-control" required></div>
+                <div class="col-md-6"><label class="form-label fw-semibold">Location *</label><input type="text" name="location" class="form-control" required></div>
+                <div class="col-12"><label class="form-label fw-semibold">Description of Incident *</label><textarea name="description" class="form-control" rows="3" required></textarea></div>
               </div>
             </div>
             <div class="modal-footer">
@@ -1939,9 +1983,9 @@ app.get('/admin/announcements', authenticateToken, requireRole(['Super Admin', '
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3"><label class="form-label">Title *</label><input type="text" name="title" class="form-control" required></div>
-              <div class="mb-3"><label class="form-label">Priority *</label><select name="priority" class="form-select"><option value="Normal">Normal</option><option value="Emergency">Emergency</option></select></div>
-              <div class="mb-3"><label class="form-label">Content *</label><textarea name="content" class="form-control" rows="4" required></textarea></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Title *</label><input type="text" name="title" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Priority *</label><select name="priority" class="form-select"><option value="Normal">Normal</option><option value="Emergency">Emergency</option></select></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Content *</label><textarea name="content" class="form-control" rows="4" required></textarea></div>
             </div>
             <div class="modal-footer">
               <button type="submit" class="btn btn-primary-custom">Publish Announcement</button>
@@ -1996,11 +2040,11 @@ app.get('/admin/events', authenticateToken, requireRole(['Super Admin', 'Baranga
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3"><label class="form-label">Event Name *</label><input type="text" name="event_name" class="form-control" required></div>
-              <div class="mb-3"><label class="form-label">Date *</label><input type="date" name="event_date" class="form-control" required></div>
-              <div class="mb-3"><label class="form-label">Time *</label><input type="text" name="event_time" class="form-control" required placeholder="e.g. 9:00 AM"></div>
-              <div class="mb-3"><label class="form-label">Location *</label><input type="text" name="location" class="form-control" required></div>
-              <div class="mb-3"><label class="form-label">Description *</label><textarea name="description" class="form-control" rows="3" required></textarea></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Event Name *</label><input type="text" name="event_name" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Date *</label><input type="date" name="event_date" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Time *</label><input type="text" name="event_time" class="form-control" required placeholder="e.g. 9:00 AM"></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Location *</label><input type="text" name="location" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Description *</label><textarea name="description" class="form-control" rows="3" required></textarea></div>
             </div>
             <div class="modal-footer">
               <button type="submit" class="btn btn-primary-custom">Save Event</button>
@@ -2057,9 +2101,9 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3"><label class="form-label">Full Name *</label><input type="text" name="name" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Full Name *</label><input type="text" name="name" class="form-control" required></div>
               <div class="mb-3">
-                <label class="form-label">Position *</label>
+                <label class="form-label fw-semibold">Position *</label>
                 <select name="position" class="form-select" required>
                   <option value="Barangay Captain">Barangay Captain</option>
                   <option value="Barangay Kagawad">Barangay Kagawad</option>
@@ -2145,12 +2189,12 @@ app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3"><label class="form-label">Full Name *</label><input type="text" name="full_name" class="form-control" required></div>
-              <div class="mb-3"><label class="form-label">Username *</label><input type="text" name="username" class="form-control" required></div>
-              <div class="mb-3"><label class="form-label">Email *</label><input type="email" name="email" class="form-control" required></div>
-              <div class="mb-3"><label class="form-label">Password *</label><input type="password" name="password" class="form-control" required minlength="6"></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Full Name *</label><input type="text" name="full_name" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Username *</label><input type="text" name="username" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Email *</label><input type="email" name="email" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Password *</label><input type="password" name="password" class="form-control" required minlength="6"></div>
               <div class="mb-3">
-                <label class="form-label">Role *</label>
+                <label class="form-label fw-semibold">Role *</label>
                 <select name="role" class="form-select" required>
                   <option value="Barangay Admin">Barangay Admin</option>
                   <option value="Barangay Secretary">Barangay Secretary</option>
@@ -2291,32 +2335,32 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
 
       <form action="/api/admin/settings/update" method="POST" enctype="multipart/form-data">
         <div class="mb-3">
-          <label class="form-label">Barangay Name</label>
+          <label class="form-label fw-semibold">Barangay Name</label>
           <input type="text" name="barangay_name" class="form-control" value="${settings.barangay_name || ''}" required>
         </div>
         <div class="row">
           <div class="col-md-6 mb-3">
-            <label class="form-label">Municipality / City</label>
+            <label class="form-label fw-semibold">Municipality / City</label>
             <input type="text" name="municipality" class="form-control" value="${settings.municipality || ''}" required>
           </div>
           <div class="col-md-6 mb-3">
-            <label class="form-label">Province</label>
+            <label class="form-label fw-semibold">Province</label>
             <input type="text" name="province" class="form-control" value="${settings.province || ''}" required>
           </div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Barangay Captain Name</label>
+          <label class="form-label fw-semibold">Barangay Captain Name</label>
           <input type="text" name="barangay_captain" class="form-control" value="${settings.barangay_captain || ''}">
         </div>
 
         <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Branding Assets Upload</h6>
         <div class="mb-3">
-          <label class="form-label">Barangay Logo</label>
+          <label class="form-label fw-semibold">Barangay Logo</label>
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:60px; height:60px; object-fit:cover;">` : ''}
           <input type="file" name="logo" class="form-control" accept="image/*">
         </div>
         <div class="mb-3">
-          <label class="form-label">Barangay Captain Digital Signature</label>
+          <label class="form-label fw-semibold">Barangay Captain Digital Signature</label>
           ${settings.captain_signature ? `<img src="${settings.captain_signature}" class="d-block mb-2" style="height:35px;">` : ''}
           <input type="file" name="signature" class="form-control" accept="image/*">
         </div>
@@ -2350,7 +2394,7 @@ app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Ad
 });
 
 // ==========================================
-// ROUTE 20: RESIDENT PORTAL & PHOTO CHANGE
+// ROUTE 20: RESIDENT PORTAL & PROFILE PHOTO CHANGE
 // ==========================================
 app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
@@ -2383,7 +2427,12 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #20a068;">
+          <div class="position-relative d-inline-block mx-auto mb-2">
+            <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle" style="width:90px; height:90px; object-fit:cover; border: 3px solid #16a34a;">
+            <button class="btn btn-sm btn-accent-custom rounded-circle position-absolute bottom-0 end-0 p-1" data-bs-toggle="modal" data-bs-target="#changePhotoModal" title="Change Photo">
+              <i class="bi bi-camera-fill" style="font-size: 0.75rem;"></i>
+            </button>
+          </div>
           <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
           <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
           <div class="mt-3">
@@ -2392,12 +2441,37 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
         </div>
       </div>
     </div>
+
+    <!-- Upload Photo Modal -->
+    <div class="modal fade" id="changePhotoModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <form action="/api/resident/upload-photo" method="POST" enctype="multipart/form-data">
+            <div class="modal-header bg-primary-blue text-white">
+              <h5 class="modal-title fw-bold"><i class="bi bi-camera me-2"></i>Change Profile Picture</h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Select Photo File (PNG, JPG, JPEG) *</label>
+                <input type="file" name="photo" class="form-control" accept="image/*" required>
+                <small class="text-muted d-block mt-1">Select a front-facing image file.</small>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-accent-custom fw-bold"><i class="bi bi-upload me-1"></i> Upload Picture</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   `;
 
   res.send(renderAppLayout(req, 'res-dashboard', html, settings));
 });
 
-// Resident Profile & Profile Picture Change
+// Resident Profile & Picture Update
 app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
@@ -2406,20 +2480,20 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
     <div class="card card-custom p-4" style="max-width: 720px; margin: auto;">
       <div class="text-center mb-4">
         <div class="position-relative d-inline-block">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 135px; height: 135px; object-fit: cover; border: 4px solid #154c79; shadow: 0 4px 10px rgba(0,0,0,0.15);">
-          <button class="btn btn-sm btn-accent-custom rounded-circle position-absolute bottom-0 end-0 p-2" data-bs-toggle="modal" data-bs-target="#changePhotoModal" title="Change Photo">
-            <i class="bi bi-camera-fill"></i>
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 135px; height: 135px; object-fit: cover; border: 4px solid #0284c7; box-shadow: 0 4px 12px rgba(0,0,0,0.12);">
+          <button class="btn btn-accent-custom rounded-circle position-absolute bottom-0 end-0 p-2 shadow" data-bs-toggle="modal" data-bs-target="#changePhotoModal" title="Change Photo">
+            <i class="bi bi-camera-fill fs-6"></i>
           </button>
         </div>
         <h4 class="fw-bold text-primary-blue mt-2 m-0">${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</h4>
         <span class="badge bg-accent-green mt-1">${resident.resident_number}</span>
       </div>
 
-      <div class="card p-3 mb-4 bg-light border">
+      <div class="card p-3 mb-4 bg-light border border-success border-opacity-25">
         <div class="d-flex justify-content-between align-items-center">
           <div>
-            <h6 class="fw-bold text-primary-blue m-0"><i class="bi bi-image me-1"></i> Profile Picture Upload</h6>
-            <small class="text-muted">Upload or update your official resident identification photograph</small>
+            <h6 class="fw-bold text-primary-blue m-0"><i class="bi bi-image me-1"></i> Update Profile Picture</h6>
+            <small class="text-muted">Upload a new photograph for your digital resident ID</small>
           </div>
           <button class="btn btn-sm btn-accent-custom fw-bold" data-bs-toggle="modal" data-bs-target="#changePhotoModal"><i class="bi bi-upload me-1"></i> Upload Photo</button>
         </div>
@@ -2440,14 +2514,14 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
       <h6 class="fw-bold text-accent-green mb-2">Request Profile Correction</h6>
       <form action="/api/resident/request-profile-update" method="POST">
         <div class="mb-3">
-          <label class="form-label">Describe Needed Changes / Corrections *</label>
+          <label class="form-label fw-semibold">Describe Needed Changes / Corrections *</label>
           <textarea name="reason" class="form-control" rows="3" required placeholder="e.g. Correct address details or typo..."></textarea>
         </div>
         <button type="submit" class="btn btn-primary-custom">Submit Correction Request</button>
       </form>
     </div>
 
-    <!-- Modal: Change Profile Photo -->
+    <!-- Modal: Upload Profile Photo -->
     <div class="modal fade" id="changePhotoModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -2460,7 +2534,7 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
               <div class="mb-3">
                 <label class="form-label fw-semibold">Select Photo File (PNG, JPG, JPEG) *</label>
                 <input type="file" name="photo" class="form-control" accept="image/*" required>
-                <small class="text-muted d-block mt-1">Please upload a clear front-facing photograph.</small>
+                <small class="text-muted d-block mt-1">Please select a clear front-facing photograph.</small>
               </div>
             </div>
             <div class="modal-footer">
@@ -2593,7 +2667,7 @@ app.get('/resident/certificates', authenticateToken, requireRole(['Resident']), 
             </div>
             <div class="modal-body">
               <div class="mb-3">
-                <label class="form-label">Certificate Type *</label>
+                <label class="form-label fw-semibold">Certificate Type *</label>
                 <select name="certificate_type" class="form-select" required>
                   <option value="Barangay Clearance">Barangay Clearance</option>
                   <option value="Certificate of Residency">Certificate of Residency</option>
@@ -2601,7 +2675,7 @@ app.get('/resident/certificates', authenticateToken, requireRole(['Resident']), 
                   <option value="Certificate of Good Moral">Certificate of Good Moral</option>
                 </select>
               </div>
-              <div class="mb-3"><label class="form-label">Purpose *</label><input type="text" name="purpose" class="form-control" required placeholder="e.g. Employment, Scholarship, ID application"></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Purpose *</label><input type="text" name="purpose" class="form-control" required placeholder="e.g. Employment, Scholarship, ID application"></div>
             </div>
             <div class="modal-footer">
               <button type="submit" class="btn btn-primary-custom">Submit Application</button>
@@ -2668,9 +2742,9 @@ app.get('/resident/appointments', authenticateToken, requireRole(['Resident']), 
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3"><label class="form-label">Service Requested *</label><input type="text" name="service_requested" class="form-control" required placeholder="e.g. Consult Captain, Document Filing"></div>
-              <div class="mb-3"><label class="form-label">Preferred Date *</label><input type="date" name="appointment_date" class="form-control" required></div>
-              <div class="mb-3"><label class="form-label">Preferred Time *</label><input type="text" name="appointment_time" class="form-control" required placeholder="e.g. 10:00 AM"></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Service Requested *</label><input type="text" name="service_requested" class="form-control" required placeholder="e.g. Consult Captain, Document Filing"></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Preferred Date *</label><input type="date" name="appointment_date" class="form-control" required></div>
+              <div class="mb-3"><label class="form-label fw-semibold">Preferred Time *</label><input type="text" name="appointment_time" class="form-control" required placeholder="e.g. 10:00 AM"></div>
             </div>
             <div class="modal-footer">
               <button type="submit" class="btn btn-primary-custom">Submit Appointment</button>
@@ -2699,10 +2773,10 @@ app.get('/resident/complaints', authenticateToken, requireRole(['Resident']), as
     <div class="card card-custom p-4" style="max-width: 600px; margin: auto;">
       <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-exclamation-triangle me-2"></i>File Community Incident or Complaint</h4>
       <form action="/api/resident/complaint/submit" method="POST">
-        <div class="mb-3"><label class="form-label">Respondent Name / Entity *</label><input type="text" name="respondent_name" class="form-control" required></div>
-        <div class="mb-3"><label class="form-label">Incident Date *</label><input type="date" name="incident_date" class="form-control" required></div>
-        <div class="mb-3"><label class="form-label">Incident Location *</label><input type="text" name="location" class="form-control" required></div>
-        <div class="mb-3"><label class="form-label">Detailed Description *</label><textarea name="description" class="form-control" rows="4" required></textarea></div>
+        <div class="mb-3"><label class="form-label fw-semibold">Respondent Name / Entity *</label><input type="text" name="respondent_name" class="form-control" required></div>
+        <div class="mb-3"><label class="form-label fw-semibold">Incident Date *</label><input type="date" name="incident_date" class="form-control" required></div>
+        <div class="mb-3"><label class="form-label fw-semibold">Incident Location *</label><input type="text" name="location" class="form-control" required></div>
+        <div class="mb-3"><label class="form-label fw-semibold">Detailed Description *</label><textarea name="description" class="form-control" rows="4" required></textarea></div>
         <button type="submit" class="btn btn-accent-custom py-2 w-100 fw-bold">Submit Confidential Complaint</button>
       </form>
     </div>
@@ -2733,7 +2807,7 @@ app.get('/resident/assistance', authenticateToken, requireRole(['Resident']), as
       <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-heart-pulse me-2"></i>Apply for Barangay Aid & Assistance</h4>
       <form action="/api/resident/assistance/request" method="POST">
         <div class="mb-3">
-          <label class="form-label">Assistance Type *</label>
+          <label class="form-label fw-semibold">Assistance Type *</label>
           <select name="assistance_type" class="form-select" required>
             <option value="Financial Assistance">Financial Assistance</option>
             <option value="Medical Assistance">Medical Assistance</option>
@@ -2742,7 +2816,7 @@ app.get('/resident/assistance', authenticateToken, requireRole(['Resident']), as
             <option value="Emergency Assistance">Emergency Assistance</option>
           </select>
         </div>
-        <div class="mb-3"><label class="form-label">Details / Reason *</label><textarea name="details" class="form-control" rows="3" required></textarea></div>
+        <div class="mb-3"><label class="form-label fw-semibold">Details / Reason *</label><textarea name="details" class="form-control" rows="3" required></textarea></div>
         <button type="submit" class="btn btn-primary-custom py-2 w-100 fw-bold">Submit Application</button>
       </form>
     </div>
@@ -2828,11 +2902,11 @@ app.get('/resident/feedback', authenticateToken, requireRole(['Resident']), asyn
       <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-chat-left-text me-2"></i>Barangay Service Feedback</h4>
       <form action="/api/resident/feedback/submit" method="POST">
         <div class="mb-3">
-          <label class="form-label">Service Evaluated *</label>
+          <label class="form-label fw-semibold">Service Evaluated *</label>
           <input type="text" name="service_type" class="form-control" required placeholder="e.g. Document Request, Captain Consultation">
         </div>
         <div class="mb-3">
-          <label class="form-label">Rating (1 to 5 Stars) *</label>
+          <label class="form-label fw-semibold">Rating (1 to 5 Stars) *</label>
           <select name="rating" class="form-select" required>
             <option value="5">5 Stars - Excellent</option>
             <option value="4">4 Stars - Very Good</option>
@@ -2841,7 +2915,7 @@ app.get('/resident/feedback', authenticateToken, requireRole(['Resident']), asyn
             <option value="1">1 Star - Very Poor</option>
           </select>
         </div>
-        <div class="mb-3"><label class="form-label">Comments *</label><textarea name="comments" class="form-control" rows="3" required></textarea></div>
+        <div class="mb-3"><label class="form-label fw-semibold">Comments *</label><textarea name="comments" class="form-control" rows="3" required></textarea></div>
         <button type="submit" class="btn btn-primary-custom py-2 w-100 fw-bold">Submit Feedback</button>
       </form>
     </div>
