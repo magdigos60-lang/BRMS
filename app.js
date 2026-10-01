@@ -2056,7 +2056,7 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
     <div class="modal fade" id="addOfficialModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
-          <form action="/api/admin/official/add" method="POST">
+          <form action="/api/admin/official/add" method="POST" enctype="multipart/form-data">
             <div class="modal-header bg-primary-blue text-white">
               <h5 class="modal-title fw-bold">Add Barangay Official</h5>
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -2073,6 +2073,10 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
                   <option value="SK Chairman">SK Chairman</option>
                 </select>
               </div>
+              <div class="mb-3">
+                <label class="form-label">Official Photo</label>
+                <input type="file" name="photo" class="form-control" accept="image/*">
+              </div>
             </div>
             <div class="modal-footer">
               <button type="submit" class="btn btn-primary-custom">Save Official</button>
@@ -2086,9 +2090,15 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
   res.send(renderAppLayout(req, 'officials', html, settings));
 });
 
-app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
+app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.single('photo'), async (req, res) => {
   const { name, position } = req.body;
-  await supabase.from('barangay_officials').insert([{ name, position }]);
+  let photo_url = null;
+
+  if (req.file) {
+    photo_url = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+  }
+
+  await supabase.from('barangay_officials').insert([{ name, position, photo_url }]);
   res.redirect('/admin/officials');
 });
 
@@ -2389,9 +2399,9 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
-          <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
-          <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
+          <img src="${resident && resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
+          <h6 class="fw-bold m-0">${resident ? resident.first_name : ''} ${resident ? resident.last_name : ''}</h6>
+          <span class="text-primary-blue small fw-bold">${resident ? resident.resident_number : ''}</span>
           <div class="mt-3">
             <a href="/resident/digital-id" class="btn btn-sm btn-accent-custom w-100 fw-bold"><i class="bi bi-qr-code me-1"></i> View Full Digital ID</a>
           </div>
@@ -2411,9 +2421,9 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
   const html = `
     <div class="card card-custom p-4" style="max-width: 700px; margin: auto;">
       <div class="text-center mb-4">
-        <img src="${resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 130px; height: 130px; object-fit: cover; border: 3px solid #0d6efd;">
-        <h4 class="fw-bold text-primary-blue m-0">${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</h4>
-        <span class="badge bg-accent-green mt-1">${resident.resident_number}</span>
+        <img src="${resident && resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 130px; height: 130px; object-fit: cover; border: 3px solid #0d6efd;">
+        <h4 class="fw-bold text-primary-blue m-0">${resident ? resident.first_name : ''} ${resident && resident.middle_name ? resident.middle_name : ''} ${resident ? resident.last_name : ''}</h4>
+        <span class="badge bg-accent-green mt-1">${resident ? resident.resident_number : ''}</span>
       </div>
 
       <div class="card p-3 mb-4 bg-light border">
@@ -2428,13 +2438,13 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
 
       <h5 class="fw-bold text-primary-blue mb-3"><i class="bi bi-person me-2"></i>My Resident Official Profile</h5>
       <div class="row g-3">
-        <div class="col-6"><strong>Full Name:</strong> ${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</div>
-        <div class="col-6"><strong>Resident ID:</strong> ${resident.resident_number}</div>
-        <div class="col-6"><strong>Date of Birth:</strong> ${resident.date_of_birth}</div>
-        <div class="col-6"><strong>Gender:</strong> ${resident.gender}</div>
-        <div class="col-6"><strong>Civil Status:</strong> ${resident.civil_status}</div>
-        <div class="col-6"><strong>Purok Zone:</strong> ${resident.puroks ? resident.puroks.name : '-'}</div>
-        <div class="col-12"><strong>Address:</strong> ${resident.address}</div>
+        <div class="col-6"><strong>Full Name:</strong> ${resident ? resident.first_name : ''} ${resident && resident.middle_name ? resident.middle_name : ''} ${resident ? resident.last_name : ''}</div>
+        <div class="col-6"><strong>Resident ID:</strong> ${resident ? resident.resident_number : ''}</div>
+        <div class="col-6"><strong>Date of Birth:</strong> ${resident ? resident.date_of_birth : ''}</div>
+        <div class="col-6"><strong>Gender:</strong> ${resident ? resident.gender : ''}</div>
+        <div class="col-6"><strong>Civil Status:</strong> ${resident ? resident.civil_status : ''}</div>
+        <div class="col-6"><strong>Purok Zone:</strong> ${resident && resident.puroks ? resident.puroks.name : '-'}</div>
+        <div class="col-12"><strong>Address:</strong> ${resident ? resident.address : ''}</div>
       </div>
 
       <hr class="my-4">
@@ -2495,13 +2505,13 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
         </div>
 
         <div class="id-card-body">
-          <img src="${resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
+          <img src="${resident && resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
           <div class="id-details">
-            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident.resident_number}</div>
-            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident.first_name} ${resident.last_name}</div>
-            <div class="text-muted mt-1">DOB: <strong>${resident.date_of_birth}</strong></div>
-            <div class="text-muted">Sex: <strong>${resident.gender}</strong> | Civil: <strong>${resident.civil_status || 'Single'}</strong></div>
-            <div class="text-muted">Purok: <strong>${resident.puroks ? resident.puroks.name : '-'}</strong></div>
+            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident ? resident.resident_number : ''}</div>
+            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident ? resident.first_name : ''} ${resident ? resident.last_name : ''}</div>
+            <div class="text-muted mt-1">DOB: <strong>${resident ? resident.date_of_birth : ''}</strong></div>
+            <div class="text-muted">Sex: <strong>${resident ? resident.gender : ''}</strong> | Civil: <strong>${resident && resident.civil_status ? resident.civil_status : 'Single'}</strong></div>
+            <div class="text-muted">Purok: <strong>${resident && resident.puroks ? resident.puroks.name : '-'}</strong></div>
           </div>
           <img src="${qrDataUrl}" class="id-qr" style="width: 1.1in; height: 1.1in;">
         </div>
