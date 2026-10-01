@@ -89,7 +89,7 @@ const DEFAULT_LOGIN_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/4
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
-// Palette Inspired by Design Specs: Deep Blue, Vibrant Blue, Emerald Green, Light Mint
+// Palette Updated with Light Green and Light Blue Design Specs
 // ==========================================
 const renderSystemHead = (title) => `
 <!DOCTYPE html>
@@ -106,8 +106,7 @@ const renderSystemHead = (title) => `
       --primary-blue: #134074;
       --accent-green: #00a86b;
       --light-green: #eef7f2;
-      --light-blue: #e0ecf8;
-      --soft-mint: #8da9c4;
+      --light-blue: #8da9c4;
       --pure-white: #ffffff;
       --bg-light: #f4f7f6;
       --text-dark: #1d2d44;
@@ -124,6 +123,7 @@ const renderSystemHead = (title) => `
     .bg-light-blue { background-color: var(--light-blue) !important; }
     .text-primary-blue { color: var(--primary-blue) !important; }
     .text-accent-green { color: var(--accent-green) !important; }
+    .text-light-blue { color: var(--light-blue) !important; }
     
     .btn-primary-custom {
       background-color: var(--primary-blue);
@@ -378,7 +378,6 @@ app.use(async (req, res, next) => {
   next();
 });
 
-// Helper: Fetch Global Barangay Settings
 const getSettings = async () => {
   const { data } = await supabase.from('system_settings').select('*').single();
   return data || {};
@@ -452,14 +451,12 @@ app.post('/api/setup', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
 
-    // Insert Admin User
     const { data: user, error: userError } = await supabase.from('users').insert([{
       username, email, password_hash, full_name, role: 'Super Admin', status: 'Active'
     }]).select().single();
 
     if (userError) throw userError;
 
-    // Save System Settings
     if (existingSettings) {
       await supabase.from('system_settings').update({
         barangay_name, municipality, province, setup_completed: true, updated_at: new Date()
@@ -470,7 +467,6 @@ app.post('/api/setup', async (req, res) => {
       }]);
     }
 
-    // Default Puroks Insertion
     await supabase.from('puroks').insert([
       { name: 'Purok 1', description: 'Zone 1' },
       { name: 'Purok 2', description: 'Zone 2' },
@@ -496,13 +492,12 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (WITH LIGHT GREEN/BLUE THEME & SCROLLABLE OFFICIALS)
+// ROUTE 2: REDESIGNED LOGIN PAGE (WITH SCROLLABLE BARANGAY OFFICIALS SHOWCASE)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
   const bgImg = settings.login_background || DEFAULT_LOGIN_BG;
   
-  // Fetch Barangay Officials for the landing/scrollable showcase
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
   res.send(`
@@ -512,12 +507,12 @@ app.get('/login', async (req, res) => {
         scroll-behavior: smooth;
       }
       body {
-        background-color: #eef7f2;
+        background-color: var(--light-green);
         overflow-x: hidden;
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(135deg, rgba(141, 169, 196, 0.85), rgba(238, 247, 242, 0.9)), url('${bgImg}');
+        background: linear-gradient(135deg, rgba(11, 37, 69, 0.90), rgba(141, 169, 196, 0.82)), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -529,12 +524,12 @@ app.get('/login', async (req, res) => {
         position: relative;
       }
       .glass-login-card {
-        background: rgba(255, 255, 255, 0.95);
+        background: rgba(255, 255, 255, 0.96);
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
-        border: 2px solid #e0ecf8;
+        border: 2px solid var(--light-blue);
         border-radius: 20px;
-        box-shadow: 0 20px 40px rgba(11, 37, 69, 0.15);
+        box-shadow: 0 20px 40px rgba(11, 37, 69, 0.25);
         max-width: 450px;
         width: 100%;
         padding: 42px 36px;
@@ -548,8 +543,8 @@ app.get('/login', async (req, res) => {
         height: 95px;
         object-fit: cover;
         border-radius: 50%;
-        border: 3px solid #00a86b;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        border: 3px solid var(--accent-green);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
       }
       .form-control-lg {
         font-size: 0.98rem;
@@ -559,35 +554,31 @@ app.get('/login', async (req, res) => {
       .input-group-text {
         border-top-left-radius: 10px;
         border-bottom-left-radius: 10px;
-        background-color: #eef7f2 !important;
-        color: #134074 !important;
+        background-color: var(--light-green) !important;
+        color: var(--primary-blue) !important;
         border: 1px solid #ced4da;
       }
       .btn-glow {
-        background-color: #134074;
+        background-color: var(--primary-blue);
         border: none;
         border-radius: 10px;
         padding: 13px;
         font-size: 1.05rem;
         letter-spacing: 0.5px;
-        box-shadow: 0 4px 15px rgba(19, 64, 116, 0.3);
+        box-shadow: 0 4px 15px rgba(19, 64, 116, 0.4);
         transition: all 0.25s ease;
       }
       .btn-glow:hover {
-        background-color: #0b2545;
-        box-shadow: 0 6px 20px rgba(11, 37, 69, 0.4);
+        background-color: var(--primary-navy);
+        box-shadow: 0 6px 20px rgba(11, 37, 69, 0.6);
       }
       .scroll-down-hint {
         position: absolute;
         bottom: 25px;
-        color: #0b2545;
+        color: white;
         text-align: center;
         animation: bounce 2s infinite;
         text-decoration: none;
-        font-weight: 600;
-        background: rgba(255, 255, 255, 0.7);
-        padding: 6px 16px;
-        border-radius: 20px;
       }
       @keyframes bounce {
         0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
@@ -596,11 +587,11 @@ app.get('/login', async (req, res) => {
       }
       .officials-section {
         padding: 80px 20px;
-        background-color: #e0ecf8;
+        background-color: var(--light-green);
       }
       .official-card {
         border-radius: 16px;
-        border: 1px solid #8da9c4;
+        border: 1px solid var(--light-blue);
         background: white;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
       }
@@ -613,7 +604,7 @@ app.get('/login', async (req, res) => {
         height: 125px;
         object-fit: cover;
         border-radius: 50%;
-        border: 4px solid #00a86b;
+        border: 4px solid var(--accent-green);
       }
     </style>
 
@@ -622,7 +613,7 @@ app.get('/login', async (req, res) => {
       <div class="glass-login-card">
         <div class="text-center mb-4">
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-primary-blue display-3 mb-2"></i>'}
-          <h3 class="fw-bold text-dark m-0" style="color: #0b2545 !important;">${settings.barangay_name || 'BARANGAY PORTAL'}</h3>
+          <h3 class="fw-bold text-dark m-0" style="color: var(--primary-navy) !important;">${settings.barangay_name || 'BARANGAY PORTAL'}</h3>
           <p class="text-muted small mt-1">Resident & Administration System</p>
           <span class="badge bg-accent-green px-3 py-2 rounded-pill mt-1"><i class="bi bi-shield-check me-1"></i> Official Portal</span>
         </div>
@@ -651,9 +642,9 @@ app.get('/login', async (req, res) => {
         </div>
       </div>
 
-      <a href="#officials-section" class="scroll-down-hint shadow-sm">
+      <a href="#officials-section" class="scroll-down-hint fw-bold">
         <span class="d-block small">Scroll down to view Barangay Officials</span>
-        <i class="bi bi-chevron-down"></i>
+        <i class="bi bi-chevron-down fs-4"></i>
       </a>
     </div>
 
@@ -661,7 +652,7 @@ app.get('/login', async (req, res) => {
     <div id="officials-section" class="officials-section">
       <div class="container">
         <div class="text-center mb-5">
-          <h2 class="fw-bold" style="color: #0b2545;"><i class="bi bi-person-lines-fill me-2 text-accent-green"></i>Barangay Officials</h2>
+          <h2 class="fw-bold" style="color: var(--primary-navy);"><i class="bi bi-person-lines-fill me-2 text-accent-green"></i>Barangay Officials</h2>
           <p class="text-muted">Dedicated to serving our community with transparency, integrity, and diligence.</p>
           <div class="mx-auto bg-accent-green" style="height: 4px; width: 70px; border-radius: 2px;"></div>
         </div>
@@ -1164,7 +1155,6 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
   res.send(renderAppLayout(req, 'residents', html, settings));
 });
 
-// Admin API Actions: Resident
 app.post('/api/admin/resident/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   const { first_name, middle_name, last_name, date_of_birth, gender, civil_status, purok_id, address, contact_number, email } = req.body;
   try {
@@ -1210,7 +1200,6 @@ app.get('/api/admin/resident/archive/:id', authenticateToken, requireRole(['Supe
   }
 });
 
-// View Resident Record Details
 app.get('/admin/resident/view/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name), households(household_number)').eq('id', req.params.id).single();
@@ -1518,7 +1507,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
               <img src="${r.photo_url || 'https://via.placeholder.com/150'}" class="id-photo">
               <div class="id-details">
                 <div class="text-primary-blue fw-bold" style="font-size: 8pt;">${r.resident_number}</div>
-                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${r.first_name}${r.last_name}</div>
+                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${r.first_name} ${r.last_name}</div>
                 <div class="text-muted mt-1">DOB: <strong>${r.date_of_birth}</strong></div>
                 <div class="text-muted">Sex: <strong>${r.gender}</strong> | Civil: <strong>${r.civil_status || 'Single'}</strong></div>
                 <div class="text-muted">Purok: <strong>${r.puroks ? r.puroks.name : '-'}</strong></div>
@@ -2358,7 +2347,7 @@ app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Ad
 });
 
 // ==========================================
-// ROUTE 20: RESIDENT PORTAL & PROFILE PICTURE CHANGE
+// ROUTE 20: RESIDENT PORTAL & PROFILE PHOTO CHANGE
 // ==========================================
 app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
@@ -2391,7 +2380,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #00a86b;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid var(--accent-green);">
           <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
           <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
           <div class="mt-3">
@@ -2414,7 +2403,7 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
     <div class="card card-custom p-4" style="max-width: 720px; margin: auto;">
       <div class="text-center mb-4">
         <div class="position-relative d-inline-block">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 135px; height: 135px; object-fit: cover; border: 4px solid #134074; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 135px; height: 135px; object-fit: cover; border: 4px solid var(--light-blue); box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
           <button class="btn btn-sm btn-accent-custom rounded-circle position-absolute bottom-0 end-0 p-2" data-bs-toggle="modal" data-bs-target="#changePhotoModal" title="Change Photo">
             <i class="bi bi-camera-fill"></i>
           </button>
@@ -2423,7 +2412,7 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
         <span class="badge bg-accent-green mt-1">${resident.resident_number}</span>
       </div>
 
-      <div class="card p-3 mb-4 bg-light border">
+      <div class="card p-3 mb-4 bg-light-green border">
         <div class="d-flex justify-content-between align-items-center">
           <div>
             <h6 class="fw-bold text-primary-blue m-0"><i class="bi bi-image me-1"></i> Update Profile Picture</h6>
