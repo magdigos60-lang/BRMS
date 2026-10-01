@@ -2077,6 +2077,10 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
                 <label class="form-label">Official Photo</label>
                 <input type="file" name="photo" class="form-control" accept="image/*">
               </div>
+              <div class="mb-3">
+                <label class="form-label">Digital Signature</label>
+                <input type="file" name="signature" class="form-control" accept="image/*">
+              </div>
             </div>
             <div class="modal-footer">
               <button type="submit" class="btn btn-primary-custom">Save Official</button>
@@ -2090,15 +2094,21 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
   res.send(renderAppLayout(req, 'officials', html, settings));
 });
 
-app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.single('photo'), async (req, res) => {
+app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.fields([{ name: 'photo' }, { name: 'signature' }]), async (req, res) => {
   const { name, position } = req.body;
-  let photo_url = null;
+  const insertData = { name, position };
 
-  if (req.file) {
-    photo_url = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+  if (req.files && req.files['photo']) {
+    const photoFile = req.files['photo'][0];
+    insertData.photo_url = `data:${photoFile.mimetype};base64,${photoFile.buffer.toString('base64')}`;
   }
 
-  await supabase.from('barangay_officials').insert([{ name, position, photo_url }]);
+  if (req.files && req.files['signature']) {
+    const sigFile = req.files['signature'][0];
+    insertData.signature_url = `data:${sigFile.mimetype};base64,${sigFile.buffer.toString('base64')}`;
+  }
+
+  await supabase.from('barangay_officials').insert([insertData]);
   res.redirect('/admin/officials');
 });
 
@@ -2399,7 +2409,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident && resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
+          <img src="${resident && resident.photo_url ? resident.photo_url : 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
           <h6 class="fw-bold m-0">${resident ? resident.first_name : ''} ${resident ? resident.last_name : ''}</h6>
           <span class="text-primary-blue small fw-bold">${resident ? resident.resident_number : ''}</span>
           <div class="mt-3">
@@ -2421,7 +2431,7 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
   const html = `
     <div class="card card-custom p-4" style="max-width: 700px; margin: auto;">
       <div class="text-center mb-4">
-        <img src="${resident && resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 130px; height: 130px; object-fit: cover; border: 3px solid #0d6efd;">
+        <img src="${resident && resident.photo_url ? resident.photo_url : 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 130px; height: 130px; object-fit: cover; border: 3px solid #0d6efd;">
         <h4 class="fw-bold text-primary-blue m-0">${resident ? resident.first_name : ''} ${resident && resident.middle_name ? resident.middle_name : ''} ${resident ? resident.last_name : ''}</h4>
         <span class="badge bg-accent-green mt-1">${resident ? resident.resident_number : ''}</span>
       </div>
@@ -2505,7 +2515,7 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
         </div>
 
         <div class="id-card-body">
-          <img src="${resident && resident.photo_url ? resident.photo_url + '?t=' + Date.now() : 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
+          <img src="${resident && resident.photo_url ? resident.photo_url : 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
           <div class="id-details">
             <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident ? resident.resident_number : ''}</div>
             <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident ? resident.first_name : ''} ${resident ? resident.last_name : ''}</div>
