@@ -496,7 +496,7 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (GREEN & BLUE GRADIENT + SCROLLABLE OFFICIALS WITH PICTURES)
+// ROUTE 2: REDESIGNED LOGIN PAGE (LIGHT GREEN & LIGHT BLUE THEME + SCROLLABLE OFFICIALS WITH PICTURES)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
@@ -516,10 +516,9 @@ app.get('/login', async (req, res) => {
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(180deg, #2ecc71 0%, #205493 100%), url('${bgImg}');
+        background: linear-gradient(180deg, rgba(46, 204, 113, 0.88), rgba(32, 84, 147, 0.88)), url('${bgImg}');
         background-size: cover;
         background-position: center;
-        background-blend-mode: overlay;
         background-attachment: fixed;
         display: flex;
         flex-direction: column;
@@ -580,12 +579,12 @@ app.get('/login', async (req, res) => {
       .scroll-down-hint {
         position: absolute;
         bottom: 25px;
-        color: #ffffff;
+        color: #205493;
         text-align: center;
         animation: bounce 2s infinite;
         text-decoration: none;
         font-weight: 700;
-        background: rgba(11, 37, 69, 0.6);
+        background: rgba(255, 255, 255, 0.8);
         padding: 8px 18px;
         border-radius: 30px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.1);
