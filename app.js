@@ -102,56 +102,51 @@ async function logActivity(userId, userName, action, details, ip) {
    API ENDPOINTS
    ========================================================================== */
 
-// SETUP / INIT CHECK (Checks whether the admin needs to create an account first before entry)
+// SETUP / INIT CHECK (Checks if initial admin setup is required before access)
 app.get('/api/setup/status', async (req, res) => {
     try {
         if (!supabase) return res.json({ configured: false, needsAdmin: true });
         
         const { data, error } = await supabase.from('users').select('id').eq('role', 'super_admin');
         if (error) throw error;
-
-        // Force creation of initial admin account first if no super_admin exists
         res.json({ configured: true, needsAdmin: data.length === 0 });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// PUBLIC FIRST ADMIN ACCOUNT CREATION (Requires admin to create first account before entry)
+// FIRST ADMIN ACCOUNT CREATION (Requires Admin Setup before entering)
 app.post('/api/setup/admin', async (req, res) => {
     try {
         const { fullName, username, email, password, confirmPassword } = req.body;
-
-        // Check if an admin already exists to prevent open access setup
-        const { data: adminData } = await supabase.from('users').select('id').eq('role', 'super_admin');
-        if (adminData && adminData.length > 0) {
-            return res.status(400).json({ error: 'Super Admin account already exists. Please log in.' });
+        
+        if (!fullName || !username || !password) {
+            return res.status(400).json({ error: 'Full name, username, and password are required.' });
         }
 
         if (password && confirmPassword && password !== confirmPassword) {
             return res.status(400).json({ error: 'Passwords do not match.' });
         }
 
-        const finalUsername = username || 'markjerald@gov.ph';
-        const finalEmail = email || 'markjerald@gov.ph';
-        const finalPassword = password || '123456';
-        const finalFullName = fullName || 'Mark Jerald';
+        const { data: existingAdmin, error: checkErr } = await supabase.from('users').select('id').eq('role', 'super_admin');
+        if (checkErr) throw checkErr;
+        if (existingAdmin && existingAdmin.length > 0) {
+            return res.status(400).json({ error: 'Super Admin account already setup. Please log in.' });
+        }
 
-        const hashedPassword = await bcrypt.hash(finalPassword, 10);
-
+        const hashedPassword = await bcrypt.hash(password, 10);
         const { data, error } = await supabase.from('users').insert([{
-            full_name: finalFullName,
-            username: finalUsername,
-            email: finalEmail,
+            full_name: fullName,
+            username: username,
+            email: email || username,
             password_hash: hashedPassword,
             role: 'super_admin'
         }]).select();
 
         if (error) throw error;
-        const userId = data[0].id;
 
-        await logActivity(userId, finalFullName, 'SYSTEM_INIT', 'Initial Super Admin Account Created', req.ip);
-        res.json({ success: true, message: 'First Admin account created successfully! You can now log in.' });
+        await logActivity(data[0].id, fullName, 'SYSTEM_INIT', 'Initial Super Admin Account Created', req.ip);
+        res.json({ success: true, message: 'First Administrator account created successfully! You may now sign in.' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -217,8 +212,8 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// ADMIN ACCOUNT CREATION ENDPOINT (Allows Logged-in Admin to create user/staff accounts)
-app.post('/api/admin/create-account', authenticateToken, requireRole(['super_admin', 'captain', 'secretary']), async (req, res) => {
+// ADMIN CREATES ADDITIONAL ACCOUNT
+app.post('/api/admin/create-account', authenticateToken, requireRole(['super_admin', 'captain']), async (req, res) => {
     try {
         const { fullName, username, email, password, role } = req.body;
         if (!fullName || !username || !email || !password || !role) {
@@ -1079,7 +1074,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           1. INITIAL ADMIN SETUP RENDER (REQUIRED MANDATORY FIRST ADMIN REGISTRATION)
+           1. INITIAL ADMIN SETUP RENDER
            ========================================================================== */
         function renderSetupAdmin() {
             const app = document.getElementById('app');
@@ -1090,28 +1085,28 @@ app.get('*', (req, res) => {
                             <div class="inline-flex p-3 bg-emerald-100 rounded-full text-emerald-600 mb-3">
                                 <i class="fa-solid fa-user-shield fa-2x"></i>
                             </div>
-                            <h1 class="text-2xl font-bold text-slate-800">CREATE ADMIN ACCOUNT</h1>
-                            <p class="text-xs text-slate-500 mt-1">Please create the primary administrator account before accessing the system.</p>
+                            <h1 class="text-2xl font-bold text-slate-800">CREATE FIRST ADMIN ACCOUNT</h1>
+                            <p class="text-xs text-slate-500 mt-1">Setup the initial administrator account before entering the system.</p>
                         </div>
                         <form id="adminSetupForm" class="space-y-4">
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Full Name *</label>
-                                <input type="text" id="setupFullName" value="Mark Jerald" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
+                                <input type="text" id="setupFullName" placeholder="e.g. Mark Jerald" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Username / Email *</label>
-                                <input type="text" id="setupUsername" value="markjerald@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Username / Email</label>
+                                <input type="text" id="setupUsername" placeholder="admin@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Password *</label>
-                                <input type="password" id="setupPassword" value="123456" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Password</label>
+                                <input type="password" id="setupPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Confirm Password *</label>
-                                <input type="password" id="setupConfirmPassword" value="123456" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Confirm Password</label>
+                                <input type="password" id="setupConfirmPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                             </div>
                             <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-lg hover:opacity-90 transition">
-                                Create Admin & Enter System
+                                Create Admin Account
                             </button>
                         </form>
                     </div>
@@ -1120,14 +1115,22 @@ app.get('*', (req, res) => {
 
             document.getElementById('adminSetupForm').onsubmit = async (e) => {
                 e.preventDefault();
+                const pwd = document.getElementById('setupPassword').value;
+                const confirmPwd = document.getElementById('setupConfirmPassword').value;
+
+                if (pwd !== confirmPwd) {
+                    alert('Passwords do not match.');
+                    return;
+                }
+
                 const res = await api('/setup/admin', {
                     method: 'POST',
                     body: JSON.stringify({
                         fullName: document.getElementById('setupFullName').value,
                         username: document.getElementById('setupUsername').value,
                         email: document.getElementById('setupUsername').value,
-                        password: document.getElementById('setupPassword').value,
-                        confirmPassword: document.getElementById('setupConfirmPassword').value
+                        password: pwd,
+                        confirmPassword: confirmPwd
                     })
                 });
                 if (res.success) {
@@ -1179,29 +1182,22 @@ app.get('*', (req, res) => {
                                 <input type="hidden" id="loginPortalType" value="staff">
                                 <div>
                                     <label class="block text-xs font-semibold text-slate-600 mb-1">Username or Email</label>
-                                    <input type="text" id="loginUsername" value="markjerald@gov.ph" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                    <input type="text" id="loginUsername" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                                 </div>
                                 <div>
                                     <label class="block text-xs font-semibold text-slate-600 mb-1">Password</label>
-                                    <input type="password" id="loginPassword" value="123456" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                                    <input type="password" id="loginPassword" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
                                 </div>
                                 <button type="submit" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-blue-600 text-white font-bold rounded-lg shadow-md hover:opacity-90 transition">
                                     Sign In
                                 </button>
                             </form>
 
-                            <div class="mt-4 pt-4 border-t border-slate-100 text-center space-y-2">
-                                <!-- Explicit Button for Admin to Create an Account -->
-                                <button type="button" onclick="renderAdminAccountModal()" class="w-full py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold rounded-lg text-xs transition border border-blue-200 flex items-center justify-center gap-2">
-                                    <i class="fa-solid fa-user-plus"></i> Admin: Create New Staff/Admin Account
+                            <div id="registerPrompt" class="hidden mt-6 text-center border-t border-slate-100 pt-4">
+                                <p class="text-xs text-slate-500">Don't have an approved resident account?</p>
+                                <button type="button" onclick="renderRegisterModal()" class="mt-2 text-xs font-bold text-emerald-600 hover:underline">
+                                    Register as New Resident
                                 </button>
-
-                                <div id="registerPrompt" class="hidden pt-2">
-                                    <p class="text-xs text-slate-500">Don't have an approved resident account?</p>
-                                    <button type="button" onclick="renderRegisterModal()" class="mt-1 text-xs font-bold text-emerald-600 hover:underline">
-                                        Register as New Resident
-                                    </button>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -1242,74 +1238,11 @@ app.get('*', (req, res) => {
                 btnStaff.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
                 btnResident.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
                 prompt.classList.add('hidden');
-                document.getElementById('loginUsername').value = 'markjerald@gov.ph';
-                document.getElementById('loginPassword').value = '123456';
             } else {
                 btnResident.className = "flex-1 py-2 text-sm font-bold text-emerald-600 border-b-2 border-emerald-600";
                 btnStaff.className = "flex-1 py-2 text-sm font-bold text-slate-400 border-b-2 border-transparent";
                 prompt.classList.remove('hidden');
-                document.getElementById('loginUsername').value = '';
-                document.getElementById('loginPassword').value = '';
             }
-        }
-
-        function renderAdminAccountModal() {
-            const modalHtml = \`
-                <div id="adminCreateModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
-                        <div class="flex justify-between items-center border-b pb-3 mb-4">
-                            <h3 class="text-base font-bold text-slate-800"><i class="fa-solid fa-user-plus text-emerald-600 mr-2"></i> Create Admin / Staff Account</h3>
-                            <button type="button" onclick="document.getElementById('adminCreateModal').remove()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
-                        </div>
-                        <form id="publicAdminCreateForm" class="space-y-3 text-xs">
-                            <div>
-                                <label class="font-bold text-slate-600">Full Name *</label>
-                                <input type="text" id="pAdminFullName" required class="w-full p-2 border border-slate-300 rounded mt-1">
-                            </div>
-                            <div>
-                                <label class="font-bold text-slate-600">Username *</label>
-                                <input type="text" id="pAdminUsername" required class="w-full p-2 border border-slate-300 rounded mt-1">
-                            </div>
-                            <div>
-                                <label class="font-bold text-slate-600">Email Address *</label>
-                                <input type="email" id="pAdminEmail" required class="w-full p-2 border border-slate-300 rounded mt-1">
-                            </div>
-                            <div>
-                                <label class="font-bold text-slate-600">Password *</label>
-                                <input type="password" id="pAdminPassword" required class="w-full p-2 border border-slate-300 rounded mt-1">
-                            </div>
-                            <div>
-                                <label class="font-bold text-slate-600">Role *</label>
-                                <select id="pAdminRole" class="w-full p-2 border border-slate-300 rounded mt-1">
-                                    <option value="super_admin">Super Administrator</option>
-                                    <option value="captain">Barangay Captain</option>
-                                    <option value="secretary">Secretary</option>
-                                    <option value="staff">Staff</option>
-                                </select>
-                            </div>
-                            <div class="pt-3">
-                                <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">Create Account</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            \`;
-            document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-            document.getElementById('publicAdminCreateForm').onsubmit = async (e) => {
-                e.preventDefault();
-                const res = await api('/setup/admin', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        fullName: document.getElementById('pAdminFullName').value,
-                        username: document.getElementById('pAdminUsername').value,
-                        email: document.getElementById('pAdminEmail').value,
-                        password: document.getElementById('pAdminPassword').value
-                    })
-                });
-                alert(res.message);
-                document.getElementById('adminCreateModal').remove();
-            };
         }
 
         async function renderRegisterModal() {
@@ -1421,7 +1354,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           3. RESIDENT PORTAL RENDER (BLUE, GREEN & WHITE THEME + ALL 13 FEATURES)
+           3. RESIDENT PORTAL RENDER
            ========================================================================== */
         function renderResidentPortal() {
             const app = document.getElementById('app');
@@ -1656,7 +1589,7 @@ app.get('*', (req, res) => {
                             <button type="button" onclick="window.print()" class="px-3 py-1 bg-blue-600 text-white rounded text-xs font-bold hover:bg-blue-700 no-print"><i class="fa-solid fa-print mr-1"></i> Print ID</button>
                         </div>
 
-                        <!-- ID CARD CONTAINER (PHILIPPINE NATIONAL ID SPECIFICATION: 3.375" x 2.125", ZERO WASTED SPACE) -->
+                        <!-- ID CARD CONTAINER -->
                         <div id="printableArea" class="flex justify-center p-4 bg-slate-100 rounded-xl">
                             <div class="id-card-national shadow-lg">
                                 <!-- Top Bar / Header -->
@@ -1669,7 +1602,7 @@ app.get('*', (req, res) => {
                                     </div>
                                 </div>
 
-                                <!-- Body Grid: Dense Photo, Data, and Large QR Code -->
+                                <!-- Body Grid -->
                                 <div class="grid grid-cols-12 gap-1 my-1 px-1 text-[7pt] leading-tight flex-1 items-center">
                                     <!-- Photo Left -->
                                     <div class="col-span-3 text-center">
@@ -2164,7 +2097,7 @@ app.get('*', (req, res) => {
         }
 
         /* ==========================================================================
-           4. STAFF / ADMIN PORTAL RENDER (WITH ADMIN CREATE ACCOUNT & BATCH PRINT)
+           4. STAFF / ADMIN PORTAL RENDER
            ========================================================================== */
         function renderStaffPortal() {
             const app = document.getElementById('app');
@@ -2202,7 +2135,12 @@ app.get('*', (req, res) => {
                     <main class="flex-1 flex flex-col overflow-hidden">
                         <header class="bg-gradient-to-r from-emerald-700 to-blue-800 text-white px-6 py-4 flex justify-between items-center shadow-md">
                             <h2 id="staffPageTitle" class="text-xl font-bold">Admin Dashboard</h2>
-                            <span class="text-xs font-semibold">\${state.user.fullName} (\${state.user.role})</span>
+                            <div class="flex items-center gap-3">
+                                <span class="text-xs font-semibold">\${state.user.fullName} (\${state.user.role})</span>
+                                <button type="button" onclick="setStaffTab('createAccount')" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition flex items-center gap-1">
+                                    <i class="fa-solid fa-user-plus"></i> Create Account
+                                </button>
+                            </div>
                         </header>
                         <div id="staffContent" class="flex-1 overflow-y-auto p-6"></div>
                     </main>
@@ -2278,6 +2216,36 @@ app.get('*', (req, res) => {
                     alert(res.message);
                     document.getElementById('adminCreateAccountForm').reset();
                 };
+            } else if (tab === 'residents') {
+                title.innerText = 'Resident Records Management';
+                const list = await api('/residents?status=ACTIVE');
+                let rows = list.map(r => \`
+                    <tr class="border-b border-slate-100 text-xs">
+                        <td class="py-3 px-2 font-mono font-bold text-emerald-700">\${r.resident_number || 'N/A'}</td>
+                        <td class="py-3 px-2 font-bold text-slate-800">\${r.first_name} \${r.last_name}</td>
+                        <td class="py-3 px-2">\${r.puroks ? r.puroks.name : 'N/A'}</td>
+                        <td class="py-3 px-2">\${r.contact_number || 'N/A'}</td>
+                        <td class="py-3 px-2 font-bold text-emerald-600">\${r.status}</td>
+                    </tr>
+                \`).join('');
+
+                container.innerHTML = \`
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Active Resident Database</h3>
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Resident #</th>
+                                    <th class="py-2">Full Name</th>
+                                    <th class="py-2">Purok</th>
+                                    <th class="py-2">Contact</th>
+                                    <th class="py-2">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No active residents.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                \`;
             } else if (tab === 'puroks') {
                 title.innerText = 'Purok Management & Live Resident Counting';
                 const list = await api('/puroks');
@@ -2310,7 +2278,6 @@ app.get('*', (req, res) => {
                 const eight = list.slice(0, 8);
                 const logo = state.settings.barangay_logo || DEFAULT_LOGO;
                 const brgyName = state.settings.barangay_name || 'BARANGAY CENTRAL';
-                const captainSig = state.settings.captain_signature || '';
                 const captainName = state.settings.captain_name || 'HON. BARANGAY CAPTAIN';
 
                 let cardsHtml = eight.map(r => \`
@@ -2371,6 +2338,36 @@ app.get('*', (req, res) => {
                         document.getElementById('scanResult').innerHTML = \`<p class="text-emerald-700 font-bold">QR Scanned: \${decodedText}</p>\`;
                     });
                 }, 500);
+            } else if (tab === 'certificates') {
+                title.innerText = 'Certificate Requests Management';
+                const requests = await api('/certificates/requests');
+                let rows = requests.map(r => \`
+                    <tr class="border-b border-slate-100 text-xs">
+                        <td class="py-3 px-2 font-mono font-bold text-blue-700">\${r.request_number}</td>
+                        <td class="py-3 px-2 font-bold text-slate-800">\${r.residents ? r.residents.first_name + ' ' + r.residents.last_name : 'N/A'}</td>
+                        <td class="py-3 px-2 font-bold text-slate-800">\${r.certificate_type}</td>
+                        <td class="py-3 px-2 text-slate-600">\${r.purpose}</td>
+                        <td class="py-3 px-2 font-bold \${r.status === 'READY_FOR_RELEASE' ? 'text-emerald-600' : 'text-amber-600'}">\${r.status}</td>
+                    </tr>
+                \`).join('');
+
+                container.innerHTML = \`
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-bold text-slate-800 mb-4">Submitted Certificate Requests</h3>
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b text-slate-400 text-[11px] uppercase">
+                                    <th class="py-2">Req #</th>
+                                    <th class="py-2">Resident</th>
+                                    <th class="py-2">Type</th>
+                                    <th class="py-2">Purpose</th>
+                                    <th class="py-2">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>\${rows || '<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">No requests available.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                \`;
             }
         }
 
