@@ -516,7 +516,7 @@ app.get('/login', async (req, res) => {
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(135deg, rgba(217, 237, 247, 0.88), rgba(225, 245, 254, 0.85)), url('${bgImg}');
+        background: linear-gradient(135deg, rgba(225, 245, 254, 0.75), rgba(217, 237, 247, 0.75)), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
