@@ -1,10 +1,11 @@
 {
   "name": "barangay-resident-management-system",
   "version": "1.0.0",
-  "description": "Full-featured Barangay Resident Management System for Render deployment with Supabase",
+  "description": "Full-featured Barangay Resident Management System for Render + Supabase deployment",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "dev": "node --watch app.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
