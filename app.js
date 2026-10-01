@@ -2035,7 +2035,7 @@ app.post('/api/admin/event/add', authenticateToken, requireRole(['Super Admin', 
 });
 
 // ==========================================
-// ROUTE 17: BARANGAY OFFICIALS MANAGEMENT
+// ROUTE 17: BARANGAY OFFICIALS MANAGEMENT (FIXED WITH MULTIPLIER/IMAGE SUPPORT)
 // ==========================================
 app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   const settings = await getSettings();
@@ -2054,7 +2054,7 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
             <div class="card card-custom p-3 text-center">
               <img src="${o.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
               <h6 class="fw-bold text-primary-blue m-0">${o.name}</h6>
-              <small class="badge bg-accent-green mb-2">${o.position}</small>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height:25px;">` : ''}
+              <small class="badge bg-accent-green mb-2">${o.position}</small>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height:25px; object-fit:contain;">` : ''}
             </div>
           </div>
         `).join('') || '<div class="col-12 text-center text-muted">No officials configured.</div>'}
@@ -2065,7 +2065,7 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
     <div class="modal fade" id="addOfficialModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
-          <form action="/api/admin/official/add" method="POST">
+          <form action="/api/admin/official/add" method="POST" enctype="multipart/form-data">
             <div class="modal-header bg-primary-blue text-white">
               <h5 class="modal-title fw-bold">Add Barangay Official</h5>
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -2082,6 +2082,14 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
                   <option value="SK Chairman">SK Chairman</option>
                 </select>
               </div>
+              <div class="mb-3">
+                <label class="form-label">Official Photo</label>
+                <input type="file" name="photo" class="form-control" accept="image/*">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Digital Signature</label>
+                <input type="file" name="signature" class="form-control" accept="image/*">
+              </div>
             </div>
             <div class="modal-footer">
               <button type="submit" class="btn btn-primary-custom">Save Official</button>
@@ -2095,9 +2103,21 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
   res.send(renderAppLayout(req, 'officials', html, settings));
 });
 
-app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
+app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.fields([{ name: 'photo' }, { name: 'signature' }]), async (req, res) => {
   const { name, position } = req.body;
-  await supabase.from('barangay_officials').insert([{ name, position }]);
+  const insertData = { name, position };
+
+  if (req.files && req.files['photo']) {
+    const photoFile = req.files['photo'][0];
+    insertData.photo_url = `data:${photoFile.mimetype};base64,${photoFile.buffer.toString('base64')}`;
+  }
+
+  if (req.files && req.files['signature']) {
+    const sigFile = req.files['signature'][0];
+    insertData.signature_url = `data:${sigFile.mimetype};base64,${sigFile.buffer.toString('base64')}`;
+  }
+
+  await supabase.from('barangay_officials').insert([insertData]);
   res.redirect('/admin/officials');
 });
 
