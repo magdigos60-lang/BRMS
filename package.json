@@ -1,7 +1,7 @@
 {
   "name": "barangay-resident-management-system",
   "version": "1.0.0",
-  "description": "Monolithic Barangay Resident Management System with Express and Supabase",
+  "description": "Barangay Resident Management System monolithic application with Express and Supabase",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
