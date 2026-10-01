@@ -89,7 +89,7 @@ const DEFAULT_LOGIN_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/4
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
-// Theme palette derived from reference design: Emerald Green (#00a86b/green-cyan) & Deep Navy Blue (#0a192f)
+// Palette Inspired by Design Specs: Deep Blue, Vibrant Blue, Emerald Green, Light Mint
 // ==========================================
 const renderSystemHead = (title) => `
 <!DOCTYPE html>
@@ -102,13 +102,13 @@ const renderSystemHead = (title) => `
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
   <style>
     :root {
-      --primary-blue: #0b2545;
-      --dark-blue: #134074;
-      --accent-green: #00b4d8;
-      --emerald-green: #00a86b;
-      --light-green: #e6f7f2;
+      --primary-navy: #0b2545;
+      --primary-blue: #134074;
+      --accent-green: #00a86b;
+      --light-green: #eef7f2;
+      --soft-mint: #8da9c4;
       --pure-white: #ffffff;
-      --bg-light: #f0f4f8;
+      --bg-light: #f4f7f6;
       --text-dark: #1d2d44;
     }
     body {
@@ -117,21 +117,22 @@ const renderSystemHead = (title) => `
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     .bg-primary-blue { background-color: var(--primary-blue) !important; }
-    .bg-dark-blue { background-color: var(--dark-blue) !important; }
-    .bg-accent-green { background-color: var(--emerald-green) !important; }
+    .bg-dark-blue { background-color: var(--primary-navy) !important; }
+    .bg-accent-green { background-color: var(--accent-green) !important; }
     .text-primary-blue { color: var(--primary-blue) !important; }
-    .text-accent-green { color: var(--emerald-green) !important; }
+    .text-accent-green { color: var(--accent-green) !important; }
+    
     .btn-primary-custom {
-      background: linear-gradient(135deg, #00a86b 0%, #00b4d8 100%);
+      background-color: var(--primary-blue);
       color: white;
       border: none;
     }
     .btn-primary-custom:hover {
-      background: linear-gradient(135deg, #008f5a 0%, #0096c7 100%);
+      background-color: var(--primary-navy);
       color: white;
     }
     .btn-accent-custom {
-      background-color: var(--emerald-green);
+      background-color: var(--accent-green);
       color: white;
       border: none;
     }
@@ -141,7 +142,7 @@ const renderSystemHead = (title) => `
     }
     .sidebar {
       min-height: 100vh;
-      background: linear-gradient(180deg, #0b2545 0%, #134074 100%);
+      background: linear-gradient(180deg, var(--primary-navy) 0%, var(--primary-blue) 100%);
       color: white;
     }
     .sidebar .nav-link {
@@ -152,21 +153,20 @@ const renderSystemHead = (title) => `
       border-radius: 6px;
     }
     .sidebar .nav-link:hover, .sidebar .nav-link.active {
-      background-color: rgba(0, 168, 107, 0.3);
+      background-color: var(--accent-green);
       color: white;
-      border-left: 4px solid var(--emerald-green);
     }
     .card-custom {
       background-color: var(--pure-white);
       border-radius: 12px;
-      border: 1px solid #e2e8f0;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.03);
+      border: 1px solid #e0e6ed;
+      box-shadow: 0 4px 10px rgba(11, 37, 69, 0.05);
     }
     .stat-card {
       border-left: 5px solid var(--primary-blue);
     }
     .stat-card.green {
-      border-left: 5px solid var(--emerald-green);
+      border-left: 5px solid var(--accent-green);
     }
 
     /* Standardized CR80 ID Card Frame (3.375in x 2.125in) */
@@ -174,7 +174,7 @@ const renderSystemHead = (title) => `
       width: 3.375in;
       height: 2.125in;
       border-radius: 10px;
-      border: 2px solid #00a86b;
+      border: 2px solid var(--primary-blue);
       background: #ffffff;
       position: relative;
       overflow: hidden;
@@ -185,7 +185,7 @@ const renderSystemHead = (title) => `
       box-sizing: border-box;
     }
     .id-card-header {
-      background: linear-gradient(90deg, #0b2545 0%, #00a86b 100%);
+      background: linear-gradient(90deg, var(--primary-navy) 0%, var(--accent-green) 100%);
       color: white;
       padding: 4px 8px;
       display: flex;
@@ -210,7 +210,7 @@ const renderSystemHead = (title) => `
       width: 1.05in;
       height: 1.05in;
       object-fit: cover;
-      border: 2px solid #00a86b;
+      border: 2px solid var(--primary-blue);
       border-radius: 6px;
       flex-shrink: 0;
     }
@@ -297,7 +297,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
 
   const residentMenu = [
     { id: 'res-dashboard', label: 'Dashboard', icon: 'bi-speedometer2', link: '/resident/dashboard' },
-    { id: 'res-profile', label: 'My Profile', icon: 'bi-person', link: '/resident/profile' },
+    { id: 'res-profile', label: 'My Profile', icon: 'bi-person-circle', link: '/resident/profile' },
     { id: 'res-digital-id', label: 'My Digital ID', icon: 'bi-card-checklist', link: '/resident/digital-id' },
     { id: 'res-certificates', label: 'Request Certificate', icon: 'bi-file-earmark-plus', link: '/resident/certificates' },
     { id: 'res-appointments', label: 'Book Appointment', icon: 'bi-calendar-plus', link: '/resident/appointments' },
@@ -382,7 +382,7 @@ const getSettings = async () => {
 };
 
 // ==========================================
-// ROUTE 1: SYSTEM SETUP (FIRST LAUNCH)
+// ROUTE 1: SYSTEM SETUP
 // ==========================================
 app.get('/setup', async (req, res) => {
   const settings = await getSettings();
@@ -493,13 +493,13 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (MODERN EMERALD GREEN & DEEP NAVY BLUE THEME + OFFICIALS SHOWCASE)
+// ROUTE 2: REDESIGNED LOGIN PAGE (WITH SCROLLABLE BARANGAY OFFICIALS SHOWCASE)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
   const bgImg = settings.login_background || DEFAULT_LOGIN_BG;
   
-  // Fetch Barangay Officials for the scrollable showcase
+  // Fetch Barangay Officials for the landing/scrollable showcase
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
   res.send(`
@@ -509,13 +509,12 @@ app.get('/login', async (req, res) => {
         scroll-behavior: smooth;
       }
       body {
-        background-color: #0b192c;
-        color: #e0e6ed;
+        background-color: #0b2545;
         overflow-x: hidden;
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(135deg, rgba(11, 25, 44, 0.88), rgba(0, 168, 107, 0.75)), url('${bgImg}');
+        background: linear-gradient(135deg, rgba(11, 37, 69, 0.88), rgba(0, 168, 107, 0.82)), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -527,20 +526,19 @@ app.get('/login', async (req, res) => {
         position: relative;
       }
       .glass-login-card {
-        background: rgba(11, 25, 44, 0.85);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(0, 168, 107, 0.35);
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 2px solid rgba(255, 255, 255, 0.8);
         border-radius: 20px;
-        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 30px rgba(0, 168, 107, 0.15);
-        max-width: 440px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+        max-width: 450px;
         width: 100%;
         padding: 42px 36px;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        transition: transform 0.3s ease;
       }
       .glass-login-card:hover {
         transform: translateY(-4px);
-        box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(0, 168, 107, 0.25);
       }
       .brand-logo-img {
         width: 95px;
@@ -548,60 +546,41 @@ app.get('/login', async (req, res) => {
         object-fit: cover;
         border-radius: 50%;
         border: 3px solid #00a86b;
-        box-shadow: 0 0 15px rgba(0, 168, 107, 0.4);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
       }
       .form-control-lg {
-        font-size: 0.95rem;
+        font-size: 0.98rem;
         padding: 12px 16px;
         border-radius: 10px;
-        background-color: rgba(255, 255, 255, 0.07) !important;
-        border: 1px solid rgba(255, 255, 255, 0.15) !important;
-        color: #ffffff !important;
-      }
-      .form-control-lg::placeholder {
-        color: #a0aec0 !important;
-      }
-      .form-control-lg:focus {
-        border-color: #00a86b !important;
-        box-shadow: 0 0 10px rgba(0, 168, 107, 0.3) !important;
       }
       .input-group-text {
         border-top-left-radius: 10px;
         border-bottom-left-radius: 10px;
-        background-color: rgba(0, 168, 107, 0.15) !important;
-        border: 1px solid rgba(255, 255, 255, 0.15) !important;
-        border-end-0: none !important;
-        color: #00a86b !important;
+        background-color: #eef7f2 !important;
+        color: #134074 !important;
+        border: 1px solid #ced4da;
       }
-      .btn-emerald-glow {
-        background: linear-gradient(135deg, #00a86b 0%, #00b4d8 100%);
+      .btn-glow {
+        background-color: #134074;
         border: none;
         border-radius: 10px;
-        padding: 14px;
+        padding: 13px;
         font-size: 1.05rem;
-        font-weight: 700;
-        color: white;
         letter-spacing: 0.5px;
-        box-shadow: 0 6px 20px rgba(0, 168, 107, 0.4);
-        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(19, 64, 116, 0.4);
+        transition: all 0.25s ease;
       }
-      .btn-emerald-glow:hover {
-        background: linear-gradient(135deg, #008f5a 0%, #0096c7 100%);
-        box-shadow: 0 8px 25px rgba(0, 168, 107, 0.6);
-        color: white;
-        transform: translateY(-2px);
+      .btn-glow:hover {
+        background-color: #0b2545;
+        box-shadow: 0 6px 20px rgba(11, 37, 69, 0.6);
       }
       .scroll-down-hint {
         position: absolute;
         bottom: 25px;
-        color: #00a86b;
+        color: white;
         text-align: center;
         animation: bounce 2s infinite;
         text-decoration: none;
-        transition: color 0.2s;
-      }
-      .scroll-down-hint:hover {
-        color: #00b4d8;
       }
       @keyframes bounce {
         0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
@@ -609,28 +588,25 @@ app.get('/login', async (req, res) => {
         60% { transform: translateY(-5px); }
       }
       .officials-section {
-        padding: 90px 20px;
-        background: linear-gradient(180deg, #0b192c 0%, #102a45 100%);
+        padding: 80px 20px;
+        background-color: #eef7f2;
       }
       .official-card {
-        background: rgba(255, 255, 255, 0.04);
         border-radius: 16px;
-        border: 1px solid rgba(0, 168, 107, 0.2);
-        backdrop-filter: blur(10px);
-        transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+        border: 1px solid #d0e1d4;
+        background: white;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
       }
       .official-card:hover {
         transform: translateY(-6px);
-        box-shadow: 0 12px 30px rgba(0, 168, 107, 0.2);
-        border-color: rgba(0, 168, 107, 0.6);
+        box-shadow: 0 12px 24px rgba(11, 37, 69, 0.12);
       }
       .official-photo {
-        width: 130px;
-        height: 130px;
+        width: 125px;
+        height: 125px;
         object-fit: cover;
         border-radius: 50%;
         border: 4px solid #00a86b;
-        box-shadow: 0 0 15px rgba(0, 168, 107, 0.3);
       }
     </style>
 
@@ -638,33 +614,33 @@ app.get('/login', async (req, res) => {
     <div class="login-section">
       <div class="glass-login-card">
         <div class="text-center mb-4">
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-accent-green display-3 mb-2"></i>'}
-          <h3 class="fw-bold text-white m-0">${settings.barangay_name || 'BARANGAY MANAGEMENT'}</h3>
-          <p class="text-white-50 small mt-1">Official Resident & Executive Portal</p>
-          <span class="badge bg-accent-green px-3 py-1 rounded-pill mt-1" style="background-color: #00a86b !important;"><i class="bi bi-shield-check me-1"></i> Official System</span>
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-primary-blue display-3 mb-2"></i>'}
+          <h3 class="fw-bold text-dark m-0" style="color: #0b2545 !important;">${settings.barangay_name || 'BARANGAY PORTAL'}</h3>
+          <p class="text-muted small mt-1">Resident & Administration System</p>
+          <span class="badge bg-accent-green px-3 py-2 rounded-pill mt-1"><i class="bi bi-shield-check me-1"></i> Official Portal</span>
         </div>
 
         <form action="/api/login" method="POST">
           <div class="mb-3">
-            <label class="form-label fw-semibold text-white-50 small">USERNAME OR EMAIL</label>
+            <label class="form-label fw-semibold text-secondary small">USERNAME OR EMAIL</label>
             <div class="input-group">
               <span class="input-group-text"><i class="bi bi-person-fill fs-5"></i></span>
               <input type="text" name="identifier" class="form-control form-control-lg border-start-0" required placeholder="Enter username or email">
             </div>
           </div>
           <div class="mb-4">
-            <label class="form-label fw-semibold text-white-50 small">PASSWORD</label>
+            <label class="form-label fw-semibold text-secondary small">PASSWORD</label>
             <div class="input-group">
               <span class="input-group-text"><i class="bi bi-lock-fill fs-5"></i></span>
               <input type="password" name="password" class="form-control form-control-lg border-start-0" required placeholder="Enter your password">
             </div>
           </div>
-          <button type="submit" class="btn btn-emerald-glow w-100"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
+          <button type="submit" class="btn btn-primary btn-glow w-100 fw-bold text-white"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
         </form>
 
-        <div class="text-center mt-4 border-top border-secondary pt-3">
-          <p class="small text-white-50 mb-1">Don't have an account yet?</p>
-          <a href="/register" class="text-accent-green fw-bold text-decoration-none" style="color: #00b4d8 !important;"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
+        <div class="text-center mt-4 border-top pt-3">
+          <p class="small text-muted mb-1">Don't have a resident account yet?</p>
+          <a href="/register" class="text-accent-green fw-bold text-decoration-none"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
         </div>
       </div>
 
@@ -678,25 +654,25 @@ app.get('/login', async (req, res) => {
     <div id="officials-section" class="officials-section">
       <div class="container">
         <div class="text-center mb-5">
-          <h2 class="fw-bold text-white"><i class="bi bi-person-lines-fill me-2 text-accent-green" style="color: #00a86b !important;"></i>Barangay Officials</h2>
-          <p class="text-white-50">Serving our community with integrity, dedication, and leadership.</p>
-          <div class="mx-auto" style="height: 3px; width: 70px; border-radius: 2px; background: linear-gradient(90deg, #00a86b, #00b4d8);"></div>
+          <h2 class="fw-bold" style="color: #0b2545;"><i class="bi bi-person-lines-fill me-2 text-accent-green"></i>Barangay Officials</h2>
+          <p class="text-muted">Dedicated to serving our community with transparency, integrity, and diligence.</p>
+          <div class="mx-auto bg-accent-green" style="height: 4px; width: 70px; border-radius: 2px;"></div>
         </div>
 
         <div class="row g-4 justify-content-center">
           ${(officials || []).map(o => `
             <div class="col-md-4 col-lg-3">
-              <div class="card official-card p-4 text-center h-100">
-                <img src="${o.photo_url || 'https://via.placeholder.com/130'}" class="official-photo mx-auto mb-3">
-                <h5 class="fw-bold text-white mb-1">${o.name}</h5>
-                <span class="badge px-3 py-2 rounded-pill mt-1 mb-2" style="background-color: rgba(0, 168, 107, 0.2); color: #00a86b; border: 1px solid #00a86b;">${o.position}</span>
-                ${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height: 30px; filter: brightness(0) invert(1); opacity: 0.8; object-fit: contain;" alt="Signature">` : ''}
+              <div class="card official-card p-4 text-center h-100 shadow-sm">
+                <img src="${o.photo_url || 'https://via.placeholder.com/120'}" class="official-photo mx-auto mb-3" alt="${o.name}">
+                <h5 class="fw-bold text-dark mb-1">${o.name}</h5>
+                <span class="badge bg-primary-blue px-3 py-2 rounded-pill mt-1 mb-2">${o.position}</span>
+                ${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height: 32px; object-fit: contain;" alt="Signature">` : ''}
               </div>
             </div>
           `).join('') || `
-            <div class="col-12 text-center text-white-50 py-5">
+            <div class="col-12 text-center text-muted py-5">
               <i class="bi bi-people fs-1 text-secondary"></i>
-              <p class="mt-2">No official records added yet.</p>
+              <p class="mt-2">No official records available at this time.</p>
             </div>
           `}
         </div>
@@ -754,7 +730,6 @@ app.get('/register', async (req, res) => {
               <h3 class="fw-bold text-primary-blue"><i class="bi bi-person-badge me-2"></i>Resident Public Registration</h3>
               <p class="text-muted">Complete the official form. Registrations undergo approval by Barangay Officials.</p>
             </div>
-            <!-- Standard URL Encoded Form Submission -->
             <form action="/api/register" method="POST">
               <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">Personal Information</h6>
               <div class="row">
@@ -1074,7 +1049,6 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
         <button class="btn btn-accent-custom fw-bold" data-bs-toggle="modal" data-bs-target="#addResidentModal"><i class="bi bi-person-plus me-1"></i> Add New Resident</button>
       </div>
 
-      <!-- Search & Filter Controls -->
       <form class="row g-2 mb-4" method="GET" action="/admin/residents">
         <div class="col-md-5">
           <input type="text" name="search" class="form-control" placeholder="Search by Name or Resident ID..." value="${search}">
@@ -1092,7 +1066,6 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
         </div>
       </form>
 
-      <!-- Table Display -->
       <div class="table-responsive">
         <table class="table table-hover align-middle">
           <thead class="table-light">
@@ -1237,18 +1210,16 @@ app.get('/admin/resident/view/:id', authenticateToken, requireRole(['Super Admin
   if (!resident) return res.status(404).send('Resident not found');
 
   const { data: certs } = await supabase.from('certificate_requests').select('*').eq('resident_id', resident.id);
-  const { data: history } = await supabase.from('resident_history').select('*').eq('resident_id', resident.id);
 
   const html = `
     <div class="row g-4">
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 140px; height: 140px; object-fit: cover; border: 3px solid #00a86b;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 140px; height: 140px; object-fit: cover; border: 3px solid #134074;">
           <h5 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h5>
           <span class="text-primary-blue fw-bold">${resident.resident_number}</span>
           <p class="text-muted small">${resident.puroks ? resident.puroks.name : 'No Purok'}</p>
 
-          <!-- Photo Upload Form -->
           <form action="/api/admin/resident/upload-photo/${resident.id}" method="POST" enctype="multipart/form-data" class="mt-3">
             <label class="form-label small fw-bold">Update Resident Photo</label>
             <input type="file" name="photo" class="form-control form-control-sm mb-2" accept="image/*" required>
@@ -1300,7 +1271,7 @@ app.post('/api/admin/resident/upload-photo/:id', authenticateToken, upload.singl
 });
 
 // ==========================================
-// ROUTE 5: PUROK MANAGEMENT & REAL-TIME COUNTS
+// ROUTE 5: PUROK MANAGEMENT
 // ==========================================
 app.get('/admin/puroks', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1503,13 +1474,12 @@ app.get('/api/admin/certificate/update/:id', authenticateToken, requireRole(['Su
 });
 
 // ==========================================
-// ROUTE 8: ENHANCED BARANGAY ID GENERATION (MAXIMIZED SPACE & ENLARGED LOGO/QR)
+// ROUTE 8: BARANGAY ID GENERATOR
 // ==========================================
 app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
   const { data: residents } = await supabase.from('residents').select('*, puroks(name)').eq('resident_status', 'Active');
 
-  // Pre-generate QR codes asynchronously
   const residentCards = await Promise.all((residents || []).slice(0, 8).map(async (r) => {
     const qrDataUrl = await QRCode.toDataURL(r.qr_token || r.id, { margin: 0, width: 250 });
     return { ...r, qrDataUrl };
@@ -1521,10 +1491,9 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
         <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay Resident Card Generator</h4>
         <button class="btn btn-accent-custom fw-bold" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print Selected Grid (8 IDs)</button>
       </div>
-      <p class="text-muted">Generate standard CR80 physical cards with optimized print layouts, high-visibility QR codes, and enlarged seal images.</p>
+      <p class="text-muted">Generate standard CR80 physical cards with optimized print layouts, high-visibility QR codes, and seal images.</p>
     </div>
 
-    <!-- Printable 8-ID Grid Sheet -->
     <div class="mt-4">
       <div class="print-sheet-8">
         ${residentCards.map(r => `
@@ -1542,7 +1511,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
               <img src="${r.photo_url || 'https://via.placeholder.com/150'}" class="id-photo">
               <div class="id-details">
                 <div class="text-primary-blue fw-bold" style="font-size: 8pt;">${r.resident_number}</div>
-                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${r.first_name}${r.last_name}</div>
+                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${r.first_name} ${r.last_name}</div>
                 <div class="text-muted mt-1">DOB: <strong>${r.date_of_birth}</strong></div>
                 <div class="text-muted">Sex: <strong>${r.gender}</strong> | Civil: <strong>${r.civil_status || 'Single'}</strong></div>
                 <div class="text-muted">Purok: <strong>${r.puroks ? r.puroks.name : '-'}</strong></div>
@@ -1569,7 +1538,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
 });
 
 // ==========================================
-// ROUTE 9: QR SCANNER PAGE (/scanner)
+// ROUTE 9: QR SCANNER PAGE
 // ==========================================
 app.get('/scanner', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1653,7 +1622,7 @@ app.post('/api/scanner/verify', authenticateToken, requireRole(['Super Admin', '
 });
 
 // ==========================================
-// ROUTE 10: SENIOR CITIZEN MANAGEMENT
+// ROUTE 10: SENIOR CITIZENS, PWD & SOLO PARENTS
 // ==========================================
 app.get('/admin/seniors', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1695,9 +1664,6 @@ app.get('/admin/seniors', authenticateToken, requireRole(['Super Admin', 'Barang
   res.send(renderAppLayout(req, 'seniors', html, settings));
 });
 
-// ==========================================
-// ROUTE 11: PWD MANAGEMENT
-// ==========================================
 app.get('/admin/pwds', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
   const { data: pwds } = await supabase.from('residents').select('*, puroks(name)').eq('is_pwd', true).eq('resident_status', 'Active');
@@ -1733,9 +1699,6 @@ app.get('/admin/pwds', authenticateToken, requireRole(['Super Admin', 'Barangay 
   res.send(renderAppLayout(req, 'pwds', html, settings));
 });
 
-// ==========================================
-// ROUTE 12: SOLO PARENT MANAGEMENT
-// ==========================================
 app.get('/admin/solo-parents', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
   const { data: parents } = await supabase.from('residents').select('*, puroks(name)').eq('is_solo_parent', true).eq('resident_status', 'Active');
@@ -1772,7 +1735,7 @@ app.get('/admin/solo-parents', authenticateToken, requireRole(['Super Admin', 'B
 });
 
 // ==========================================
-// ROUTE 13: BLOTTER & COMPLAINTS MANAGEMENT
+// ROUTE 11: BLOTTER & COMPLAINTS
 // ==========================================
 app.get('/admin/blotters', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1849,7 +1812,7 @@ app.post('/api/admin/blotter/add', authenticateToken, requireRole(['Super Admin'
 });
 
 // ==========================================
-// ROUTE 14: ASSISTANCE REQUESTS
+// ROUTE 12: ASSISTANCE REQUESTS
 // ==========================================
 app.get('/admin/assistance', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1900,7 +1863,7 @@ app.get('/api/admin/assistance/approve/:id', authenticateToken, requireRole(['Su
 });
 
 // ==========================================
-// ROUTE 15: APPOINTMENTS
+// ROUTE 13: APPOINTMENTS
 // ==========================================
 app.get('/admin/appointments', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1940,7 +1903,7 @@ app.get('/admin/appointments', authenticateToken, requireRole(['Super Admin', 'B
 });
 
 // ==========================================
-// ROUTE 16: ANNOUNCEMENTS & EVENTS
+// ROUTE 14: ANNOUNCEMENTS & EVENTS
 // ==========================================
 app.get('/admin/announcements', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   const settings = await getSettings();
@@ -2059,7 +2022,7 @@ app.post('/api/admin/event/add', authenticateToken, requireRole(['Super Admin', 
 });
 
 // ==========================================
-// ROUTE 17: BARANGAY OFFICIALS MANAGEMENT (ADMIN WITH PHOTO & SIGNATURE UPLOAD)
+// ROUTE 15: BARANGAY OFFICIALS MANAGEMENT
 // ==========================================
 app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   const settings = await getSettings();
@@ -2068,28 +2031,20 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
   const html = `
     <div class="card card-custom p-4">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-person-lines-fill me-2"></i>Barangay Council & Officials Management</h4>
+        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-person-lines-fill me-2"></i>Barangay Council & Officials</h4>
         <button class="btn btn-accent-custom fw-bold" data-bs-toggle="modal" data-bs-target="#addOfficialModal"><i class="bi bi-person-plus me-1"></i> Add Official</button>
       </div>
 
       <div class="row g-3">
         ${(officials || []).map(o => `
           <div class="col-md-3">
-            <div class="card card-custom p-3 text-center h-100">
-              <img src="${o.photo_url || 'https://via.placeholder.com/120'}" class="rounded-circle mx-auto mb-2" style="width:100px; height:100px; object-fit:cover; border: 3px solid #00a86b;">
+            <div class="card card-custom p-3 text-center">
+              <img src="${o.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
               <h6 class="fw-bold text-primary-blue m-0">${o.name}</h6>
-              <span class="badge bg-accent-green my-2">${o.position}</span>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height:30px; object-fit:contain;">` : ''}
-              
-              <!-- Update Official Media Form -->
-              <form action="/api/admin/official/upload-media/${o.id}" method="POST" enctype="multipart/form-data" class="mt-3 pt-2 border-top">
-                <label class="form-label small text-muted d-block text-start mb-1">Update Photo/Signature:</label>
-                <input type="file" name="photo" class="form-control form-control-sm mb-1" accept="image/*" title="Upload Official Photo">
-                <input type="file" name="signature" class="form-control form-control-sm mb-2" accept="image/*" title="Upload Signature">
-                <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-upload me-1"></i> Save Media</button>
-              </form>
+              <small class="badge bg-accent-green mb-2">${o.position}</small>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-2" style="height:25px;">` : ''}
             </div>
           </div>
-        `).join('') || '<div class="col-12 text-center text-muted py-4">No official records configured. Click "Add Official" to add barangay leadership.</div>'}
+        `).join('') || '<div class="col-12 text-center text-muted">No officials configured.</div>'}
       </div>
     </div>
 
@@ -2097,13 +2052,13 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
     <div class="modal fade" id="addOfficialModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
-          <form action="/api/admin/official/add" method="POST" enctype="multipart/form-data">
+          <form action="/api/admin/official/add" method="POST">
             <div class="modal-header bg-primary-blue text-white">
               <h5 class="modal-title fw-bold">Add Barangay Official</h5>
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3"><label class="form-label">Full Name *</label><input type="text" name="name" class="form-control" required placeholder="e.g. Hon. Juan Cruz"></div>
+              <div class="mb-3"><label class="form-label">Full Name *</label><input type="text" name="name" class="form-control" required></div>
               <div class="mb-3">
                 <label class="form-label">Position *</label>
                 <select name="position" class="form-select" required>
@@ -2114,18 +2069,9 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
                   <option value="SK Chairman">SK Chairman</option>
                 </select>
               </div>
-              <div class="mb-3">
-                <label class="form-label">Official Photo</label>
-                <input type="file" name="photo" class="form-control" accept="image/*">
-              </div>
-              <div class="mb-3">
-                <label class="form-label">Digital Signature</label>
-                <input type="file" name="signature" class="form-control" accept="image/*">
-              </div>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-              <button type="submit" class="btn btn-primary-custom">Save Official Record</button>
+              <button type="submit" class="btn btn-primary-custom">Save Official</button>
             </div>
           </form>
         </div>
@@ -2136,55 +2082,14 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
   res.send(renderAppLayout(req, 'officials', html, settings));
 });
 
-app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.fields([{ name: 'photo' }, { name: 'signature' }]), async (req, res) => {
-  try {
-    const { name, position } = req.body;
-    let photo_url = '';
-    let signature_url = '';
-
-    if (req.files && req.files['photo']) {
-      const pFile = req.files['photo'][0];
-      photo_url = `data:${pFile.mimetype};base64,${pFile.buffer.toString('base64')}`;
-    }
-
-    if (req.files && req.files['signature']) {
-      const sFile = req.files['signature'][0];
-      signature_url = `data:${sFile.mimetype};base64,${sFile.buffer.toString('base64')}`;
-    }
-
-    await supabase.from('barangay_officials').insert([{ name, position, photo_url, signature_url }]);
-    await logActivity(req.user.id, 'Add Official', `Added barangay official: ${name} (${position})`);
-    res.redirect('/admin/officials');
-  } catch (err) {
-    res.status(500).send('Error adding official: ' + err.message);
-  }
-});
-
-app.post('/api/admin/official/upload-media/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.fields([{ name: 'photo' }, { name: 'signature' }]), async (req, res) => {
-  try {
-    const updateData = {};
-    if (req.files && req.files['photo']) {
-      const pFile = req.files['photo'][0];
-      updateData.photo_url = `data:${pFile.mimetype};base64,${pFile.buffer.toString('base64')}`;
-    }
-    if (req.files && req.files['signature']) {
-      const sFile = req.files['signature'][0];
-      updateData.signature_url = `data:${sFile.mimetype};base64,${sFile.buffer.toString('base64')}`;
-    }
-
-    if (Object.keys(updateData).length > 0) {
-      await supabase.from('barangay_officials').update(updateData).eq('id', req.params.id);
-      await logActivity(req.user.id, 'Update Official Media', `Updated media for official ID: ${req.params.id}`);
-    }
-
-    res.redirect('/admin/officials');
-  } catch (err) {
-    res.status(500).send('Error updating media: ' + err.message);
-  }
+app.post('/api/admin/official/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
+  const { name, position } = req.body;
+  await supabase.from('barangay_officials').insert([{ name, position }]);
+  res.redirect('/admin/officials');
 });
 
 // ==========================================
-// ROUTE 18: USER MANAGEMENT & PERMISSIONS
+// ROUTE 16: USER ACCOUNTS & PERMISSIONS
 // ==========================================
 app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
@@ -2281,7 +2186,7 @@ app.get('/api/admin/user/toggle/:id', authenticateToken, requireRole(['Super Adm
 });
 
 // ==========================================
-// ROUTE 19: REPORTS & DEMOGRAPHICS
+// ROUTE 17: REPORTS & DEMOGRAPHICS
 // ==========================================
 app.get('/admin/reports', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -2338,7 +2243,7 @@ app.get('/admin/reports', authenticateToken, requireRole(['Super Admin', 'Barang
 });
 
 // ==========================================
-// ROUTE 20: ACTIVITY LOGS & AUDIT TRAIL
+// ROUTE 18: ACTIVITY LOGS
 // ==========================================
 app.get('/admin/activity-logs', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
@@ -2376,7 +2281,7 @@ app.get('/admin/activity-logs', authenticateToken, requireRole(['Super Admin', '
 });
 
 // ==========================================
-// ROUTE 21: SYSTEM SETTINGS & BRANDING LOGO UPLOADS
+// ROUTE 19: SYSTEM SETTINGS
 // ==========================================
 app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
@@ -2446,12 +2351,11 @@ app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Ad
 });
 
 // ==========================================
-// ROUTE 22: RESIDENT PORTAL & DIGITAL ID VIEW
+// ROUTE 20: RESIDENT PORTAL & PROFILE PHOTO CHANGE
 // ==========================================
 app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
-  const { data: certs } = await supabase.from('certificate_requests').select('*').eq('resident_id', req.user.resident_id);
   const { data: announcements } = await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(3);
 
   const html = `
@@ -2480,9 +2384,9 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident ? resident.photo_url || 'https://via.placeholder.com/100' : 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #00a86b;">
-          <h6 class="fw-bold m-0">${resident ? `${resident.first_name}${resident.last_name}` : 'Resident Name'}</h6>
-          <span class="text-primary-blue small fw-bold">${resident ? resident.resident_number : 'BRGY-000000'}</span>
+          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #00a86b;">
+          <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
+          <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
           <div class="mt-3">
             <a href="/resident/digital-id" class="btn btn-sm btn-accent-custom w-100 fw-bold"><i class="bi bi-qr-code me-1"></i> View Full Digital ID</a>
           </div>
@@ -2494,65 +2398,93 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
   res.send(renderAppLayout(req, 'res-dashboard', html, settings));
 });
 
-// Resident Profile & Edit Request / Photo Upload (UPDATED FOR PHOTO UPDATE)
+// Resident Profile & Picture Update
 app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
 
   const html = `
-    <div class="card card-custom p-4" style="max-width: 700px; margin: auto;">
+    <div class="card card-custom p-4" style="max-width: 720px; margin: auto;">
       <div class="text-center mb-4">
-        <img src="${resident ? resident.photo_url || 'https://via.placeholder.com/150' : 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-3" style="width: 130px; height: 130px; object-fit: cover; border: 3px solid #00a86b;">
-        <h4 class="fw-bold text-primary-blue m-0">${resident ? `${resident.first_name} ${resident.middle_name \vert{}\vert{} ''}${resident.last_name}` : 'Resident'}</h4>
-        <span class="badge bg-accent-green mt-1">${resident ? resident.resident_number : ''}</span>
+        <div class="position-relative d-inline-block">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 135px; height: 135px; object-fit: cover; border: 4px solid #134074; shadow: 0 4px 10px rgba(0,0,0,0.15);">
+          <button class="btn btn-sm btn-accent-custom rounded-circle position-absolute bottom-0 end-0 p-2" data-bs-toggle="modal" data-bs-target="#changePhotoModal" title="Change Photo">
+            <i class="bi bi-camera-fill"></i>
+          </button>
+        </div>
+        <h4 class="fw-bold text-primary-blue mt-2 m-0">${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</h4>
+        <span class="badge bg-accent-green mt-1">${resident.resident_number}</span>
       </div>
 
-      <!-- Enhanced Profile Picture Upload Form -->
       <div class="card p-3 mb-4 bg-light border">
-        <h6 class="fw-bold text-primary-blue mb-2"><i class="bi bi-camera me-1"></i> Change Profile Picture</h6>
-        <form action="/api/resident/upload-photo" method="POST" enctype="multipart/form-data">
-          <div class="input-group">
-            <input type="file" name="photo" class="form-control" accept="image/*" required>
-            <button type="submit" class="btn btn-primary-custom fw-bold"><i class="bi bi-upload me-1"></i> Upload Photo</button>
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h6 class="fw-bold text-primary-blue m-0"><i class="bi bi-image me-1"></i> Update Profile Picture</h6>
+            <small class="text-muted">Upload a new photograph for your digital resident ID</small>
           </div>
-          <small class="text-muted mt-1 d-block">Supported formats: JPG, PNG, WEBP (Max size: 10MB)</small>
-        </form>
+          <button class="btn btn-sm btn-accent-custom fw-bold" data-bs-toggle="modal" data-bs-target="#changePhotoModal"><i class="bi bi-upload me-1"></i> Upload Photo</button>
+        </div>
       </div>
 
       <h5 class="fw-bold text-primary-blue mb-3"><i class="bi bi-person me-2"></i>My Resident Official Profile</h5>
       <div class="row g-3">
-        <div class="col-6"><strong>Full Name:</strong> ${resident ? `${resident.first_name} ${resident.middle_name \vert{}\vert{} ''}${resident.last_name}` : '-'}</div>
-        <div class="col-6"><strong>Resident ID:</strong> ${resident ? resident.resident_number : '-'}</div>
-        <div class="col-6"><strong>Date of Birth:</strong> ${resident ? resident.date_of_birth : '-'}</div>
-        <div class="col-6"><strong>Gender:</strong> ${resident ? resident.gender : '-'}</div>
-        <div class="col-6"><strong>Civil Status:</strong> ${resident ? resident.civil_status : '-'}</div>
-        <div class="col-6"><strong>Purok Zone:</strong> ${resident && resident.puroks ? resident.puroks.name : '-'}</div>
-        <div class="col-12"><strong>Address:</strong> ${resident ? resident.address : '-'}</div>
+        <div class="col-6"><strong>Full Name:</strong> ${resident.first_name} ${resident.middle_name || ''} ${resident.last_name}</div>
+        <div class="col-6"><strong>Resident ID:</strong> ${resident.resident_number}</div>
+        <div class="col-6"><strong>Date of Birth:</strong> ${resident.date_of_birth}</div>
+        <div class="col-6"><strong>Gender:</strong> ${resident.gender}</div>
+        <div class="col-6"><strong>Civil Status:</strong> ${resident.civil_status}</div>
+        <div class="col-6"><strong>Purok Zone:</strong> ${resident.puroks ? resident.puroks.name : '-'}</div>
+        <div class="col-12"><strong>Address:</strong> ${resident.address}</div>
       </div>
 
       <hr class="my-4">
-      <h6 class="fw-bold text-accent-green mb-2">Request Information Update</h6>
+      <h6 class="fw-bold text-accent-green mb-2">Request Profile Correction</h6>
       <form action="/api/resident/request-profile-update" method="POST">
         <div class="mb-3">
-          <label class="form-label">Describe Needed Corrections / Changes *</label>
-          <textarea name="reason" class="form-control" rows="3" required placeholder="e.g. Correct typo in last name or address change..."></textarea>
+          <label class="form-label">Describe Needed Changes / Corrections *</label>
+          <textarea name="reason" class="form-control" rows="3" required placeholder="e.g. Correct address details or typo..."></textarea>
         </div>
-        <button type="submit" class="btn btn-primary-custom">Submit Update Request</button>
+        <button type="submit" class="btn btn-primary-custom">Submit Correction Request</button>
       </form>
+    </div>
+
+    <!-- Modal: Upload Profile Photo -->
+    <div class="modal fade" id="changePhotoModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <form action="/api/resident/upload-photo" method="POST" enctype="multipart/form-data">
+            <div class="modal-header bg-primary-blue text-white">
+              <h5 class="modal-title fw-bold"><i class="bi bi-camera me-2"></i>Change Profile Picture</h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Select Photo File (PNG, JPG, JPEG) *</label>
+                <input type="file" name="photo" class="form-control" accept="image/*" required>
+                <small class="text-muted d-block mt-1">Please select a clear front-facing photograph.</small>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-accent-custom fw-bold"><i class="bi bi-upload me-1"></i> Upload New Picture</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   `;
 
   res.send(renderAppLayout(req, 'res-profile', html, settings));
 });
 
-// Resident Upload Profile Photo Handler
+// Resident Profile Photo Upload Handler
 app.post('/api/resident/upload-photo', authenticateToken, requireRole(['Resident']), upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).send('<script>alert("Please select an image file to upload."); window.history.back();</script>');
     const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
 
     await supabase.from('residents').update({ photo_url: base64Data }).eq('id', req.user.resident_id);
-    await logActivity(req.user.id, 'Resident Photo Self-Update', `Resident updated their own profile photo.`);
+    await logActivity(req.user.id, 'Resident Photo Self-Update', `Resident updated their profile picture.`);
     res.redirect('/resident/profile');
   } catch (err) {
     console.error('Error uploading photo:', err);
@@ -2588,13 +2520,13 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
         </div>
 
         <div class="id-card-body">
-          <img src="${resident ? resident.photo_url || 'https://via.placeholder.com/150' : 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
           <div class="id-details">
-            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident ? resident.resident_number : '-'}</div>
-            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident ? `${resident.first_name}${resident.last_name}` : '-'}</div>
-            <div class="text-muted mt-1">DOB: <strong>${resident ? resident.date_of_birth : '-'}</strong></div>
-            <div class="text-muted">Sex: <strong>${resident ? resident.gender : '-'}</strong> | Civil: <strong>${resident ? resident.civil_status || 'Single' : '-'}</strong></div>
-            <div class="text-muted">Purok: <strong>${resident && resident.puroks ? resident.puroks.name : '-'}</strong></div>
+            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident.resident_number}</div>
+            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident.first_name} ${resident.last_name}</div>
+            <div class="text-muted mt-1">DOB: <strong>${resident.date_of_birth}</strong></div>
+            <div class="text-muted">Sex: <strong>${resident.gender}</strong> | Civil: <strong>${resident.civil_status || 'Single'}</strong></div>
+            <div class="text-muted">Purok: <strong>${resident.puroks ? resident.puroks.name : '-'}</strong></div>
           </div>
           <img src="${qrDataUrl}" class="id-qr" style="width: 1.1in; height: 1.1in;">
         </div>
