@@ -1,13 +1,13 @@
 {
   "name": "barangay-resident-management-system",
   "version": "1.0.0",
-  "description": "Production Barangay Resident Management System for Render + Supabase",
+  "description": "Production-grade Barangay Resident Management System for Render and Supabase",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
+    "@supabase/supabase-js": "^2.39.8",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
