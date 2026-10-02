@@ -100,8 +100,6 @@ const renderSystemHead = (title) => `
   <title>${title} - Barangay Resident System</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
-  <!-- Isinama ang Instascan Library para sa functional QR Code Camera Scanner -->
-  <script src="https://rawgit.com/schmich/instascan-builds/master/instascan.min.js"></script>
   <style>
     :root {
       --primary-navy: #0b2545;
@@ -177,7 +175,7 @@ const renderSystemHead = (title) => `
       background: linear-gradient(135deg, #ffffff 0%, var(--light-green) 100%);
     }
 
-    /* Standardized CR80 ID Card Frame (3.375in x 2.125in) - Barangay ID Format */
+    /* Standardized CR80 ID Card Frame (3.375in x 2.125in) - National ID Style with Barangay ID Label */
     .id-card-frame {
       width: 3.375in;
       height: 2.125in;
@@ -202,8 +200,8 @@ const renderSystemHead = (title) => `
       height: 0.42in;
     }
     .id-header-logo {
-      width: 0.32in;
-      height: 0.32in;
+      width: 0.35in;
+      height: 0.35in;
       object-fit: cover;
       border-radius: 50%;
       border: 1px solid white;
@@ -325,7 +323,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         <!-- Sidebar Navigation -->
         <div class="col-md-3 col-lg-2 sidebar d-flex flex-column p-3 no-print">
           <div class="d-flex align-items-center mb-4 px-2">
-            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle shadow-sm" style="width: 70px; height: 70px; object-fit: cover; border: 2px solid #2ecc71;">` : '<i class="bi bi-building fs-1 me-2 text-accent-green"></i>'}
+            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle shadow-sm" style="width: 65px; height: 65px; object-fit: cover; border: 2px solid #2ecc71;">` : '<i class="bi bi-building fs-1 me-2 text-accent-green"></i>'}
             <div>
               <h6 class="m-0 fw-bold">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
               <small class="text-white-50">${user.full_name || user.role || 'User'}</small>
@@ -383,7 +381,6 @@ app.use(async (req, res, next) => {
   next();
 });
 
-// Helper: Fetch Global Barangay Settings
 const getSettings = async () => {
   const { data } = await supabase.from('system_settings').select('*').single();
   return data || {};
@@ -403,7 +400,7 @@ app.get('/setup', async (req, res) => {
         <div class="text-center mb-4">
           <i class="bi bi-gear-fill text-primary-blue fs-1"></i>
           <h3 class="fw-bold text-primary-blue mt-2">Initial System Setup</h3>
-          <p class="text-muted">Configure your Barangay details and create the Super Administrator account.</p>
+          <p class="text-muted">Configure your Barangay details and create the Administrator account.</p>
         </div>
         <form action="/api/setup" method="POST">
           <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">1. Barangay Details</h6>
@@ -421,10 +418,10 @@ app.get('/setup', async (req, res) => {
               <input type="text" name="province" class="form-control" required placeholder="Pampanga">
             </div>
           </div>
-          <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-4">2. Super Admin Credentials</h6>
+          <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-4">2. Admin Credentials</h6>
           <div class="mb-3">
             <label class="form-label">Full Name</label>
-            <input type="text" name="full_name" class="form-control" required placeholder="Hon. Admin Name">
+            <input type="text" name="full_name" class="form-control" required placeholder="Administrator Name">
           </div>
           <div class="mb-3">
             <label class="form-label">Username</label>
@@ -498,28 +495,21 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (Green upper & Blue lower gradient + New BG picture + Horizontal rectangle fields)
+// ROUTE 2: REDESIGNED LOGIN PAGE (GREEN UPPER & BLUE LOWER GRADIENT + NEW BG PICTURE + HORIZONTAL RECTANGLE FIELDS)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
   const bgImg = 'https://scontent.fmnl33-4.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=zPWWgjIxijoQ7kNvwFRKLVb&_nc_oc=AdpZBQL9o8MZk4xIiBL9pR6vKPkB7bvmqkM4R26op6LLy9SHE6Qd009laEUr-_vlHfE&_nc_zt=23&_nc_ht=scontent.fmnl33-4.fna&_nc_gid=A3E_5De3Kcc14pam4H4mgA&_nc_ss=7b2a8&oh=00_AQN0FSG7xTxJGzBY3rAhHoIZqJoNuUuFP2P_2cdm47NTxw&oe=6AC4DD7C';
-  
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
   res.send(`
     ${renderSystemHead('Login')}
     <style>
-      html {
-        scroll-behavior: smooth;
-      }
-      body {
-        background-color: #0b2545;
-        overflow-x: hidden;
-      }
+      html { scroll-behavior: smooth; }
+      body { background-color: #0b2545; overflow-x: hidden; }
       .login-section {
         min-height: 100vh;
-        /* Green sa taas, Blue sa baba (Hindi masyadong madilim) */
-        background: linear-gradient(180deg, rgba(46, 204, 113, 0.45), rgba(32, 84, 147, 0.65)), url('${bgImg}');
+        background: linear-gradient(180deg, rgba(46, 204, 113, 0.75), rgba(32, 84, 147, 0.75)), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -542,21 +532,19 @@ app.get('/login', async (req, res) => {
         padding: 42px 36px;
         transition: transform 0.3s ease;
       }
-      .glass-login-card:hover {
-        transform: translateY(-4px);
-      }
+      .glass-login-card:hover { transform: translateY(-4px); }
       .brand-logo-img {
-        width: 130px;
-        height: 130px;
+        width: 120px;
+        height: 120px;
         object-fit: cover;
         border-radius: 50%;
         border: 3px solid #2ecc71;
         box-shadow: 0 4px 12px rgba(32, 84, 147, 0.2);
       }
-      /* Horizontal rectangle login fields para ma-maximize ang espasyo */
+      /* Horizontal rectangle login fields */
       .form-control-horizontal {
         height: 52px;
-        border-radius: 0 8px 8px 0;
+        border-radius: 8px;
         font-size: 1.05rem;
       }
       .input-group-horizontal {
@@ -569,7 +557,6 @@ app.get('/login', async (req, res) => {
         border: 1px solid #ced4da;
         width: 52px;
         justify-content: center;
-        border-radius: 8px 0 0 8px;
       }
       .btn-glow {
         background-color: #205493;
@@ -593,7 +580,7 @@ app.get('/login', async (req, res) => {
         animation: bounce 2s infinite;
         text-decoration: none;
         font-weight: 700;
-        background: rgba(255, 255, 255, 0.8);
+        background: rgba(255, 255, 255, 0.85);
         padding: 8px 18px;
         border-radius: 30px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.1);
@@ -618,8 +605,8 @@ app.get('/login', async (req, res) => {
         box-shadow: 0 12px 24px rgba(32, 84, 147, 0.15);
       }
       .official-photo {
-        width: 140px;
-        height: 140px;
+        width: 130px;
+        height: 130px;
         object-fit: cover;
         border-radius: 50%;
         border: 4px solid #2ecc71;
@@ -627,7 +614,6 @@ app.get('/login', async (req, res) => {
       }
     </style>
 
-    <!-- SECTION 1: LOGIN CARD CONTAINER -->
     <div class="login-section">
       <div class="glass-login-card">
         <div class="text-center mb-4">
@@ -642,14 +628,14 @@ app.get('/login', async (req, res) => {
             <label class="form-label fw-semibold text-secondary small">USERNAME OR EMAIL</label>
             <div class="input-group input-group-horizontal">
               <span class="input-group-text"><i class="bi bi-person-fill fs-5"></i></span>
-              <input type="text" name="identifier" class="form-control form-control-horizontal" required placeholder="Enter username or email">
+              <input type="text" name="identifier" class="form-control form-control-horizontal border-start-0" required placeholder="Enter username or email">
             </div>
           </div>
           <div class="mb-4">
             <label class="form-label fw-semibold text-secondary small">PASSWORD</label>
             <div class="input-group input-group-horizontal">
               <span class="input-group-text"><i class="bi bi-lock-fill fs-5"></i></span>
-              <input type="password" name="password" class="form-control form-control-horizontal" required placeholder="Enter your password">
+              <input type="password" name="password" class="form-control form-control-horizontal border-start-0" required placeholder="Enter your password">
             </div>
           </div>
           <button type="submit" class="btn btn-primary btn-glow w-100 fw-bold text-white"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
@@ -667,7 +653,6 @@ app.get('/login', async (req, res) => {
       </a>
     </div>
 
-    <!-- SECTION 2: SCROLLABLE BARANGAY OFFICIALS SHOWCASE WITH PICTURES -->
     <div id="officials-section" class="officials-section">
       <div class="container">
         <div class="text-center mb-5">
@@ -689,7 +674,7 @@ app.get('/login', async (req, res) => {
           `).join('') || `
             <div class="col-12 text-center text-muted py-5">
               <i class="bi bi-people fs-1 text-secondary"></i>
-              <p class="mt-2">No official records available at this time. Admin can add officials in the dashboard.</p>
+              <p class="mt-2">No official records available at this time.</p>
             </div>
           `}
         </div>
@@ -1123,7 +1108,7 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
                   </td>
                 </tr>
               `;
-            }).join('') || '<tr><td colspan="6" class="text-center py-4 text-muted">No resident records found. Register or approve your first resident to get started.</td></tr>'}
+            }).join('') || '<tr><td colspan="6" class="text-center py-4 text-muted">No resident records found.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1174,7 +1159,6 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
   res.send(renderAppLayout(req, 'residents', html, settings));
 });
 
-// Admin API Actions: Resident
 app.post('/api/admin/resident/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   const { first_name, middle_name, last_name, date_of_birth, gender, civil_status, purok_id, address, contact_number, email } = req.body;
   try {
@@ -1220,7 +1204,6 @@ app.get('/api/admin/resident/archive/:id', authenticateToken, requireRole(['Supe
   }
 });
 
-// View Resident Record Details
 app.get('/admin/resident/view/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name), households(household_number)').eq('id', req.params.id).single();
@@ -1323,7 +1306,6 @@ app.get('/admin/puroks', authenticateToken, requireRole(['Super Admin', 'Baranga
       </div>
     </div>
 
-    <!-- Modal Add Purok -->
     <div class="modal fade" id="addPurokModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -1395,7 +1377,6 @@ app.get('/admin/households', authenticateToken, requireRole(['Super Admin', 'Bar
       </div>
     </div>
 
-    <!-- Modal Add Household -->
     <div class="modal fade" id="addHouseholdModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -1491,7 +1472,7 @@ app.get('/api/admin/certificate/update/:id', authenticateToken, requireRole(['Su
 });
 
 // ==========================================
-// ROUTE 8: BARANGAY ID GENERATOR (Updated Format to Barangay ID with functional QR)
+// ROUTE 8: BARANGAY ID GENERATOR (National ID Style with Barangay ID label & functional QR)
 // ==========================================
 app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1505,10 +1486,10 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
   const html = `
     <div class="card card-custom p-4 no-print">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay ID Card Generator</h4>
+        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay Resident ID Generator</h4>
         <button class="btn btn-accent-custom fw-bold text-white" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print Selected Grid (8 IDs)</button>
       </div>
-      <p class="text-muted">Generate standard CR80 physical Barangay ID cards with optimized print layouts and functional QR codes.</p>
+      <p class="text-muted">Generate standard CR80 physical cards (National ID format with <strong>Barangay ID</strong> label) with functional QR codes and seals.</p>
     </div>
 
     <div class="mt-4">
@@ -1519,7 +1500,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
               ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
               <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
                 <strong style="font-size: 7.5pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
-                <span style="font-size: 5.5pt; letter-spacing:0.5px;">OFFICIAL BARANGAY ID</span>
+                <span style="font-size: 5.5pt; font-weight: 700; letter-spacing:0.5px;">BARANGAY ID (NATIONAL ID FORMAT)</span>
               </div>
               <span class="badge bg-white text-dark px-1" style="font-size: 5pt; font-weight: 800;">VERIFIED</span>
             </div>
@@ -1555,7 +1536,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
 });
 
 // ==========================================
-// ROUTE 9: QR SCANNER PAGE (With Functional Camera Scanner & Manual Input)
+// ROUTE 9: QR SCANNER PAGE (With Camera & Manual Scanner)
 // ==========================================
 app.get('/scanner', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1564,24 +1545,22 @@ app.get('/scanner', authenticateToken, requireRole(['Super Admin', 'Barangay Adm
     <div class="card card-custom p-4" style="max-width: 650px; margin: auto;">
       <div class="text-center mb-3">
         <i class="bi bi-qr-code-scan text-primary-blue fs-1"></i>
-        <h4 class="fw-bold text-primary-blue mt-2">Barangay ID QR Code Scanner</h4>
-        <p class="text-muted small">Gamitin ang camera scanner o i-type ang token para i-verify ang Barangay ID.</p>
+        <h4 class="fw-bold text-primary-blue mt-2">QR Code & Camera Scanner</h4>
+        <p class="text-muted small">Verify resident authenticity using camera scanner or manual token input.</p>
       </div>
 
-      <!-- Live Camera Scanner Element -->
-      <div class="mb-3 text-center">
-        <div class="border rounded p-2 bg-dark d-inline-block position-relative" style="width: 100%; max-width: 400px; height: 260px;">
-          <video id="preview" style="width: 100%; height: 100%; object-fit: cover; border-radius: 6px;"></video>
-        </div>
-        <div class="mt-2">
-          <button id="startScanBtn" class="btn btn-sm btn-success fw-bold"><i class="bi bi-camera-video me-1"></i> Start Camera</button>
-          <button id="stopScanBtn" class="btn btn-sm btn-danger fw-bold" style="display:none;"><i class="bi bi-camera-video-off me-1"></i> Stop Camera</button>
+      <!-- Live Camera Scanner Integration View -->
+      <div class="mb-4 text-center">
+        <div id="reader" style="width: 100%; max-width: 500px; margin: auto; border-radius: 8px; overflow: hidden; border: 2px dashed #205493; background: #f8f9fa; padding: 10px;">
+          <i class="bi bi-camera-video display-4 text-secondary d-block my-3"></i>
+          <p class="text-muted small">Camera QR Scanner Enabled. Use button below to start or enter token manually.</p>
+          <button type="button" class="btn btn-sm btn-accent-custom text-white fw-bold px-3 mb-2" onclick="startCameraScanner()"><i class="bi bi-play-circle me-1"></i> Start Camera Stream</button>
         </div>
       </div>
 
-      <form id="scannerForm" action="/api/scanner/verify" method="POST" class="mb-4">
+      <form action="/api/scanner/verify" method="POST" class="mb-4">
         <div class="input-group">
-          <input type="text" id="qr_token" name="qr_token" class="form-control" placeholder="Scan or enter QR Verification Token..." required>
+          <input type="text" id="qrTokenInput" name="qr_token" class="form-control" placeholder="Scan or enter QR Verification Token..." required>
           <button type="submit" class="btn btn-primary-custom fw-bold text-white">Verify Record</button>
         </div>
       </form>
@@ -1591,34 +1570,30 @@ app.get('/scanner', authenticateToken, requireRole(['Super Admin', 'Barangay Adm
       </div>
     </div>
 
+    <!-- Include HTML5-QRCode Library for actual browser camera scanning -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script>
-      let scanner = null;
-      document.getElementById('startScanBtn').addEventListener('click', function() {
-        document.getElementById('startScanBtn').style.display = 'none';
-        document.getElementById('stopScanBtn').style.display = 'inline-block';
-        scanner = new Instascan.Scanner({ video: document.getElementById('preview'), mirror: false });
-        scanner.addListener('scan', function(content) {
-          document.getElementById('qr_token').value = content;
-          document.getElementById('scannerForm').submit();
-        });
-        Instascan.Camera.getCameras().then(function (cameras) {
-          if (cameras.length > 0) {
-            scanner.start(cameras[0]);
-          } else {
-            alert('No cameras found.');
+      function startCameraScanner() {
+        const readerDiv = document.getElementById('reader');
+        readerDiv.innerHTML = '<div id="html5-qrcode-scanner-container"></div>';
+        
+        const html5QrCode = new Html5Qrcode("html5-qrcode-scanner-container");
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (decodedText, decodedResult) => {
+            document.getElementById('qrTokenInput').value = decodedText;
+            html5QrCode.stop().then(() => {
+              document.forms[0].submit();
+            }).catch(err => { console.error(err); });
+          },
+          (errorMessage) => {
+            // scanning error ignored for continuous frame scanning
           }
-        }).catch(function (e) {
-          console.error(e);
+        ).catch(err => {
+          alert("Unable to access camera: " + err);
         });
-      });
-
-      document.getElementById('stopScanBtn').addEventListener('click', function() {
-        if (scanner) {
-          scanner.stop();
-        }
-        document.getElementById('startScanBtn').style.display = 'inline-block';
-        document.getElementById('stopScanBtn').style.display = 'none';
-      });
+      }
     </script>
   `;
 
@@ -1629,7 +1604,7 @@ app.post('/api/scanner/verify', authenticateToken, requireRole(['Super Admin', '
   const { qr_token } = req.body;
   const settings = await getSettings();
 
-  const { data: resident } = await supabase.from('residents').select('*, puroks(name)').or(`qr_token.eq.${qr_token},id.eq.${qr_token}`).single();
+  const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('qr_token', qr_token).single();
 
   let resultHtml = '';
   if (resident) {
@@ -1638,7 +1613,7 @@ app.post('/api/scanner/verify', authenticateToken, requireRole(['Super Admin', '
     resultHtml = `
       <div class="card card-custom p-4 border-success">
         <div class="text-center mb-3">
-          <span class="badge bg-success px-3 py-2 fs-6 text-white"><i class="bi bi-patch-check-fill me-1"></i> OFFICIAL BARANGAY ID VERIFIED</span>
+          <span class="badge bg-success px-3 py-2 fs-6 text-white"><i class="bi bi-patch-check-fill me-1"></i> OFFICIAL RESIDENT VERIFIED</span>
         </div>
         <div class="row align-items-center">
           <div class="col-md-4 text-center">
@@ -1706,7 +1681,7 @@ app.get('/admin/seniors', authenticateToken, requireRole(['Super Admin', 'Barang
               return `
                 <tr>
                   <td class="fw-bold text-primary-blue">${s.resident_number}</td>
-                  <td class="fw-semibold">${s.first_name}${s.last_name}</td>
+                  <td class="fw-semibold">${s.first_name} ${s.last_name}</td>
                   <td><span class="badge bg-accent-green text-white">${age} yrs old</span></td>
                   <td>${s.puroks ? s.puroks.name : '-'}</td>
                   <td>${s.contact_number || '-'}</td>
@@ -1743,7 +1718,7 @@ app.get('/admin/pwds', authenticateToken, requireRole(['Super Admin', 'Barangay 
             ${(pwds || []).map(p => `
               <tr>
                 <td class="fw-bold text-primary-blue">${p.resident_number}</td>
-                <td class="fw-semibold">${p.first_name}${p.last_name}</td>
+                <td class="fw-semibold">${p.first_name} ${p.last_name}</td>
                 <td>${p.disability_details || 'Unspecified'}</td>
                 <td>${p.puroks ? p.puroks.name : '-'}</td>
               </tr>
@@ -1778,7 +1753,7 @@ app.get('/admin/solo-parents', authenticateToken, requireRole(['Super Admin', 'B
             ${(parents || []).map(p => `
               <tr>
                 <td class="fw-bold text-primary-blue">${p.resident_number}</td>
-                <td class="fw-semibold">${p.first_name}${p.last_name}</td>
+                <td class="fw-semibold">${p.first_name} ${p.last_name}</td>
                 <td>${p.solo_parent_details || 'N/A'}</td>
                 <td>${p.puroks ? p.puroks.name : '-'}</td>
               </tr>
@@ -1832,7 +1807,6 @@ app.get('/admin/blotters', authenticateToken, requireRole(['Super Admin', 'Baran
       </div>
     </div>
 
-    <!-- Modal Add Blotter -->
     <div class="modal fade" id="addBlotterModal" tabindex="-1">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -1947,7 +1921,7 @@ app.get('/admin/appointments', authenticateToken, requireRole(['Super Admin', 'B
                 <td class="fw-bold text-primary-blue">${a.appointment_number}</td>
                 <td>${a.residents ? `${a.residents.first_name} ${a.residents.last_name}` : 'Unknown'}</td>
                 <td>${a.service_requested}</td>
-                <td>${a.appointment_date} at${a.appointment_time}</td>
+                <td>${a.appointment_date} at ${a.appointment_time}</td>
                 <td><span class="badge bg-primary text-white">${a.status}</span></td>
               </tr>
             `).join('') || '<tr><td colspan="5" class="text-center py-4 text-muted">No appointments scheduled.</td></tr>'}
@@ -1988,7 +1962,6 @@ app.get('/admin/announcements', authenticateToken, requireRole(['Super Admin', '
       </div>
     </div>
 
-    <!-- Modal Add Announcement -->
     <div class="modal fade" id="addAnnouncementModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -2036,7 +2009,7 @@ app.get('/admin/events', authenticateToken, requireRole(['Super Admin', 'Baranga
           <div class="col-md-4">
             <div class="card card-custom p-3 border-top border-4 border-success">
               <h5 class="fw-bold text-primary-blue">${e.event_name}</h5>
-              <p class="text-muted small mb-1"><i class="bi bi-calendar3 me-1"></i> ${e.event_date} at${e.event_time}</p>
+              <p class="text-muted small mb-1"><i class="bi bi-calendar3 me-1"></i> ${e.event_date} at ${e.event_time}</p>
               <p class="text-muted small mb-2"><i class="bi bi-geo-alt me-1"></i> ${e.location}</p>
               <p class="small">${e.description}</p>
             </div>
@@ -2045,7 +2018,6 @@ app.get('/admin/events', authenticateToken, requireRole(['Super Admin', 'Baranga
       </div>
     </div>
 
-    <!-- Modal Add Event -->
     <div class="modal fade" id="addEventModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -2113,7 +2085,6 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
       </div>
     </div>
 
-    <!-- Modal Add Official -->
     <div class="modal fade" id="addOfficialModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -2182,7 +2153,7 @@ app.get('/api/admin/official/delete/:id', authenticateToken, requireRole(['Super
 });
 
 // ==========================================
-// ROUTE 16: USER ACCOUNTS & PERMISSIONS (Updated Admin Account Name)
+// ROUTE 16: USER ACCOUNTS & PERMISSIONS (Updated Admin Account Name Management)
 // ==========================================
 app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
@@ -2216,6 +2187,7 @@ app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay
                 <td><span class="badge bg-primary-blue text-white">${u.role}</span></td>
                 <td><span class="badge ${u.status === 'Active' ? 'bg-success' : 'bg-secondary'}">${u.status}</span></td>
                 <td class="text-end">
+                  <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editUserModal${u.id}">Edit Name/Details</button>
                   ${u.status === 'Active' ? `
                     <a href="/api/admin/user/toggle/${u.id}?status=Disabled" class="btn btn-sm btn-outline-danger">Disable</a>
                   ` : `
@@ -2223,13 +2195,43 @@ app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay
                   `}
                 </td>
               </tr>
+
+              <!-- Modal Edit User Account Name & Details -->
+              <div class="modal fade" id="editUserModal${u.id}" tabindex="-1">
+                <div class="modal-dialog">
+                  <div class="modal-content">
+                    <form action="/api/admin/user/update/${u.id}" method="POST">
+                      <div class="modal-header bg-primary-blue text-white">
+                        <h5 class="modal-title fw-bold">Update Account Details</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                      </div>
+                      <div class="modal-body text-start">
+                        <div class="mb-3"><label class="form-label">Full Name *</label><input type="text" name="full_name" class="form-control" value="${u.full_name}" required></div>
+                        <div class="mb-3"><label class="form-label">Username *</label><input type="text" name="username" class="form-control" value="${u.username}" required></div>
+                        <div class="mb-3"><label class="form-label">Email *</label><input type="email" name="email" class="form-control" value="${u.email}" required></div>
+                        <div class="mb-3">
+                          <label class="form-label">Role *</label>
+                          <select name="role" class="form-select" required>
+                            <option value="Super Admin" ${u.role === 'Super Admin' ? 'selected' : ''}>Super Admin</option>
+                            <option value="Barangay Admin" ${u.role === 'Barangay Admin' ? 'selected' : ''}>Barangay Admin</option>
+                            <option value="Barangay Secretary" ${u.role === 'Barangay Secretary' ? 'selected' : ''}>Barangay Secretary</option>
+                            <option value="Barangay Staff" ${u.role === 'Barangay Staff' ? 'selected' : ''}>Barangay Staff</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div class="modal-footer">
+                        <button type="submit" class="btn btn-primary-custom text-white">Save Changes</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
             `).join('')}
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- Modal Add User -->
     <div class="modal fade" id="addUserModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -2269,6 +2271,12 @@ app.post('/api/admin/user/add', authenticateToken, requireRole(['Super Admin', '
   const salt = await bcrypt.genSalt(10);
   const password_hash = await bcrypt.hash(password, salt);
   await supabase.from('users').insert([{ full_name, username, email, password_hash, role, status: 'Active' }]);
+  res.redirect('/admin/users');
+});
+
+app.post('/api/admin/user/update/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
+  const { full_name, username, email, role } = req.body;
+  await supabase.from('users').update({ full_name, username, email, role }).eq('id', req.params.id);
   res.redirect('/admin/users');
 });
 
@@ -2374,7 +2382,7 @@ app.get('/admin/activity-logs', authenticateToken, requireRole(['Super Admin', '
 });
 
 // ==========================================
-// ROUTE 19: SYSTEM SETTINGS (Updated Emergency Number Configuration)
+// ROUTE 19: SYSTEM SETTINGS (Admin configurable emergency number)
 // ==========================================
 app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
@@ -2412,7 +2420,7 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
         <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Branding Assets Upload</h6>
         <div class="mb-3">
           <label class="form-label">Barangay Logo</label>
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:70px; height:70px; object-fit:cover;">` : ''}
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:60px; height:60px; object-fit:cover;">` : ''}
           <input type="file" name="logo" class="form-control" accept="image/*">
         </div>
         <div class="mb-3">
@@ -2482,7 +2490,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
 
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
-          <h5 class="fw-bold text-primary-blue mb-3">My Digital Barangay ID</h5>
+          <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
           <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #2ecc71;">
           <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
           <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
@@ -2498,7 +2506,6 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
   res.send(renderAppLayout(req, 'res-dashboard', html, settings));
 });
 
-// Resident Profile & Picture Update
 app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
@@ -2548,7 +2555,6 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
       </form>
     </div>
 
-    <!-- Modal: Upload Profile Photo -->
     <div class="modal fade" id="changePhotoModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -2577,7 +2583,6 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
   res.send(renderAppLayout(req, 'res-profile', html, settings));
 });
 
-// Resident Profile Photo Upload Handler
 app.post('/api/resident/upload-photo', authenticateToken, requireRole(['Resident']), upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).send('<script>alert("Please select an image file to upload."); window.history.back();</script>');
@@ -2598,7 +2603,6 @@ app.post('/api/resident/request-profile-update', authenticateToken, requireRole(
   res.redirect('/resident/profile');
 });
 
-// Resident Digital ID Display (Barangay ID format with functional QR code)
 app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
@@ -2607,14 +2611,14 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
 
   const html = `
     <div class="text-center py-4">
-      <h4 class="fw-bold text-primary-blue mb-3">Official Digital Barangay ID</h4>
+      <h4 class="fw-bold text-primary-blue mb-3">Official Digital Resident ID</h4>
 
       <div class="id-card-frame shadow-lg text-start" style="width: 3.6in; height: 2.25in; border-width: 3px;">
         <div class="id-card-header">
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
           <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
             <strong style="font-size: 8pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
-            <span style="font-size: 6pt; letter-spacing:0.5px;">OFFICIAL BARANGAY ID</span>
+            <span style="font-size: 6pt; font-weight: 700; letter-spacing:0.5px;">BARANGAY ID (NATIONAL ID FORMAT)</span>
           </div>
           <span class="badge bg-white text-dark px-1" style="font-size: 5.5pt; font-weight: 800;">VERIFIED</span>
         </div>
@@ -2647,7 +2651,6 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
   res.send(renderAppLayout(req, 'res-digital-id', html, settings));
 });
 
-// Resident Certificate Request
 app.get('/resident/certificates', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: certs } = await supabase.from('certificate_requests').select('*').eq('resident_id', req.user.resident_id).order('created_at', { ascending: false });
@@ -2683,7 +2686,6 @@ app.get('/resident/certificates', authenticateToken, requireRole(['Resident']), 
       </div>
     </div>
 
-    <!-- Modal Request Certificate -->
     <div class="modal fade" id="reqCertModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -2723,7 +2725,6 @@ app.post('/api/resident/certificate/request', authenticateToken, requireRole(['R
   res.redirect('/resident/certificates');
 });
 
-// Resident Appointments
 app.get('/resident/appointments', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: appts } = await supabase.from('appointments').select('*').eq('resident_id', req.user.resident_id);
@@ -2759,7 +2760,6 @@ app.get('/resident/appointments', authenticateToken, requireRole(['Resident']), 
       </div>
     </div>
 
-    <!-- Modal Book Appointment -->
     <div class="modal fade" id="bookApptModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -2792,7 +2792,6 @@ app.post('/api/resident/appointment/book', authenticateToken, requireRole(['Resi
   res.redirect('/resident/appointments');
 });
 
-// Resident Complaints
 app.get('/resident/complaints', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
 
@@ -2825,7 +2824,6 @@ app.post('/api/resident/complaint/submit', authenticateToken, requireRole(['Resi
   res.redirect('/resident/dashboard');
 });
 
-// Resident Assistance Requests
 app.get('/resident/assistance', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
 
@@ -2859,7 +2857,6 @@ app.post('/api/resident/assistance/request', authenticateToken, requireRole(['Re
   res.redirect('/resident/dashboard');
 });
 
-// Resident Announcements Display
 app.get('/resident/announcements', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: announcements } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
@@ -2884,7 +2881,6 @@ app.get('/resident/announcements', authenticateToken, requireRole(['Resident']),
   res.send(renderAppLayout(req, 'res-announcements', html, settings));
 });
 
-// Resident Emergency Contacts
 app.get('/resident/emergency-contacts', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
 
@@ -2920,7 +2916,6 @@ app.get('/resident/emergency-contacts', authenticateToken, requireRole(['Residen
   res.send(renderAppLayout(req, 'res-contacts', html, settings));
 });
 
-// Resident Feedback
 app.get('/resident/feedback', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
 
