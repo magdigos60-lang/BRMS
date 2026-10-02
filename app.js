@@ -1,4 +1,3 @@
-
 /**
  * BARANGAY RESIDENT MANAGEMENT SYSTEM
  * Single Monolithic Server Application (Express.js + Supabase JavaScript Client)
@@ -201,8 +200,8 @@ const renderSystemHead = (title) => `
       height: 0.42in;
     }
     .id-header-logo {
-      width: 0.45in;
-      height: 0.45in;
+      width: 0.55in;
+      height: 0.55in;
       object-fit: cover;
       border-radius: 50%;
       border: 1px solid white;
@@ -355,7 +354,10 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         <!-- Main Content Area -->
         <div class="col-md-9 col-lg-10 p-4 overflow-y-auto" style="height: 100vh; background-color: #f4f9f6;">
           <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom no-print">
-            <h4 class="fw-bold text-primary-blue m-0">${settings.system_name || 'Barangay Resident Management System'}</h4>
+            <div class="d-flex align-items-center">
+              ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-3 rounded-circle shadow-sm" style="width: 50px; height: 50px; object-fit: cover;">` : ''}
+              <h4 class="fw-bold text-primary-blue m-0">${settings.system_name || settings.barangay_name || 'Barangay Resident Management System'}</h4>
+            </div>
             <span class="badge bg-accent-green px-3 py-2 text-white"><i class="bi bi-check-circle me-1"></i> System Online</span>
           </div>
           ${contentHtml}
@@ -497,11 +499,11 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (GRADIENT GREEN (TOP) TO BLUE (BOTTOM) + UPDATED LOGIN PIC)
+// ROUTE 2: REDESIGNED LOGIN PAGE (GREEN TOP & BLUE BOTTOM GRADIENT + RECTANGLE INPUTS)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
-  const bgImg = 'https://scontent.fmnl33-4.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=zPWWgjIxijoQ7kNvwFRKLVb&_nc_oc=AdpZBQL9o8MZk4xIiBL9pR6vKPkB7bvmqkM4R26op6LLy9SHE6Qd009laEUr-_vlHfE&_nc_zt=23&_nc_ht=scontent.fmnl33-4.fna&_nc_gid=A3E_5De3Kcc14pam4H4mgA&_nc_ss=7b2a8&oh=00_AQN0FSG7xTxJGzBY3rAhHoIZqJoNuUuFP2P_2cdm47NTxw&oe=6AC4DD7C';
+  const bgImg = settings.login_background || 'https://scontent.fmnl33-4.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=zPWWgjIxijoQ7kNvwFRKLVb&_nc_oc=AdpZBQL9o8MZk4xIiBL9pR6vKPkB7bvmqkM4R26op6LLy9SHE6Qd009laEUr-_vlHfE&_nc_zt=23&_nc_ht=scontent.fmnl33-4.fna&_nc_gid=A3E_5De3Kcc14pam4H4mgA&_nc_ss=7b2a8&oh=00_AQN0FSG7xTxJGzBY3rAhHoIZqJoNuUuFP2P_2cdm47NTxw&oe=6AC4DD7C';
   
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
@@ -517,6 +519,7 @@ app.get('/login', async (req, res) => {
       }
       .login-section {
         min-height: 100vh;
+        /* Gradient: Green on top, Blue on bottom, blended with the requested background image */
         background: linear-gradient(180deg, rgba(46, 204, 113, 0.88) 0%, rgba(32, 84, 147, 0.88) 100%), url('${bgImg}');
         background-size: cover;
         background-position: center;
@@ -533,7 +536,7 @@ app.get('/login', async (req, res) => {
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
         border: 2px solid rgba(46, 204, 113, 0.3);
-        border-radius: 20px;
+        border-radius: 12px; /* Rectangle style adjustment */
         box-shadow: 0 20px 40px rgba(32, 84, 147, 0.18);
         max-width: 450px;
         width: 100%;
@@ -544,21 +547,21 @@ app.get('/login', async (req, res) => {
         transform: translateY(-4px);
       }
       .brand-logo-img {
-        width: 110px;
-        height: 110px;
+        width: 115px;
+        height: 115px;
         object-fit: cover;
         border-radius: 50%;
         border: 3px solid #2ecc71;
         box-shadow: 0 4px 12px rgba(32, 84, 147, 0.2);
       }
+      .form-control-lg, .input-group-text, .btn-glow {
+        border-radius: 4px !important; /* Strictly rectangle fill fields */
+      }
       .form-control-lg {
         font-size: 0.98rem;
         padding: 12px 16px;
-        border-radius: 10px;
       }
       .input-group-text {
-        border-top-left-radius: 10px;
-        border-bottom-left-radius: 10px;
         background-color: #d9edf7 !important;
         color: #205493 !important;
         border: 1px solid #ced4da;
@@ -566,7 +569,6 @@ app.get('/login', async (req, res) => {
       .btn-glow {
         background-color: #205493;
         border: none;
-        border-radius: 10px;
         padding: 13px;
         font-size: 1.05rem;
         letter-spacing: 0.5px;
@@ -600,7 +602,7 @@ app.get('/login', async (req, res) => {
         background: linear-gradient(180deg, #d9edf7 0%, #e1f5fe 100%);
       }
       .official-card {
-        border-radius: 16px;
+        border-radius: 12px;
         border: 1px solid #a3e4d7;
         background: white;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
@@ -610,8 +612,8 @@ app.get('/login', async (req, res) => {
         box-shadow: 0 12px 24px rgba(32, 84, 147, 0.15);
       }
       .official-photo {
-        width: 130px;
-        height: 130px;
+        width: 145px;
+        height: 145px;
         object-fit: cover;
         border-radius: 50%;
         border: 4px solid #2ecc71;
@@ -2325,24 +2327,16 @@ app.get('/admin/activity-logs', authenticateToken, requireRole(['Super Admin', '
 });
 
 // ==========================================
-// ROUTE 19: SYSTEM SETTINGS (INCLUDES EMERGENCY NUMBERS & ADMIN ACCOUNT NAME UPDATE)
+// ROUTE 19: SYSTEM SETTINGS (INCLUDES EDITABLE EMERGENCY NUMBERS)
 // ==========================================
 app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
-  const adminUser = req.user;
 
   const html = `
     <div class="card card-custom p-4" style="max-width: 800px; margin: auto;">
-      <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-sliders me-2"></i>Barangay System Configuration & Admin Settings</h4>
+      <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-sliders me-2"></i>Barangay System Configuration</h4>
 
       <form action="/api/admin/settings/update" method="POST" enctype="multipart/form-data">
-        <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">1. Admin Account Details</h6>
-        <div class="mb-3">
-          <label class="form-label">Admin Account Full Name</label>
-          <input type="text" name="admin_full_name" class="form-control" value="${adminUser.full_name || ''}" required>
-        </div>
-
-        <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-4">2. Barangay Information</h6>
         <div class="mb-3">
           <label class="form-label">Barangay Name</label>
           <input type="text" name="barangay_name" class="form-control" value="${settings.barangay_name || ''}" required>
@@ -2357,24 +2351,26 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
             <input type="text" name="province" class="form-control" value="${settings.province || ''}" required>
           </div>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Barangay Captain Name</label>
-          <input type="text" name="barangay_captain" class="form-control" value="${settings.barangay_captain || ''}">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Barangay Emergency Contact Number(s)</label>
-          <input type="text" name="contact_number" class="form-control" value="${settings.contact_number || ''}" placeholder="e.g. 09123456789 / (045) 123-4567" required>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Barangay Captain Name</label>
+            <input type="text" name="barangay_captain" class="form-control" value="${settings.barangay_captain || ''}">
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Barangay Hall Contact Number (Emergency)</label>
+            <input type="text" name="contact_number" class="form-control" value="${settings.contact_number || '09123456789'}">
+          </div>
         </div>
 
-        <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">3. Branding Assets Upload</h6>
+        <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Branding Assets Upload</h6>
         <div class="mb-3">
           <label class="form-label">Barangay Logo</label>
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:75px; height:75px; object-fit:cover;">` : ''}
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:60px; height:60px; object-fit:cover;">` : ''}
           <input type="file" name="logo" class="form-control" accept="image/*">
         </div>
         <div class="mb-3">
           <label class="form-label">Barangay Captain Digital Signature</label>
-          ${settings.captain_signature ? `<img src="${settings.captain_signature}" class="d-block mb-2" style="height:40px; object-fit:contain;">` : ''}
+          ${settings.captain_signature ? `<img src="${settings.captain_signature}" class="d-block mb-2" style="height:35px; object-fit:contain;">` : ''}
           <input type="file" name="signature" class="form-control" accept="image/*">
         </div>
 
@@ -2387,7 +2383,7 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
 });
 
 app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.fields([{ name: 'logo' }, { name: 'signature' }]), async (req, res) => {
-  const { barangay_name, municipality, province, barangay_captain, contact_number, admin_full_name } = req.body;
+  const { barangay_name, municipality, province, barangay_captain, contact_number } = req.body;
   const settings = await getSettings();
 
   const updateData = { barangay_name, municipality, province, barangay_captain, contact_number, updated_at: new Date() };
@@ -2403,11 +2399,6 @@ app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Ad
   }
 
   await supabase.from('system_settings').update(updateData).eq('id', settings.id);
-
-  if (admin_full_name) {
-    await supabase.from('users').update({ full_name: admin_full_name }).eq('id', req.user.id);
-  }
-
   res.redirect('/admin/settings');
 });
 
@@ -2445,7 +2436,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:90px; height:90px; object-fit:cover; border: 2px solid #2ecc71;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #2ecc71;">
           <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
           <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
           <div class="mt-3">
@@ -2469,7 +2460,7 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
     <div class="card card-custom p-4" style="max-width: 720px; margin: auto;">
       <div class="text-center mb-4">
         <div class="position-relative d-inline-block">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 145px; height: 145px; object-fit: cover; border: 4px solid #205493; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 135px; height: 135px; object-fit: cover; border: 4px solid #205493; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
           <button class="btn btn-sm btn-accent-custom rounded-circle position-absolute bottom-0 end-0 p-2 text-white" data-bs-toggle="modal" data-bs-target="#changePhotoModal" title="Change Photo">
             <i class="bi bi-camera-fill"></i>
           </button>
