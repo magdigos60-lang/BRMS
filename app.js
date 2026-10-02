@@ -160,11 +160,6 @@ const renderSystemHead = (title) => `
       background-color: var(--accent-green);
       color: white;
     }
-    .sidebar img, .sidebar .bi-building {
-      width: 55px !important;
-      height: 55px !important;
-      font-size: 2.5rem !important;
-    }
     .card-custom {
       background-color: var(--pure-white);
       border-radius: 12px;
@@ -328,9 +323,9 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         <!-- Sidebar Navigation -->
         <div class="col-md-3 col-lg-2 sidebar d-flex flex-column p-3 no-print">
           <div class="d-flex align-items-center mb-4 px-2">
-            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle" style="width: 55px; height: 55px; object-fit: cover;">` : '<i class="bi bi-building fs-1 me-2" style="font-size: 2.5rem !important;"></i>'}
+            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle" style="width: 55px; height: 55px; object-fit: cover;">` : '<i class="bi bi-building fs-1 me-2"></i>'}
             <div>
-              <h6 class="m-0 fw-bold">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
+              <h6 class="m-0 fw-bold fs-5">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
               <small class="text-white-50">${user.role || 'User'}</small>
             </div>
           </div>
@@ -347,8 +342,8 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
           <hr class="text-white-50">
           <div class="dropdown">
             <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle px-2" id="dropdownUser1" data-bs-toggle="dropdown" aria-expanded="false">
-              <i class="bi bi-person-circle fs-4 me-2"></i>
-              <strong>${user.full_name || user.username}</strong>
+              <i class="bi bi-person-circle fs-3 me-2"></i>
+              <strong class="fs-6">${user.full_name || user.username}</strong>
             </a>
             <ul class="dropdown-menu dropdown-menu-dark text-small shadow">
               <li><a class="dropdown-item" href="/logout"><i class="bi bi-box-arrow-right me-2"></i> Sign out</a></li>
@@ -406,7 +401,7 @@ app.get('/setup', async (req, res) => {
         <div class="text-center mb-4">
           <i class="bi bi-gear-fill text-primary-blue fs-1"></i>
           <h3 class="fw-bold text-primary-blue mt-2">Initial System Setup</h3>
-          <p class="text-muted">Configure your Barangay details and create the Administrator account.</p>
+          <p class="text-muted">Configure your Barangay details and create the Super Administrator account.</p>
         </div>
         <form action="/api/setup" method="POST">
           <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">1. Barangay Details</h6>
@@ -424,10 +419,10 @@ app.get('/setup', async (req, res) => {
               <input type="text" name="province" class="form-control" required placeholder="Pampanga">
             </div>
           </div>
-          <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-4">2. Admin Credentials</h6>
+          <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-4">2. Super Admin Credentials</h6>
           <div class="mb-3">
             <label class="form-label">Full Name</label>
-            <input type="text" name="full_name" class="form-control" required placeholder="Administrator Name">
+            <input type="text" name="full_name" class="form-control" required placeholder="Hon. Admin Name">
           </div>
           <div class="mb-3">
             <label class="form-label">Username</label>
@@ -524,6 +519,7 @@ app.get('/login', async (req, res) => {
         background: linear-gradient(180deg, #2ecc71 0%, #205493 100%), url('${bgImg}');
         background-size: cover;
         background-position: center;
+        background-blend-mode: overlay;
         background-attachment: fixed;
         display: flex;
         flex-direction: column;
@@ -548,8 +544,8 @@ app.get('/login', async (req, res) => {
         transform: translateY(-4px);
       }
       .brand-logo-img {
-        width: 95px;
-        height: 95px;
+        width: 110px;
+        height: 110px;
         object-fit: cover;
         border-radius: 50%;
         border: 3px solid #2ecc71;
@@ -1098,7 +1094,7 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
                 <tr>
                   <td class="fw-bold text-primary-blue">${r.resident_number}</td>
                   <td>
-                    ${r.photo_url ? `<img src="${r.photo_url}" class="rounded-circle me-2" style="width:30px; height:30px; object-fit:cover;">` : ''}
+                    ${r.photo_url ? `<img src="${r.photo_url}" class="rounded-circle me-2" style="width:35px; height:35px; object-fit:cover;">` : ''}
                     ${r.first_name} ${r.middle_name || ''} ${r.last_name} ${r.suffix || ''}
                   </td>
                   <td>${r.puroks ? r.puroks.name : '-'}</td>
@@ -1504,7 +1500,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
         <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay Resident Card Generator</h4>
         <button class="btn btn-accent-custom fw-bold text-white" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print Selected Grid (8 IDs)</button>
       </div>
-      <p class="text-muted">Generate standard CR80 physical cards with optimized print layouts, high-visibility QR codes, and larger portal logos.</p>
+      <p class="text-muted">Generate standard CR80 physical cards with optimized print layouts, high-visibility QR codes, and seal images.</p>
     </div>
 
     <div class="mt-4">
@@ -1512,7 +1508,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
         ${residentCards.map(r => `
           <div class="id-card-frame">
             <div class="id-card-header">
-              ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-4"></i>'}
+              ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
               <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
                 <strong style="font-size: 7.5pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
                 <span style="font-size: 5.5pt; letter-spacing:0.5px;">OFFICIAL RESIDENT IDENTIFICATION</span>
@@ -2171,6 +2167,7 @@ app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay
                 <td><span class="badge bg-primary-blue text-white">${u.role}</span></td>
                 <td><span class="badge ${u.status === 'Active' ? 'bg-success' : 'bg-secondary'}">${u.status}</span></td>
                 <td class="text-end">
+                  <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editUserModal${u.id}">Edit</button>
                   ${u.status === 'Active' ? `
                     <a href="/api/admin/user/toggle/${u.id}?status=Disabled" class="btn btn-sm btn-outline-danger">Disable</a>
                   ` : `
@@ -2178,6 +2175,37 @@ app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay
                   `}
                 </td>
               </tr>
+
+              <!-- Modal Edit User -->
+              <div class="modal fade" id="editUserModal${u.id}" tabindex="-1">
+                <div class="modal-dialog">
+                  <div class="modal-content">
+                    <form action="/api/admin/user/update/${u.id}" method="POST">
+                      <div class="modal-header bg-primary-blue text-white">
+                        <h5 class="modal-title fw-bold">Edit Account Details</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                      </div>
+                      <div class="modal-body text-start">
+                        <div class="mb-3"><label class="form-label">Full Name *</label><input type="text" name="full_name" class="form-control" value="${u.full_name}" required></div>
+                        <div class="mb-3"><label class="form-label">Username *</label><input type="text" name="username" class="form-control" value="${u.username}" required></div>
+                        <div class="mb-3"><label class="form-label">Email *</label><input type="email" name="email" class="form-control" value="${u.email}" required></div>
+                        <div class="mb-3">
+                          <label class="form-label">Role *</label>
+                          <select name="role" class="form-select" required>
+                            <option value="Super Admin" ${u.role === 'Super Admin' ? 'selected' : ''}>Super Admin</option>
+                            <option value="Barangay Admin" ${u.role === 'Barangay Admin' ? 'selected' : ''}>Barangay Admin</option>
+                            <option value="Barangay Secretary" ${u.role === 'Barangay Secretary' ? 'selected' : ''}>Barangay Secretary</option>
+                            <option value="Barangay Staff" ${u.role === 'Barangay Staff' ? 'selected' : ''}>Barangay Staff</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div class="modal-footer">
+                        <button type="submit" class="btn btn-primary-custom text-white">Update Account</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
             `).join('')}
           </tbody>
         </table>
@@ -2224,6 +2252,12 @@ app.post('/api/admin/user/add', authenticateToken, requireRole(['Super Admin', '
   const salt = await bcrypt.genSalt(10);
   const password_hash = await bcrypt.hash(password, salt);
   await supabase.from('users').insert([{ full_name, username, email, password_hash, role, status: 'Active' }]);
+  res.redirect('/admin/users');
+});
+
+app.post('/api/admin/user/update/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
+  const { full_name, username, email, role } = req.body;
+  await supabase.from('users').update({ full_name, username, email, role }).eq('id', req.params.id);
   res.redirect('/admin/users');
 });
 
@@ -2358,15 +2392,31 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
           <input type="text" name="barangay_captain" class="form-control" value="${settings.barangay_captain || ''}">
         </div>
 
+        <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Emergency Numbers Management</h6>
+        <div class="row">
+          <div class="col-md-4 mb-3">
+            <label class="form-label">Barangay Hall Hotline</label>
+            <input type="text" name="contact_number" class="form-control" value="${settings.contact_number || '09123456789'}">
+          </div>
+          <div class="col-md-4 mb-3">
+            <label class="form-label">Police Station Hotline</label>
+            <input type="text" name="police_hotline" class="form-control" value="${settings.police_hotline || '911 / (045) 123-4567'}">
+          </div>
+          <div class="col-md-4 mb-3">
+            <label class="form-label">Fire Department Hotline</label>
+            <input type="text" name="fire_hotline" class="form-control" value="${settings.fire_hotline || '160 / (045) 765-4321'}">
+          </div>
+        </div>
+
         <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Branding Assets Upload</h6>
         <div class="mb-3">
           <label class="form-label">Barangay Logo</label>
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:60px; height:60px; object-fit:cover;">` : ''}
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:75px; height:75px; object-fit:cover;">` : ''}
           <input type="file" name="logo" class="form-control" accept="image/*">
         </div>
         <div class="mb-3">
           <label class="form-label">Barangay Captain Digital Signature</label>
-          ${settings.captain_signature ? `<img src="${settings.captain_signature}" class="d-block mb-2" style="height:35px; object-fit:contain;">` : ''}
+          ${settings.captain_signature ? `<img src="${settings.captain_signature}" class="d-block mb-2" style="height:40px; object-fit:contain;">` : ''}
           <input type="file" name="signature" class="form-control" accept="image/*">
         </div>
 
@@ -2379,10 +2429,10 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
 });
 
 app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.fields([{ name: 'logo' }, { name: 'signature' }]), async (req, res) => {
-  const { barangay_name, municipality, province, barangay_captain } = req.body;
+  const { barangay_name, municipality, province, barangay_captain, contact_number, police_hotline, fire_hotline } = req.body;
   const settings = await getSettings();
 
-  const updateData = { barangay_name, municipality, province, barangay_captain, updated_at: new Date() };
+  const updateData = { barangay_name, municipality, province, barangay_captain, contact_number, police_hotline, fire_hotline, updated_at: new Date() };
 
   if (req.files && req.files['logo']) {
     const logoFile = req.files['logo'][0];
@@ -2560,7 +2610,7 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
 
       <div class="id-card-frame shadow-lg text-start" style="width: 3.6in; height: 2.25in; border-width: 3px;">
         <div class="id-card-header">
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-4"></i>'}
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
           <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
             <strong style="font-size: 8pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
             <span style="font-size: 6pt; letter-spacing:0.5px;">OFFICIAL RESIDENT IDENTIFICATION</span>
@@ -2844,22 +2894,22 @@ app.get('/resident/emergency-contacts', authenticateToken, requireRole(['Residen
         <div class="col-md-4">
           <div class="p-3 border rounded text-center bg-light-blue">
             <i class="bi bi-building fs-1 text-primary-blue"></i>
-            <h5 class="fw-bold mt-2">Barangay Hall Hotline</h5>
-            <p class="text-muted m-0"><strong>0919-123-4567 / (045) 888-1234</strong></p>
+            <h5 class="fw-bold mt-2">Barangay Hall</h5>
+            <p class="text-muted m-0">${settings.contact_number || '09123456789'}</p>
           </div>
         </div>
         <div class="col-md-4">
           <div class="p-3 border rounded text-center bg-light-green">
             <i class="bi bi-shield-fill fs-1 text-danger"></i>
-            <h5 class="fw-bold mt-2">Police Emergency</h5>
-            <p class="text-muted m-0"><strong>911 / 0998-987-6543</strong></p>
+            <h5 class="fw-bold mt-2">Police Station</h5>
+            <p class="text-muted m-0">${settings.police_hotline || '911 / (045) 123-4567'}</p>
           </div>
         </div>
         <div class="col-md-4">
           <div class="p-3 border rounded text-center bg-light-blue">
             <i class="bi bi-fire fs-1 text-warning"></i>
-            <h5 class="fw-bold mt-2">Fire & Rescue</h5>
-            <p class="text-muted m-0"><strong>160 / (045) 888-9999</strong></p>
+            <h5 class="fw-bold mt-2">Fire Department</h5>
+            <p class="text-muted m-0">${settings.fire_hotline || '160 / (045) 765-4321'}</p>
           </div>
         </div>
       </div>
