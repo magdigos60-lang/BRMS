@@ -32,7 +32,7 @@ const app = express();
 
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 
-// Universal Body Parsing Middlewares with optimization
+// Universal Body Parsing Middlewares
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
@@ -175,80 +175,73 @@ const renderSystemHead = (title) => `
       background: linear-gradient(135deg, #ffffff 0%, var(--light-green) 100%);
     }
 
-    /* National ID format Barangay ID Card Frame (CR80 proportions with national layout aesthetics) */
+    /* Standardized CR80 ID Card Frame (3.375in x 2.125in) */
     .id-card-frame {
-      width: 3.45in;
-      height: 2.15in;
-      border-radius: 12px;
-      border: none;
-      background: linear-gradient(135deg, #ffffff 0%, #f7f9fc 100%);
+      width: 3.375in;
+      height: 2.125in;
+      border-radius: 10px;
+      border: 2px solid var(--primary-blue);
+      background: #ffffff;
       position: relative;
       overflow: hidden;
       font-size: 8pt;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.12);
       display: inline-block;
-      margin: 8px;
+      margin: 6px;
       box-sizing: border-box;
     }
     .id-card-header {
-      background: linear-gradient(90deg, #1b4d3e 0%, #2ecc71 100%);
+      background: linear-gradient(90deg, var(--primary-navy) 0%, var(--accent-green) 100%);
       color: white;
-      padding: 4px 10px;
+      padding: 4px 8px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      height: 0.45in;
+      height: 0.42in;
     }
     .id-header-logo {
-      width: 0.35in;
-      height: 0.35in;
+      width: 0.32in;
+      height: 0.32in;
       object-fit: cover;
       border-radius: 50%;
-      border: none;
     }
     .id-card-body {
-      padding: 6px 8px;
+      padding: 6px;
       display: flex;
-      gap: 10px;
-      height: calc(2.15in - 0.75in);
-      align-items: center;
+      gap: 8px;
+      height: calc(2.125in - 0.72in);
     }
     .id-photo {
       width: 1.05in;
-      height: 1.15in;
+      height: 1.05in;
       object-fit: cover;
-      border: 2px solid #2ecc71;
-      border-radius: 4px;
+      border: 2px solid var(--primary-blue);
+      border-radius: 6px;
       flex-shrink: 0;
     }
     .id-details {
       flex-grow: 1;
       font-size: 7.2pt;
-      line-height: 1.25;
+      line-height: 1.2;
       overflow: hidden;
     }
     .id-qr {
-      width: 0.95in;
-      height: 0.95in;
+      width: 1.05in;
+      height: 1.05in;
       object-fit: contain;
       flex-shrink: 0;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      padding: 2px;
-      background: white;
     }
     .id-card-footer {
       position: absolute;
       bottom: 0;
       left: 0;
       right: 0;
-      height: 0.28in;
-      padding: 0 8px 2px 8px;
+      height: 0.35in;
+      padding: 0 8px 3px 8px;
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
       background: #ffffff;
-      border-top: 1px solid #eee;
     }
     .print-sheet-8 {
       display: grid;
@@ -279,7 +272,7 @@ const renderSystemFooter = () => `
 </html>
 `;
 
-// Layout Wrapper with Responsive Sidebar (Pinalaki ang Logos and removed outer lines)
+// Layout Wrapper with Responsive Sidebar (Pinalaki ang Logos, Inalis ang Outer Lines)
 const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
   const user = req.user || {};
   const isAdmin = ['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff'].includes(user.role);
@@ -329,9 +322,9 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         <!-- Sidebar Navigation -->
         <div class="col-md-3 col-lg-2 sidebar d-flex flex-column p-3 no-print">
           <div class="d-flex align-items-center mb-4 px-2">
-            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle shadow-sm" style="width: 65px; height: 65px; object-fit: cover; border: none;">` : '<i class="bi bi-building fs-1 me-2 text-accent-green"></i>'}
+            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle shadow-sm" style="width: 70px; height: 70px; object-fit: cover;">` : '<i class="bi bi-building fs-1 me-2 text-accent-green"></i>'}
             <div>
-              <h6 class="m-0 fw-bold fs-5">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
+              <h6 class="m-0 fw-bold">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
               <small class="text-white-50">${user.full_name || user.role || 'User'}</small>
             </div>
           </div>
@@ -402,7 +395,7 @@ app.get('/setup', async (req, res) => {
 
   res.send(`
     ${renderSystemHead('Initial Setup')}
-    <div class="container d-flex justify-content-center align-items-center min-vh-100" style="background: linear-gradient(180deg, #2ecc71 0%, #205493 100%);">
+    <div class="container d-flex justify-content-center align-items-center min-vh-100" style="background: linear-gradient(135deg, #e1f5fe 0%, #d9edf7 100%);">
       <div class="card card-custom p-4 shadow-lg" style="max-width: 550px; width: 100%;">
         <div class="text-center mb-4">
           <i class="bi bi-gear-fill text-primary-blue fs-1"></i>
@@ -502,7 +495,7 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (GRADIENT GREEN (TOP) TO BLUE (BROWN/BLUE) + NEW BG PICTURE + HORIZONTAL SPLIT RECTANGLE)
+// ROUTE 2: REDESIGNED LOGIN PAGE (GREEN UPPER & BLUE LOWER GRADIENT + NEW BG PICTURE + HORIZONTAL SPLIT RECTANGLE CARD)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
@@ -522,8 +515,8 @@ app.get('/login', async (req, res) => {
       }
       .login-section {
         min-height: 100vh;
-        /* Green sa taas, Blue sa baba - Not too dark gradient */
-        background: linear-gradient(180deg, rgba(88, 214, 141, 0.75), rgba(52, 152, 219, 0.75)), url('${bgImg}');
+        /* Green sa taas, Blue sa baba - Not too dark */
+        background: linear-gradient(180deg, rgba(46, 204, 113, 0.75), rgba(32, 84, 147, 0.75)), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -534,44 +527,28 @@ app.get('/login', async (req, res) => {
         padding: 40px 20px;
         position: relative;
       }
-      /* Horizontal rectangle card with division in the middle */
+      /* Horizontal rectangle login fields with split in the middle, blue and green background */
       .horizontal-login-card {
-        background: rgba(255, 255, 255, 0.95);
+        background: linear-gradient(135deg, rgba(217, 237, 247, 0.95) 0%, rgba(225, 245, 254, 0.95) 100%);
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
+        border: 2px solid rgba(46, 204, 113, 0.4);
         border-radius: 20px;
-        box-shadow: 0 20px 40px rgba(32, 84, 147, 0.2);
-        max-width: 900px;
+        box-shadow: 0 20px 40px rgba(32, 84, 147, 0.25);
+        max-width: 850px;
         width: 100%;
         overflow: hidden;
-        border: none;
         transition: transform 0.3s ease;
       }
       .horizontal-login-card:hover {
         transform: translateY(-4px);
       }
-      .login-left-pane {
-        background: linear-gradient(135deg, rgba(230, 253, 239, 0.9), rgba(217, 237, 247, 0.9));
-        padding: 40px 30px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        border-right: 1px solid rgba(0,0,0,0.06);
-      }
-      .login-right-pane {
-        padding: 40px 35px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-      }
-      .brand-logo-img-large {
+      .brand-logo-img {
         width: 130px;
         height: 130px;
         object-fit: cover;
         border-radius: 50%;
-        box-shadow: 0 6px 16px rgba(32, 84, 147, 0.15);
+        box-shadow: 0 4px 12px rgba(32, 84, 147, 0.2);
       }
       .form-control-horizontal {
         height: 48px;
@@ -583,36 +560,36 @@ app.get('/login', async (req, res) => {
         overflow: hidden;
       }
       .input-group-text {
-        background-color: #d9edf7 !important;
-        color: #205493 !important;
-        border: 1px solid #ced4da;
+        background-color: #205493 !important;
+        color: #ffffff !important;
+        border: none;
         width: 48px;
         justify-content: center;
       }
       .btn-glow {
         background-color: #205493;
         border: none;
-        border-radius: 8px;
+        border-radius: 10px;
         padding: 12px;
         font-size: 1.05rem;
         letter-spacing: 0.5px;
-        box-shadow: 0 4px 15px rgba(32, 84, 147, 0.35);
+        box-shadow: 0 4px 15px rgba(32, 84, 147, 0.4);
         transition: all 0.25s ease;
       }
       .btn-glow:hover {
         background-color: #0b2545;
-        box-shadow: 0 6px 20px rgba(11, 37, 69, 0.5);
+        box-shadow: 0 6px 20px rgba(11, 37, 69, 0.6);
       }
       .scroll-down-hint {
         position: absolute;
-        bottom: 20px;
-        color: #1d2d44;
+        bottom: 25px;
+        color: #ffffff;
         text-align: center;
         animation: bounce 2s infinite;
         text-decoration: none;
         font-weight: 700;
-        background: rgba(255, 255, 255, 0.85);
-        padding: 8px 20px;
+        background: rgba(32, 84, 147, 0.8);
+        padding: 8px 18px;
         border-radius: 30px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.1);
       }
@@ -627,7 +604,7 @@ app.get('/login', async (req, res) => {
       }
       .official-card {
         border-radius: 16px;
-        border: none;
+        border: 1px solid #a3e4d7;
         background: white;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
       }
@@ -644,49 +621,52 @@ app.get('/login', async (req, res) => {
       }
     </style>
 
-    <!-- SECTION 1: HORIZONTAL LOGIN CARD CONTAINER -->
+    <!-- SECTION 1: HORIZONTAL SPLIT LOGIN CARD CONTAINER -->
     <div class="login-section">
-      <div class="card horizontal-login-card">
-        <div class="row g-0">
-          <!-- LEFT SIDE: Logo & Other Information -->
-          <div class="col-md-5 login-left-pane">
-            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img-large mb-3">` : '<i class="bi bi-building-fill text-primary-blue display-1 mb-2"></i>'}
-            <h4 class="fw-bold text-dark m-0" style="color: #0b2545 !important;">${settings.barangay_name || 'BARANGAY PORTAL'}</h4>
-            <p class="text-muted small mt-1 mb-3">Official Resident & Administration System</p>
-            <div class="badge bg-accent-green px-3 py-2 rounded-pill text-white mb-2"><i class="bi bi-shield-check me-1"></i> Secure Portal</div>
-            <p class="text-muted small px-2 mt-2">Manage requests, view digital IDs, and access community announcements effortlessly.</p>
+      <div class="horizontal-login-card row g-0">
+        <!-- Left Side: Logo and Information -->
+        <div class="col-md-5 p-5 d-flex flex-column align-items-center justify-content-center text-center bg-white bg-opacity-50 border-end">
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="brand-logo-img mb-3">` : '<i class="bi bi-building-fill text-primary-blue display-3 mb-2"></i>'}
+          <h3 class="fw-bold m-0" style="color: #0b2545 !important;">${settings.barangay_name || 'BARANGAY PORTAL'}</h3>
+          <p class="text-muted small mt-2">Resident & Administration System</p>
+          <span class="badge bg-accent-green px-3 py-2 rounded-pill mt-2 text-white"><i class="bi bi-shield-check me-1"></i> Official Portal</span>
+          
+          <div class="mt-4 text-start small text-secondary">
+            <p class="mb-1"><i class="bi bi-telephone-fill text-primary-blue me-1"></i> Emergency Hotline: <strong>${settings.contact_number || '09123456789'}</strong></p>
+            <p class="mb-0"><i class="bi bi-geo-alt-fill text-accent-green me-1"></i> ${settings.municipality || 'Angeles City'}, ${settings.province || 'Pampanga'}</p>
           </div>
+        </div>
 
-          <!-- RIGHT SIDE: Username, Password, Are you a resident without account?, Register as Resident -->
-          <div class="col-md-7 login-right-pane">
-            <h3 class="fw-bold mb-3" style="color: #0b2545;">Sign In</h3>
-            <form action="/api/login" method="POST">
-              <div class="mb-3">
-                <label class="form-label fw-semibold text-secondary small">USERNAME OR EMAIL</label>
-                <div class="input-group input-group-horizontal">
-                  <span class="input-group-text"><i class="bi bi-person-fill fs-5"></i></span>
-                  <input type="text" name="identifier" class="form-control form-control-horizontal border-start-0" required placeholder="Enter username or email">
-                </div>
+        <!-- Right Side: Username, Password, Are you a resident without an account?, Register as Resident -->
+        <div class="col-md-7 p-5 d-flex flex-column justify-content-center">
+          <h4 class="fw-bold mb-4" style="color: #205493;"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In</h4>
+          
+          <form action="/api/login" method="POST">
+            <div class="mb-3">
+              <label class="form-label fw-semibold text-secondary small">USERNAME OR EMAIL</label>
+              <div class="input-group input-group-horizontal">
+                <span class="input-group-text"><i class="bi bi-person-fill fs-5"></i></span>
+                <input type="text" name="identifier" class="form-control form-control-horizontal" required placeholder="Enter username or email">
               </div>
-              <div class="mb-4">
-                <label class="form-label fw-semibold text-secondary small">PASSWORD</label>
-                <div class="input-group input-group-horizontal">
-                  <span class="input-group-text"><i class="bi bi-lock-fill fs-5"></i></span>
-                  <input type="password" name="password" class="form-control form-control-horizontal border-start-0" required placeholder="Enter your password">
-                </div>
-              </div>
-              <button type="submit" class="btn btn-primary btn-glow w-100 fw-bold text-white"><i class="bi bi-box-arrow-in-right me-2"></i>Sign In to Account</button>
-            </form>
-
-            <div class="text-center mt-4 border-top pt-3">
-              <p class="small text-muted mb-1">Are you a resident without an account?</p>
-              <a href="/register" class="text-accent-green fw-bold text-decoration-none"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
             </div>
+            <div class="mb-4">
+              <label class="form-label fw-semibold text-secondary small">PASSWORD</label>
+              <div class="input-group input-group-horizontal">
+                <span class="input-group-text"><i class="bi bi-lock-fill fs-5"></i></span>
+                <input type="password" name="password" class="form-control form-control-horizontal" required placeholder="Enter your password">
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-glow w-100 fw-bold text-white mb-3">Sign In to Account</button>
+          </form>
+
+          <div class="text-center border-top pt-3">
+            <p class="small text-muted mb-1">Are you a resident without an account?</p>
+            <a href="/register" class="text-accent-green fw-bold text-decoration-none"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
           </div>
         </div>
       </div>
 
-      <a href="#officials-section" class="scroll-down-hint">
+      <a href="#officials-section" class="scroll-down-hint mt-4">
         <span class="d-block small">Scroll down to view Barangay Officials & Pictures</span>
         <i class="bi bi-chevron-down fs-5"></i>
       </a>
@@ -1516,7 +1496,7 @@ app.get('/api/admin/certificate/update/:id', authenticateToken, requireRole(['Su
 });
 
 // ==========================================
-// ROUTE 8: BARANGAY ID GENERATOR (FORMATTED LIKE NATIONAL ID -> BARANGAY ID WITH FUNCTIONAL QR CODE)
+// ROUTE 8: BARANGAY ID GENERATOR (National ID format replaced with Barangay ID, Captain Name Below Signature)
 // ==========================================
 app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1530,10 +1510,10 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
   const html = `
     <div class="card card-custom p-4 no-print">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay ID Generator (National ID Format)</h4>
+        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay ID Generator (Barangay ID Format)</h4>
         <button class="btn btn-accent-custom fw-bold text-white" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print Selected Grid (8 IDs)</button>
       </div>
-      <p class="text-muted">Generate standard physical identification cards styled in National ID format, labeled as <strong>Barangay ID</strong>, with functional QR codes.</p>
+      <p class="text-muted">Generate standard CR80 physical cards with optimized print layouts, functional QR codes, and captain's signature positioned above the name.</p>
     </div>
 
     <div class="mt-4">
@@ -1543,31 +1523,31 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
             <div class="id-card-header">
               ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
               <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
-                <strong style="font-size: 7.5pt; display: block;" class="text-uppercase">REPUBLIC OF THE PHILIPPINES</strong>
-                <span style="font-size: 6.5pt; letter-spacing:0.5px; font-weight:700;">BARANGAY ID</span>
+                <strong style="font-size: 7.5pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
+                <span style="font-size: 5.5pt; letter-spacing:0.5px;">OFFICIAL BARANGAY ID</span>
               </div>
-              <span class="badge bg-white text-dark px-1" style="font-size: 5pt; font-weight: 800;">OFFICIAL</span>
+              <span class="badge bg-white text-dark px-1" style="font-size: 5pt; font-weight: 800;">VERIFIED</span>
             </div>
 
             <div class="id-card-body">
               <img src="${r.photo_url || 'https://via.placeholder.com/150'}" class="id-photo">
               <div class="id-details">
-                <div class="text-success fw-bold" style="font-size: 7.5pt;">ID No: ${r.resident_number}</div>
-                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8pt;">${r.first_name} ${r.last_name}</div>
-                <div class="text-muted mt-1" style="font-size: 6.5pt;">DOB: <strong>${r.date_of_birth}</strong></div>
-                <div class="text-muted" style="font-size: 6.5pt;">Sex: <strong>${r.gender}</strong> | Civil: <strong>${r.civil_status || 'Single'}</strong></div>
-                <div class="text-muted" style="font-size: 6.5pt;">Purok: <strong>${r.puroks ? r.puroks.name : '-'}</strong></div>
+                <div class="text-primary-blue fw-bold" style="font-size: 8pt;">${r.resident_number}</div>
+                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${r.first_name} ${r.last_name}</div>
+                <div class="text-muted mt-1">DOB: <strong>${r.date_of_birth}</strong></div>
+                <div class="text-muted">Sex: <strong>${r.gender}</strong> | Civil: <strong>${r.civil_status || 'Single'}</strong></div>
+                <div class="text-muted">Purok: <strong>${r.puroks ? r.puroks.name : '-'}</strong></div>
               </div>
               <img src="${r.qrDataUrl}" class="id-qr">
             </div>
 
             <div class="id-card-footer">
-              <div style="font-size: 4.5pt; max-width:1.9in;" class="text-muted lh-1">
-                ${settings.barangay_name || 'Barangay Hall'} | Valid Resident Identification
+              <div style="font-size: 4.5pt; max-width:1.7in;" class="text-muted lh-1">
+                If found, please return to Barangay Hall. Property of Barangay Administration.
               </div>
-              <div class="text-center" style="min-width: 0.9in;">
-                ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:15px; object-fit:contain;"><br>` : ''}
-                <span style="font-size: 4.5pt; border-top: 1px solid #333; display: block; font-weight: 600;">Punong Barangay</span>
+              <div class="text-center" style="min-width: 1.1in;">
+                ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:15px; object-fit:contain; display:block; margin: 0 auto 1px auto;">` : '<div style="height:15px;"></div>'}
+                <span style="font-size: 5pt; border-top: 1px solid #333; display: block; font-weight: 600;">${settings.barangay_captain || 'Barangay Captain'}</span>
               </div>
             </div>
           </div>
@@ -1580,66 +1560,60 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
 });
 
 // ==========================================
-// ROUTE 9: QR SCANNER PAGE (WITH CAMERA SCANNER SUPPORT)
+// ROUTE 9: QR SCANNER PAGE (With Camera Scanner Support)
 // ==========================================
 app.get('/scanner', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
 
   const html = `
-    <div class="card card-custom p-4 mx-auto" style="max-width: 700px;">
+    <div class="card card-custom p-4" style="max-width: 650px; margin: auto;">
       <div class="text-center mb-3">
         <i class="bi bi-qr-code-scan text-primary-blue fs-1"></i>
-        <h4 class="fw-bold text-primary-blue mt-2">QR Code & Camera Scanner</h4>
-        <p class="text-muted small">Use your camera to scan resident Barangay IDs or type the verification token manually.</p>
+        <h4 class="fw-bold text-primary-blue mt-2">QR Code Official Scanner & Camera Reader</h4>
+        <p class="text-muted small">Verify resident authenticity using camera scanning or manual token input for fast response.</p>
       </div>
 
-      <!-- Live Camera Scanner Viewport -->
+      <!-- Live Camera Scanner Integration Container -->
       <div class="mb-4 text-center">
-        <div id="reader" style="width: 100%; max-width: 450px; margin: auto; border-radius: 12px; overflow: hidden; border: 2px dashed #2ecc71; background: #f8f9fa; padding: 10px;">
-          <div id="camera-placeholder" class="py-5">
-            <i class="bi bi-camera-video fs-1 text-muted"></i>
-            <p class="text-muted small mt-2">Click below to activate camera scanner</p>
-            <button type="button" id="startCameraBtn" class="btn btn-sm btn-accent-custom text-white fw-bold"><i class="bi bi-camera me-1"></i> Start Camera Stream</button>
-          </div>
-        </div>
+        <div id="reader" style="width: 100%; border-radius: 8px; overflow: hidden; display: none;" class="mb-3 border"></div>
+        <button id="startCameraBtn" class="btn btn-accent-custom fw-bold text-white mb-2"><i class="bi bi-camera-video me-1"></i> Open Camera Scanner</button>
       </div>
 
-      <form action="/api/scanner/verify" method="POST" class="mb-4">
+      <form action="/api/scanner/verify" method="POST" class="mb-4" id="qrForm">
         <div class="input-group">
-          <input type="text" id="qr_token_input" name="qr_token" class="form-control" placeholder="Scanned QR token or manual entry..." required>
+          <input type="text" id="qr_token" name="qr_token" class="form-control" placeholder="Scan or enter QR Verification Token..." required>
           <button type="submit" class="btn btn-primary-custom fw-bold text-white">Verify Record</button>
         </div>
       </form>
 
       <div id="scannerResult" class="p-3 border rounded bg-light-green text-center">
-        <span class="text-muted"><i class="bi bi-info-circle me-1"></i> Ready for camera scan or manual code entry.</span>
+        <span class="text-muted"><i class="bi bi-info-circle me-1"></i> Camera or scanner ready for fast verification input.</span>
       </div>
     </div>
 
-    <!-- Include Html5Qrcode Scanner Library for real-time camera scanning -->
+    <!-- Include html5-qrcode library for high performance camera scanning -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script>
       document.getElementById('startCameraBtn').addEventListener('click', function() {
-        document.getElementById('camera-placeholder').innerHTML = '<div class="spinner-border text-success my-3" role="status"></div><p class="small text-muted">Requesting camera access...</p>';
-        
+        const readerDiv = document.getElementById('reader');
+        readerDiv.style.display = 'block';
+        this.style.display = 'none';
+
         const html5QrCode = new Html5Qrcode("reader");
         html5QrCode.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 250, height: 250 } },
           (decodedText, decodedResult) => {
-            console.log(\`QR Code matched = \${decodedText}\`, decodedResult);
-            document.getElementById('qr_token_input').value = decodedText;
+            document.getElementById('qr_token').value = decodedText;
             html5QrCode.stop().then(() => {
-              document.forms[0].submit();
-            }).catch(err => {
-              console.error("Failed to stop scanner.", err);
-            });
+              document.getElementById('qrForm').submit();
+            }).catch(err => console.error(err));
           },
           (errorMessage) => {
-            // Scanning parse frame status
+            // scanning continuously
           }
-        ).catch((err) => {
-          document.getElementById('reader').innerHTML = '<div class="alert alert-danger m-2">Camera access denied or unavailable. Please use manual entry below.</div>';
+        ).catch(err => {
+          alert("Unable to access camera: " + err);
         });
       });
     </script>
@@ -1729,7 +1703,7 @@ app.get('/admin/seniors', authenticateToken, requireRole(['Super Admin', 'Barang
               return `
                 <tr>
                   <td class="fw-bold text-primary-blue">${s.resident_number}</td>
-                  <td class="fw-semibold">${s.first_name}${s.last_name}</td>
+                  <td class="fw-semibold">${s.first_name} ${s.last_name}</td>
                   <td><span class="badge bg-accent-green text-white">${age} yrs old</span></td>
                   <td>${s.puroks ? s.puroks.name : '-'}</td>
                   <td>${s.contact_number || '-'}</td>
@@ -1766,7 +1740,7 @@ app.get('/admin/pwds', authenticateToken, requireRole(['Super Admin', 'Barangay 
             ${(pwds || []).map(p => `
               <tr>
                 <td class="fw-bold text-primary-blue">${p.resident_number}</td>
-                <td class="fw-semibold">${p.first_name}${p.last_name}</td>
+                <td class="fw-semibold">${p.first_name} ${p.last_name}</td>
                 <td>${p.disability_details || 'Unspecified'}</td>
                 <td>${p.puroks ? p.puroks.name : '-'}</td>
               </tr>
@@ -1801,7 +1775,7 @@ app.get('/admin/solo-parents', authenticateToken, requireRole(['Super Admin', 'B
             ${(parents || []).map(p => `
               <tr>
                 <td class="fw-bold text-primary-blue">${p.resident_number}</td>
-                <td class="fw-semibold">${p.first_name}${p.last_name}</td>
+                <td class="fw-semibold">${p.first_name} ${p.last_name}</td>
                 <td>${p.solo_parent_details || 'N/A'}</td>
                 <td>${p.puroks ? p.puroks.name : '-'}</td>
               </tr>
@@ -1816,7 +1790,7 @@ app.get('/admin/solo-parents', authenticateToken, requireRole(['Super Admin', 'B
 });
 
 // ==========================================
-// ROUTE 11: BLOTTER & COMPLAINTS
+// ROUTE 11: BLOTTER & COMPLAINTS (With Print Support for Complaint Files)
 // ==========================================
 app.get('/admin/blotters', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1826,7 +1800,10 @@ app.get('/admin/blotters', authenticateToken, requireRole(['Super Admin', 'Baran
     <div class="card card-custom p-4">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-shield-exclamation me-2"></i>Barangay Blotter & Incident Records</h4>
-        <button class="btn btn-accent-custom fw-bold text-white" data-bs-toggle="modal" data-bs-target="#addBlotterModal"><i class="bi bi-plus-lg me-1"></i> File Incident Blotter</button>
+        <div>
+          <button class="btn btn-outline-primary me-2 no-print" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print Complaint Files</button>
+          <button class="btn btn-accent-custom fw-bold text-white no-print" data-bs-toggle="modal" data-bs-target="#addBlotterModal"><i class="bi bi-plus-lg me-1"></i> File Incident Blotter</button>
+        </div>
       </div>
 
       <div class="table-responsive">
@@ -2120,9 +2097,9 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
         ${(officials || []).map(o => `
           <div class="col-md-3">
             <div class="card card-custom p-3 text-center h-100">
-              <img src="${o.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: none;">
+              <img src="${o.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 3px solid #2ecc71;">
               <h6 class="fw-bold text-primary-blue m-0">${o.name}</h6>
-              <span class="badge bg-accent-green mb-2 text-white">${o.position}</span>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-1" style="height:25px; object-fit:contain;">` : ''}
+              <span class="badge bg-accent-green mb-2 text-white">${o.position}</span>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-1" style="height:25px; object-fit:contain;" alt="Signature">` : ''}
               
               <form action="/api/admin/official/upload-photo/${o.id}" method="POST" enctype="multipart/form-data" class="mt-2">
                 <input type="file" name="photo" class="form-control form-control-sm mb-1" accept="image/*" required>
@@ -2205,7 +2182,7 @@ app.get('/api/admin/official/delete/:id', authenticateToken, requireRole(['Super
 });
 
 // ==========================================
-// ROUTE 16: USER ACCOUNTS & PERMISSIONS (Updated Admin Account Name)
+// ROUTE 16: USER ACCOUNTS & PERMISSIONS (Updated Admin Account Name support)
 // ==========================================
 app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
@@ -2397,14 +2374,14 @@ app.get('/admin/activity-logs', authenticateToken, requireRole(['Super Admin', '
 });
 
 // ==========================================
-// ROUTE 19: SYSTEM SETTINGS (EMERGENCY NUMBER & ADMIN NAME CONFIGURABLE)
+// ROUTE 19: SYSTEM SETTINGS (Updated Emergency Number & Admin Account Settings)
 // ==========================================
 app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
 
   const html = `
     <div class="card card-custom p-4" style="max-width: 800px; margin: auto;">
-      <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-sliders me-2"></i>Barangay System Configuration</h4>
+      <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-sliders me-2"></i>Barangay System Configuration & Emergency Hotline</h4>
 
       <form action="/api/admin/settings/update" method="POST" enctype="multipart/form-data">
         <div class="mb-3">
@@ -2423,19 +2400,19 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
         </div>
         <div class="row">
           <div class="col-md-6 mb-3">
-            <label class="form-label">Barangay Captain / Admin Account Name</label>
-            <input type="text" name="barangay_captain" class="form-control" value="${settings.barangay_captain || ''}" placeholder="Hon. Admin Name">
+            <label class="form-label">Barangay Captain Name</label>
+            <input type="text" name="barangay_captain" class="form-control" value="${settings.barangay_captain || ''}">
           </div>
           <div class="col-md-6 mb-3">
             <label class="form-label">Emergency Hotline Number</label>
-            <input type="text" name="contact_number" class="form-control" value="${settings.contact_number || ''}" placeholder="e.g. 09123456789 / 911">
+            <input type="text" name="contact_number" class="form-control" value="${settings.contact_number || ''}" placeholder="e.g. 09123456789 / 911" required>
           </div>
         </div>
 
-        <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Branding Assets Upload (No outer lines)</h6>
+        <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Branding Assets Upload</h6>
         <div class="mb-3">
           <label class="form-label">Barangay Logo</label>
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:70px; height:70px; object-fit:cover;">` : ''}
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:60px; height:60px; object-fit:cover;">` : ''}
           <input type="file" name="logo" class="form-control" accept="image/*">
         </div>
         <div class="mb-3">
@@ -2506,7 +2483,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #2ecc71;">
           <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
           <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
           <div class="mt-3">
@@ -2530,7 +2507,7 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
     <div class="card card-custom p-4" style="max-width: 720px; margin: auto;">
       <div class="text-center mb-4">
         <div class="position-relative d-inline-block">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 135px; height: 135px; object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 135px; height: 135px; object-fit: cover; border: 4px solid #205493; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
           <button class="btn btn-sm btn-accent-custom rounded-circle position-absolute bottom-0 end-0 p-2 text-white" data-bs-toggle="modal" data-bs-target="#changePhotoModal" title="Change Photo">
             <i class="bi bi-camera-fill"></i>
           </button>
@@ -2621,7 +2598,7 @@ app.post('/api/resident/request-profile-update', authenticateToken, requireRole(
   res.redirect('/resident/profile');
 });
 
-// Resident Digital ID Display (National ID Format - Barangay ID)
+// Resident Digital ID Display (Barangay ID format with captain name below signature)
 app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
@@ -2632,35 +2609,35 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
     <div class="text-center py-4">
       <h4 class="fw-bold text-primary-blue mb-3">Official Digital Resident ID</h4>
 
-      <div class="id-card-frame shadow-lg text-start" style="width: 3.6in; height: 2.25in; margin: auto;">
+      <div class="id-card-frame shadow-lg text-start" style="width: 3.6in; height: 2.25in; border-width: 3px;">
         <div class="id-card-header">
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
           <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
-            <strong style="font-size: 8pt; display: block;" class="text-uppercase">REPUBLIC OF THE PHILIPPINES</strong>
-            <span style="font-size: 7pt; letter-spacing:0.5px; font-weight:700;">BARANGAY ID</span>
+            <strong style="font-size: 8pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
+            <span style="font-size: 6pt; letter-spacing:0.5px;">OFFICIAL BARANGAY ID</span>
           </div>
-          <span class="badge bg-white text-dark px-1" style="font-size: 5.5pt; font-weight: 800;">OFFICIAL</span>
+          <span class="badge bg-white text-dark px-1" style="font-size: 5.5pt; font-weight: 800;">VERIFIED</span>
         </div>
 
         <div class="id-card-body">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.2in;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
           <div class="id-details">
-            <div class="text-success fw-bold" style="font-size: 8pt;">ID No: ${resident.resident_number}</div>
-            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${resident.first_name} ${resident.last_name}</div>
-            <div class="text-muted mt-1" style="font-size: 7pt;">DOB: <strong>${resident.date_of_birth}</strong></div>
-            <div class="text-muted" style="font-size: 7pt;">Sex: <strong>${resident.gender}</strong> | Civil: <strong>${resident.civil_status || 'Single'}</strong></div>
-            <div class="text-muted" style="font-size: 7pt;">Purok: <strong>${resident.puroks ? resident.puroks.name : '-'}</strong></div>
+            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident.resident_number}</div>
+            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident.first_name} ${resident.last_name}</div>
+            <div class="text-muted mt-1">DOB: <strong>${resident.date_of_birth}</strong></div>
+            <div class="text-muted">Sex: <strong>${resident.gender}</strong> | Civil: <strong>${resident.civil_status || 'Single'}</strong></div>
+            <div class="text-muted">Purok: <strong>${resident.puroks ? resident.puroks.name : '-'}</strong></div>
           </div>
-          <img src="${qrDataUrl}" class="id-qr" style="width: 1.05in; height: 1.05in;">
+          <img src="${qrDataUrl}" class="id-qr" style="width: 1.1in; height: 1.1in;">
         </div>
 
         <div class="id-card-footer">
-          <div style="font-size: 4.8pt; max-width:2.0in;" class="text-muted lh-1">
-            ${settings.barangay_name || 'Barangay Hall'} | Valid Resident Identification
+          <div style="font-size: 4.8pt; max-width:1.9in;" class="text-muted lh-1">
+            If found, please return to Barangay Hall. Property of Barangay Administration.
           </div>
-          <div class="text-center" style="min-width: 1.0in;">
-            ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:16px; object-fit:contain;"><br>` : ''}
-            <span style="font-size: 5pt; border-top: 1px solid #333; display: block; font-weight: 600;">Punong Barangay</span>
+          <div class="text-center" style="min-width: 1.1in;">
+            ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:18px; object-fit:contain; display:block; margin: 0 auto 1px auto;">` : '<div style="height:18px;"></div>'}
+            <span style="font-size: 5.5pt; border-top: 1px solid #333; display: block; font-weight: 600;">${settings.barangay_captain || 'Barangay Captain'}</span>
           </div>
         </div>
       </div>
@@ -2773,7 +2750,7 @@ app.get('/resident/appointments', authenticateToken, requireRole(['Resident']), 
               <tr>
                 <td class="fw-bold text-primary-blue">${a.appointment_number}</td>
                 <td>${a.service_requested}</td>
-                <td>${a.appointment_date} at ${a.appointment_time}</td>
+                <td>${a.appointment_date} at${a.appointment_time}</td>
                 <td><span class="badge bg-primary text-white">${a.status}</span></td>
               </tr>
             `).join('') || '<tr><td colspan="4" class="text-center py-4 text-muted">No appointments booked.</td></tr>'}
@@ -2987,6 +2964,7 @@ app.get('/', (req, res) => {
   res.redirect('/login');
 });
 
+// Start Express Server
 app.listen(PORT, () => {
   console.log(`[BARANGAY SYSTEM RUNNING] Listening on port ${PORT}`);
 });
