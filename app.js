@@ -1,3 +1,4 @@
+name=app (12).js
 /**
  * BARANGAY RESIDENT MANAGEMENT SYSTEM
  * Single Monolithic Server Application (Express.js + Supabase JavaScript Client)
@@ -85,7 +86,7 @@ const logActivity = async (userId, action, details = '', ip = '') => {
 // ==========================================
 // CONSTANTS & LOGIC CONSTANTS
 // ==========================================
-const DEFAULT_LOGIN_BG = 'blob:https://www.facebook.com/523bf736-96a4-4408-9480-a4e42d1b1670';
+const DEFAULT_LOGIN_BG = 'https://scontent.fmnl33-4.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=zPWWgjIxijoQ7kNvwFRKLVb&_nc_oc=AdpZBQL9o8MZk4xIiBL9pR6vKPkB7bvmqkM4R26op6LLy9SHE6Qd009laEUr-_vlHfE&_nc_zt=23&_nc_ht=scontent.fmnl33-4.fna&_nc_gid=A3E_5De3Kcc14pam4H4mgA&_nc_ss=7b2a8&oh=00_AQN0FSG7xTxJGzBY3rAhHoIZqJoNuUuFP2P_2cdm47NTxw&oe=6AC4DD7C';
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
@@ -323,10 +324,10 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         <!-- Sidebar Navigation -->
         <div class="col-md-3 col-lg-2 sidebar d-flex flex-column p-3 no-print">
           <div class="d-flex align-items-center mb-4 px-2">
-            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle" style="width: 55px; height: 55px; object-fit: cover;">` : '<i class="bi bi-building fs-1 me-2"></i>'}
+            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle" style="width: 55px; height: 55px; object-fit: cover;">` : '<i class="bi bi-building fs-2 me-2"></i>'}
             <div>
-              <h6 class="m-0 fw-bold fs-5">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
-              <small class="text-white-50">${user.role || 'User'}</small>
+              <h6 class="m-0 fw-bold">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
+              <small class="text-white-50">${user.full_name || user.role || 'User'}</small>
             </div>
           </div>
           <hr class="text-white-50 mt-0">
@@ -342,8 +343,8 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
           <hr class="text-white-50">
           <div class="dropdown">
             <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle px-2" id="dropdownUser1" data-bs-toggle="dropdown" aria-expanded="false">
-              <i class="bi bi-person-circle fs-3 me-2"></i>
-              <strong class="fs-6">${user.full_name || user.username}</strong>
+              <i class="bi bi-person-circle fs-4 me-2"></i>
+              <strong>${user.full_name || user.username}</strong>
             </a>
             <ul class="dropdown-menu dropdown-menu-dark text-small shadow">
               <li><a class="dropdown-item" href="/logout"><i class="bi bi-box-arrow-right me-2"></i> Sign out</a></li>
@@ -496,11 +497,11 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (LIGHT GREEN & LIGHT BLUE THEME + SCROLLABLE OFFICIALS WITH PICTURES)
+// ROUTE 2: REDESIGNED LOGIN PAGE (GRADIENT GREEN (TOP) TO BLUE (BOTTOM) + UPDATED LOGIN PIC)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
-  const bgImg = settings.login_background || DEFAULT_LOGIN_BG;
+  const bgImg = 'https://scontent.fmnl33-4.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=zPWWgjIxijoQ7kNvwFRKLVb&_nc_oc=AdpZBQL9o8MZk4xIiBL9pR6vKPkB7bvmqkM4R26op6LLy9SHE6Qd009laEUr-_vlHfE&_nc_zt=23&_nc_ht=scontent.fmnl33-4.fna&_nc_gid=A3E_5De3Kcc14pam4H4mgA&_nc_ss=7b2a8&oh=00_AQN0FSG7xTxJGzBY3rAhHoIZqJoNuUuFP2P_2cdm47NTxw&oe=6AC4DD7C';
   
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
@@ -516,10 +517,9 @@ app.get('/login', async (req, res) => {
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(180deg, #2ecc71 0%, #205493 100%), url('${bgImg}');
+        background: linear-gradient(180deg, rgba(46, 204, 113, 0.88) 0%, rgba(32, 84, 147, 0.88) 100%), url('${bgImg}');
         background-size: cover;
         background-position: center;
-        background-blend-mode: overlay;
         background-attachment: fixed;
         display: flex;
         flex-direction: column;
@@ -1094,7 +1094,7 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
                 <tr>
                   <td class="fw-bold text-primary-blue">${r.resident_number}</td>
                   <td>
-                    ${r.photo_url ? `<img src="${r.photo_url}" class="rounded-circle me-2" style="width:35px; height:35px; object-fit:cover;">` : ''}
+                    ${r.photo_url ? `<img src="${r.photo_url}" class="rounded-circle me-2" style="width:30px; height:30px; object-fit:cover;">` : ''}
                     ${r.first_name} ${r.middle_name || ''} ${r.last_name} ${r.suffix || ''}
                   </td>
                   <td>${r.puroks ? r.puroks.name : '-'}</td>
@@ -2167,7 +2167,6 @@ app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay
                 <td><span class="badge bg-primary-blue text-white">${u.role}</span></td>
                 <td><span class="badge ${u.status === 'Active' ? 'bg-success' : 'bg-secondary'}">${u.status}</span></td>
                 <td class="text-end">
-                  <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editUserModal${u.id}">Edit</button>
                   ${u.status === 'Active' ? `
                     <a href="/api/admin/user/toggle/${u.id}?status=Disabled" class="btn btn-sm btn-outline-danger">Disable</a>
                   ` : `
@@ -2175,37 +2174,6 @@ app.get('/admin/users', authenticateToken, requireRole(['Super Admin', 'Barangay
                   `}
                 </td>
               </tr>
-
-              <!-- Modal Edit User -->
-              <div class="modal fade" id="editUserModal${u.id}" tabindex="-1">
-                <div class="modal-dialog">
-                  <div class="modal-content">
-                    <form action="/api/admin/user/update/${u.id}" method="POST">
-                      <div class="modal-header bg-primary-blue text-white">
-                        <h5 class="modal-title fw-bold">Edit Account Details</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                      </div>
-                      <div class="modal-body text-start">
-                        <div class="mb-3"><label class="form-label">Full Name *</label><input type="text" name="full_name" class="form-control" value="${u.full_name}" required></div>
-                        <div class="mb-3"><label class="form-label">Username *</label><input type="text" name="username" class="form-control" value="${u.username}" required></div>
-                        <div class="mb-3"><label class="form-label">Email *</label><input type="email" name="email" class="form-control" value="${u.email}" required></div>
-                        <div class="mb-3">
-                          <label class="form-label">Role *</label>
-                          <select name="role" class="form-select" required>
-                            <option value="Super Admin" ${u.role === 'Super Admin' ? 'selected' : ''}>Super Admin</option>
-                            <option value="Barangay Admin" ${u.role === 'Barangay Admin' ? 'selected' : ''}>Barangay Admin</option>
-                            <option value="Barangay Secretary" ${u.role === 'Barangay Secretary' ? 'selected' : ''}>Barangay Secretary</option>
-                            <option value="Barangay Staff" ${u.role === 'Barangay Staff' ? 'selected' : ''}>Barangay Staff</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div class="modal-footer">
-                        <button type="submit" class="btn btn-primary-custom text-white">Update Account</button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              </div>
             `).join('')}
           </tbody>
         </table>
@@ -2252,12 +2220,6 @@ app.post('/api/admin/user/add', authenticateToken, requireRole(['Super Admin', '
   const salt = await bcrypt.genSalt(10);
   const password_hash = await bcrypt.hash(password, salt);
   await supabase.from('users').insert([{ full_name, username, email, password_hash, role, status: 'Active' }]);
-  res.redirect('/admin/users');
-});
-
-app.post('/api/admin/user/update/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
-  const { full_name, username, email, role } = req.body;
-  await supabase.from('users').update({ full_name, username, email, role }).eq('id', req.params.id);
   res.redirect('/admin/users');
 });
 
@@ -2363,16 +2325,24 @@ app.get('/admin/activity-logs', authenticateToken, requireRole(['Super Admin', '
 });
 
 // ==========================================
-// ROUTE 19: SYSTEM SETTINGS
+// ROUTE 19: SYSTEM SETTINGS (INCLUDES EMERGENCY NUMBERS & ADMIN ACCOUNT NAME UPDATE)
 // ==========================================
 app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
+  const adminUser = req.user;
 
   const html = `
     <div class="card card-custom p-4" style="max-width: 800px; margin: auto;">
-      <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-sliders me-2"></i>Barangay System Configuration</h4>
+      <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-sliders me-2"></i>Barangay System Configuration & Admin Settings</h4>
 
       <form action="/api/admin/settings/update" method="POST" enctype="multipart/form-data">
+        <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">1. Admin Account Details</h6>
+        <div class="mb-3">
+          <label class="form-label">Admin Account Full Name</label>
+          <input type="text" name="admin_full_name" class="form-control" value="${adminUser.full_name || ''}" required>
+        </div>
+
+        <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-4">2. Barangay Information</h6>
         <div class="mb-3">
           <label class="form-label">Barangay Name</label>
           <input type="text" name="barangay_name" class="form-control" value="${settings.barangay_name || ''}" required>
@@ -2391,24 +2361,12 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
           <label class="form-label">Barangay Captain Name</label>
           <input type="text" name="barangay_captain" class="form-control" value="${settings.barangay_captain || ''}">
         </div>
-
-        <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Emergency Numbers Management</h6>
-        <div class="row">
-          <div class="col-md-4 mb-3">
-            <label class="form-label">Barangay Hall Hotline</label>
-            <input type="text" name="contact_number" class="form-control" value="${settings.contact_number || '09123456789'}">
-          </div>
-          <div class="col-md-4 mb-3">
-            <label class="form-label">Police Station Hotline</label>
-            <input type="text" name="police_hotline" class="form-control" value="${settings.police_hotline || '911 / (045) 123-4567'}">
-          </div>
-          <div class="col-md-4 mb-3">
-            <label class="form-label">Fire Department Hotline</label>
-            <input type="text" name="fire_hotline" class="form-control" value="${settings.fire_hotline || '160 / (045) 765-4321'}">
-          </div>
+        <div class="mb-3">
+          <label class="form-label">Barangay Emergency Contact Number(s)</label>
+          <input type="text" name="contact_number" class="form-control" value="${settings.contact_number || ''}" placeholder="e.g. 09123456789 / (045) 123-4567" required>
         </div>
 
-        <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Branding Assets Upload</h6>
+        <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">3. Branding Assets Upload</h6>
         <div class="mb-3">
           <label class="form-label">Barangay Logo</label>
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:75px; height:75px; object-fit:cover;">` : ''}
@@ -2429,10 +2387,10 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
 });
 
 app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), upload.fields([{ name: 'logo' }, { name: 'signature' }]), async (req, res) => {
-  const { barangay_name, municipality, province, barangay_captain, contact_number, police_hotline, fire_hotline } = req.body;
+  const { barangay_name, municipality, province, barangay_captain, contact_number, admin_full_name } = req.body;
   const settings = await getSettings();
 
-  const updateData = { barangay_name, municipality, province, barangay_captain, contact_number, police_hotline, fire_hotline, updated_at: new Date() };
+  const updateData = { barangay_name, municipality, province, barangay_captain, contact_number, updated_at: new Date() };
 
   if (req.files && req.files['logo']) {
     const logoFile = req.files['logo'][0];
@@ -2445,6 +2403,11 @@ app.post('/api/admin/settings/update', authenticateToken, requireRole(['Super Ad
   }
 
   await supabase.from('system_settings').update(updateData).eq('id', settings.id);
+
+  if (admin_full_name) {
+    await supabase.from('users').update({ full_name: admin_full_name }).eq('id', req.user.id);
+  }
+
   res.redirect('/admin/settings');
 });
 
@@ -2482,7 +2445,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #2ecc71;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:90px; height:90px; object-fit:cover; border: 2px solid #2ecc71;">
           <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
           <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
           <div class="mt-3">
@@ -2506,7 +2469,7 @@ app.get('/resident/profile', authenticateToken, requireRole(['Resident']), async
     <div class="card card-custom p-4" style="max-width: 720px; margin: auto;">
       <div class="text-center mb-4">
         <div class="position-relative d-inline-block">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 135px; height: 135px; object-fit: cover; border: 4px solid #205493; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="rounded-circle mx-auto mb-2" style="width: 145px; height: 145px; object-fit: cover; border: 4px solid #205493; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
           <button class="btn btn-sm btn-accent-custom rounded-circle position-absolute bottom-0 end-0 p-2 text-white" data-bs-toggle="modal" data-bs-target="#changePhotoModal" title="Change Photo">
             <i class="bi bi-camera-fill"></i>
           </button>
@@ -2902,14 +2865,14 @@ app.get('/resident/emergency-contacts', authenticateToken, requireRole(['Residen
           <div class="p-3 border rounded text-center bg-light-green">
             <i class="bi bi-shield-fill fs-1 text-danger"></i>
             <h5 class="fw-bold mt-2">Police Station</h5>
-            <p class="text-muted m-0">${settings.police_hotline || '911 / (045) 123-4567'}</p>
+            <p class="text-muted m-0">911 / (045) 123-4567</p>
           </div>
         </div>
         <div class="col-md-4">
           <div class="p-3 border rounded text-center bg-light-blue">
             <i class="bi bi-fire fs-1 text-warning"></i>
             <h5 class="fw-bold mt-2">Fire Department</h5>
-            <p class="text-muted m-0">${settings.fire_hotline || '160 / (045) 765-4321'}</p>
+            <p class="text-muted m-0">160 / (045) 765-4321</p>
           </div>
         </div>
       </div>
