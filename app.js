@@ -85,11 +85,7 @@ const logActivity = async (userId, action, details = '', ip = '') => {
 // ==========================================
 // CONSTANTS & LOGIC CONSTANTS
 // ==========================================
-const DEFAULT_LOGIN_BG = 'data:image/jpeg;base64,...'; // or a direct image URL if preferred, let's use the provided image data URI format or link from source
-// Using the image provided by the user as data URI or direct link reference:
-const USER_PROVIDED_BG = 'https://images.unsplash.com/photo-1541888946425-d0fbb18f86f6?auto=format&fit=crop&q=80'; // fallback, or we can use the exact image provided in the prompt context:
-// Let's use the provided image URL from source:
-const OFFICIAL_BUILDING_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg?stp=dst-jpg_tt6&cstp=mx1857x2048&ctp=s1857x2048&_nc_cat=107&ccb=1-7&_nc_sid=cc71e4&_nc_eui2=AeH-CrVk3UW0Tqq0z_SDhKwemnbseM68ydCadux4zrzJ0I4R6gykVtH1GEMMnjk_E0vUUupJBZ3vwMdzuIfYXMgZ&_nc_ohc=dQMK5ddUuHcQ7kNvwGa1gPS&_nc_oc=AdoFKxV7tJpE4hgQ4pRI2MUvCVRMJBztcvXKVR66-nYuAHhEYRtmWNOf2aAis5Et9sE&_nc_zt=23&_nc_ht=scontent.fcrk3-3.fna&_nc_gid=xdfM6qfHMw-bCjf2oW_Nzw&_nc_ss=7b2a8&oh=00_AQMFazlU8aRub-iyfGwAHzijoCAXz8cAE0ZoQgTtFlJvjw&oe=6AC35F71';
+const DEFAULT_LOGIN_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg?stp=dst-jpg_tt6&cstp=mx1857x2048&ctp=s1857x2048&_nc_cat=107&ccb=1-7&_nc_sid=cc71e4&_nc_eui2=AeH-CrVk3UW0Tqq0z_SDhKwemnbseM68ydCadux4zrzJ0I4R6gykVtH1GEMMnjk_E0vUUupJBZ3vwMdzuIfYXMgZ&_nc_ohc=dQMK5ddUuHcQ7kNvwGa1gPS&_nc_oc=AdoFKxV7tJpE4hgQ4pRI2MUvCVRMJBztcvXKVR66-nYuAHhEYRtmWNOf2aAis5Et9sE&_nc_zt=23&_nc_ht=scontent.fcrk3-3.fna&_nc_gid=xdfM6qfHMw-bCjf2oW_Nzw&_nc_ss=7b2a8&oh=00_AQMFazlU8aRub-iyfGwAHzijoCAXz8cAE0ZoQgTtFlJvjw&oe=6AC35F71';
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
@@ -500,11 +496,11 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (GREEN AT TOP, BLUE AT BOTTOM GRADIENT OVER BACKGROUND IMAGE)
+// ROUTE 2: REDESIGNED LOGIN PAGE (LIGHT GREEN & LIGHT BLUE THEME + SCROLLABLE OFFICIALS WITH PICTURES)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
-  const bgImg = settings.login_background || OFFICIAL_BUILDING_BG;
+  const bgImg = settings.login_background || DEFAULT_LOGIN_BG;
   
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
@@ -520,10 +516,11 @@ app.get('/login', async (req, res) => {
       }
       .login-section {
         min-height: 100vh;
-        background: linear-gradient(180deg, rgba(46, 204, 113, 0.88) 0%, rgba(32, 84, 147, 0.88) 100%), url('${bgImg}');
+        background: linear-gradient(180deg, #2ecc71 0%, #205493 100%), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
+        background-blend-mode: overlay;
         display: flex;
         flex-direction: column;
         align-items: center;
