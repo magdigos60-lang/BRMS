@@ -85,7 +85,7 @@ const logActivity = async (userId, action, details = '', ip = '') => {
 // ==========================================
 // CONSTANTS & LOGIC CONSTANTS
 // ==========================================
-const DEFAULT_LOGIN_BG = 'https://scontent.fcrk3-3.fna.fbcdn.net/v/t39.30808-6/467984538_122130208178389200_2470999473131951042_n.jpg?stp=dst-jpg_tt6&cstp=mx1857x2048&ctp=s1857x2048&_nc_cat=107&ccb=1-7&_nc_sid=cc71e4&_nc_eui2=AeH-CrVk3UW0Tqq0z_SDhKwemnbseM68ydCadux4zrzJ0I4R6gykVtH1GEMMnjk_E0vUUupJBZ3vwMdzuIfYXMgZ&_nc_ohc=dQMK5ddUuHcQ7kNvwGa1gPS&_nc_oc=AdoFKxV7tJpE4hgQ4pRI2MUvCVRMJBztcvXKVR66-nYuAHhEYRtmWNOf2aAis5Et9sE&_nc_zt=23&_nc_ht=scontent.fcrk3-3.fna&_nc_gid=xdfM6qfHMw-bCjf2oW_Nzw&_nc_ss=7b2a8&oh=00_AQMFazlU8aRub-iyfGwAHzijoCAXz8cAE0ZoQgTtFlJvjw&oe=6AC35F71';
+const DEFAULT_LOGIN_BG = 'blob:https://www.facebook.com/523bf736-96a4-4408-9480-a4e42d1b1670';
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
@@ -160,6 +160,11 @@ const renderSystemHead = (title) => `
       background-color: var(--accent-green);
       color: white;
     }
+    .sidebar img, .sidebar .bi-building {
+      width: 55px !important;
+      height: 55px !important;
+      font-size: 2.5rem !important;
+    }
     .card-custom {
       background-color: var(--pure-white);
       border-radius: 12px;
@@ -200,8 +205,8 @@ const renderSystemHead = (title) => `
       height: 0.42in;
     }
     .id-header-logo {
-      width: 0.32in;
-      height: 0.32in;
+      width: 0.45in;
+      height: 0.45in;
       object-fit: cover;
       border-radius: 50%;
       border: 1px solid white;
@@ -323,7 +328,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         <!-- Sidebar Navigation -->
         <div class="col-md-3 col-lg-2 sidebar d-flex flex-column p-3 no-print">
           <div class="d-flex align-items-center mb-4 px-2">
-            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle" style="width: 40px; height: 40px; object-fit: cover;">` : '<i class="bi bi-building fs-3 me-2"></i>'}
+            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle" style="width: 55px; height: 55px; object-fit: cover;">` : '<i class="bi bi-building fs-1 me-2" style="font-size: 2.5rem !important;"></i>'}
             <div>
               <h6 class="m-0 fw-bold">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
               <small class="text-white-50">${user.role || 'User'}</small>
@@ -401,7 +406,7 @@ app.get('/setup', async (req, res) => {
         <div class="text-center mb-4">
           <i class="bi bi-gear-fill text-primary-blue fs-1"></i>
           <h3 class="fw-bold text-primary-blue mt-2">Initial System Setup</h3>
-          <p class="text-muted">Configure your Barangay details and create the Super Administrator account.</p>
+          <p class="text-muted">Configure your Barangay details and create the Administrator account.</p>
         </div>
         <form action="/api/setup" method="POST">
           <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">1. Barangay Details</h6>
@@ -419,10 +424,10 @@ app.get('/setup', async (req, res) => {
               <input type="text" name="province" class="form-control" required placeholder="Pampanga">
             </div>
           </div>
-          <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-4">2. Super Admin Credentials</h6>
+          <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-4">2. Admin Credentials</h6>
           <div class="mb-3">
             <label class="form-label">Full Name</label>
-            <input type="text" name="full_name" class="form-control" required placeholder="Hon. Admin Name">
+            <input type="text" name="full_name" class="form-control" required placeholder="Administrator Name">
           </div>
           <div class="mb-3">
             <label class="form-label">Username</label>
@@ -520,7 +525,6 @@ app.get('/login', async (req, res) => {
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
-        background-blend-mode: overlay;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1500,7 +1504,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
         <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay Resident Card Generator</h4>
         <button class="btn btn-accent-custom fw-bold text-white" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print Selected Grid (8 IDs)</button>
       </div>
-      <p class="text-muted">Generate standard CR80 physical cards with optimized print layouts, high-visibility QR codes, and seal images.</p>
+      <p class="text-muted">Generate standard CR80 physical cards with optimized print layouts, high-visibility QR codes, and larger portal logos.</p>
     </div>
 
     <div class="mt-4">
@@ -1508,7 +1512,7 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
         ${residentCards.map(r => `
           <div class="id-card-frame">
             <div class="id-card-header">
-              ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
+              ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-4"></i>'}
               <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
                 <strong style="font-size: 7.5pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
                 <span style="font-size: 5.5pt; letter-spacing:0.5px;">OFFICIAL RESIDENT IDENTIFICATION</span>
@@ -2556,7 +2560,7 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
 
       <div class="id-card-frame shadow-lg text-start" style="width: 3.6in; height: 2.25in; border-width: 3px;">
         <div class="id-card-header">
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-4"></i>'}
           <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
             <strong style="font-size: 8pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
             <span style="font-size: 6pt; letter-spacing:0.5px;">OFFICIAL RESIDENT IDENTIFICATION</span>
@@ -2840,22 +2844,22 @@ app.get('/resident/emergency-contacts', authenticateToken, requireRole(['Residen
         <div class="col-md-4">
           <div class="p-3 border rounded text-center bg-light-blue">
             <i class="bi bi-building fs-1 text-primary-blue"></i>
-            <h5 class="fw-bold mt-2">Barangay Hall</h5>
-            <p class="text-muted m-0">${settings.contact_number || '09123456789'}</p>
+            <h5 class="fw-bold mt-2">Barangay Hall Hotline</h5>
+            <p class="text-muted m-0"><strong>0919-123-4567 / (045) 888-1234</strong></p>
           </div>
         </div>
         <div class="col-md-4">
           <div class="p-3 border rounded text-center bg-light-green">
             <i class="bi bi-shield-fill fs-1 text-danger"></i>
-            <h5 class="fw-bold mt-2">Police Station</h5>
-            <p class="text-muted m-0">911 / (045) 123-4567</p>
+            <h5 class="fw-bold mt-2">Police Emergency</h5>
+            <p class="text-muted m-0"><strong>911 / 0998-987-6543</strong></p>
           </div>
         </div>
         <div class="col-md-4">
           <div class="p-3 border rounded text-center bg-light-blue">
             <i class="bi bi-fire fs-1 text-warning"></i>
-            <h5 class="fw-bold mt-2">Fire Department</h5>
-            <p class="text-muted m-0">160 / (045) 765-4321</p>
+            <h5 class="fw-bold mt-2">Fire & Rescue</h5>
+            <p class="text-muted m-0"><strong>160 / (045) 888-9999</strong></p>
           </div>
         </div>
       </div>
