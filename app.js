@@ -200,8 +200,8 @@ const renderSystemHead = (title) => `
       height: 0.42in;
     }
     .id-header-logo {
-      width: 0.55in;
-      height: 0.55in;
+      width: 0.45in;
+      height: 0.45in;
       object-fit: cover;
       border-radius: 50%;
       border: 1px solid white;
@@ -354,10 +354,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         <!-- Main Content Area -->
         <div class="col-md-9 col-lg-10 p-4 overflow-y-auto" style="height: 100vh; background-color: #f4f9f6;">
           <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom no-print">
-            <div class="d-flex align-items-center">
-              ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-3 rounded-circle shadow-sm" style="width: 50px; height: 50px; object-fit: cover;">` : ''}
-              <h4 class="fw-bold text-primary-blue m-0">${settings.system_name || settings.barangay_name || 'Barangay Resident Management System'}</h4>
-            </div>
+            <h4 class="fw-bold text-primary-blue m-0">${settings.system_name || 'Barangay Resident Management System'}</h4>
             <span class="badge bg-accent-green px-3 py-2 text-white"><i class="bi bi-check-circle me-1"></i> System Online</span>
           </div>
           ${contentHtml}
@@ -499,11 +496,11 @@ app.post('/api/setup', async (req, res) => {
 });
 
 // ==========================================
-// ROUTE 2: REDESIGNED LOGIN PAGE (GREEN TOP & BLUE BOTTOM GRADIENT + RECTANGLE INPUTS)
+// ROUTE 2: REDESIGNED LOGIN PAGE (GRADIENT GREEN (TOP) TO BLUE (BOTTOM) + HORIZONTAL RECTANGLE FILL + BIGGER LOGO)
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
-  const bgImg = settings.login_background || 'https://scontent.fmnl33-4.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=zPWWgjIxijoQ7kNvwFRKLVb&_nc_oc=AdpZBQL9o8MZk4xIiBL9pR6vKPkB7bvmqkM4R26op6LLy9SHE6Qd009laEUr-_vlHfE&_nc_zt=23&_nc_ht=scontent.fmnl33-4.fna&_nc_gid=A3E_5De3Kcc14pam4H4mgA&_nc_ss=7b2a8&oh=00_AQN0FSG7xTxJGzBY3rAhHoIZqJoNuUuFP2P_2cdm47NTxw&oe=6AC4DD7C';
+  const bgImg = settings.login_background || DEFAULT_LOGIN_BG;
   
   const { data: officials } = await supabase.from('barangay_officials').select('*');
 
@@ -519,8 +516,7 @@ app.get('/login', async (req, res) => {
       }
       .login-section {
         min-height: 100vh;
-        /* Gradient: Green on top, Blue on bottom, blended with the requested background image */
-        background: linear-gradient(180deg, rgba(46, 204, 113, 0.88) 0%, rgba(32, 84, 147, 0.88) 100%), url('${bgImg}');
+        background: linear-gradient(180deg, rgba(46, 204, 113, 0.90) 0%, rgba(32, 84, 147, 0.90) 100%), url('${bgImg}');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -536,32 +532,32 @@ app.get('/login', async (req, res) => {
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
         border: 2px solid rgba(46, 204, 113, 0.3);
-        border-radius: 12px; /* Rectangle style adjustment */
+        border-radius: 16px;
         box-shadow: 0 20px 40px rgba(32, 84, 147, 0.18);
-        max-width: 450px;
+        max-width: 620px;
         width: 100%;
-        padding: 42px 36px;
+        padding: 38px 42px;
         transition: transform 0.3s ease;
       }
       .glass-login-card:hover {
         transform: translateY(-4px);
       }
       .brand-logo-img {
-        width: 115px;
-        height: 115px;
+        width: 120px;
+        height: 120px;
         object-fit: cover;
         border-radius: 50%;
-        border: 3px solid #2ecc71;
-        box-shadow: 0 4px 12px rgba(32, 84, 147, 0.2);
-      }
-      .form-control-lg, .input-group-text, .btn-glow {
-        border-radius: 4px !important; /* Strictly rectangle fill fields */
+        border: 4px solid #2ecc71;
+        box-shadow: 0 6px 16px rgba(32, 84, 147, 0.25);
       }
       .form-control-lg {
         font-size: 0.98rem;
         padding: 12px 16px;
+        border-radius: 8px;
       }
       .input-group-text {
+        border-top-left-radius: 8px;
+        border-bottom-left-radius: 8px;
         background-color: #d9edf7 !important;
         color: #205493 !important;
         border: 1px solid #ced4da;
@@ -569,6 +565,7 @@ app.get('/login', async (req, res) => {
       .btn-glow {
         background-color: #205493;
         border: none;
+        border-radius: 8px;
         padding: 13px;
         font-size: 1.05rem;
         letter-spacing: 0.5px;
@@ -587,7 +584,7 @@ app.get('/login', async (req, res) => {
         animation: bounce 2s infinite;
         text-decoration: none;
         font-weight: 700;
-        background: rgba(255, 255, 255, 0.8);
+        background: rgba(255, 255, 255, 0.85);
         padding: 8px 18px;
         border-radius: 30px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.1);
@@ -602,7 +599,7 @@ app.get('/login', async (req, res) => {
         background: linear-gradient(180deg, #d9edf7 0%, #e1f5fe 100%);
       }
       .official-card {
-        border-radius: 12px;
+        border-radius: 16px;
         border: 1px solid #a3e4d7;
         background: white;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
@@ -612,8 +609,8 @@ app.get('/login', async (req, res) => {
         box-shadow: 0 12px 24px rgba(32, 84, 147, 0.15);
       }
       .official-photo {
-        width: 145px;
-        height: 145px;
+        width: 130px;
+        height: 130px;
         object-fit: cover;
         border-radius: 50%;
         border: 4px solid #2ecc71;
@@ -621,7 +618,7 @@ app.get('/login', async (req, res) => {
       }
     </style>
 
-    <!-- SECTION 1: LOGIN CARD CONTAINER -->
+    <!-- SECTION 1: LOGIN CARD CONTAINER (Horizontal Rectangle Layout) -->
     <div class="login-section">
       <div class="glass-login-card">
         <div class="text-center mb-4">
@@ -2050,7 +2047,7 @@ app.get('/admin/officials', authenticateToken, requireRole(['Super Admin', 'Bara
         ${(officials || []).map(o => `
           <div class="col-md-3">
             <div class="card card-custom p-3 text-center h-100">
-              <img src="${o.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 3px solid #2ecc71;">
+              <img src="${o.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:90px; height:90px; object-fit:cover; border: 3px solid #2ecc71;">
               <h6 class="fw-bold text-primary-blue m-0">${o.name}</h6>
               <span class="badge bg-accent-green mb-2 text-white">${o.position}</span>${o.signature_url ? `<img src="${o.signature_url}" class="d-block mx-auto mt-1" style="height:25px; object-fit:contain;">` : ''}
               
@@ -2327,7 +2324,7 @@ app.get('/admin/activity-logs', authenticateToken, requireRole(['Super Admin', '
 });
 
 // ==========================================
-// ROUTE 19: SYSTEM SETTINGS (INCLUDES EDITABLE EMERGENCY NUMBERS)
+// ROUTE 19: SYSTEM SETTINGS (INCLUDING EMERGENCY NUMBERS CONFIGURATION)
 // ==========================================
 app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Barangay Admin']), async (req, res) => {
   const settings = await getSettings();
@@ -2357,15 +2354,15 @@ app.get('/admin/settings', authenticateToken, requireRole(['Super Admin', 'Baran
             <input type="text" name="barangay_captain" class="form-control" value="${settings.barangay_captain || ''}">
           </div>
           <div class="col-md-6 mb-3">
-            <label class="form-label">Barangay Hall Contact Number (Emergency)</label>
-            <input type="text" name="contact_number" class="form-control" value="${settings.contact_number || '09123456789'}">
+            <label class="form-label">Emergency Hotline Number</label>
+            <input type="text" name="contact_number" class="form-control" value="${settings.contact_number || ''}" placeholder="e.g. 09123456789">
           </div>
         </div>
 
         <h6 class="fw-bold text-accent-green mt-4 border-bottom pb-2">Branding Assets Upload</h6>
         <div class="mb-3">
           <label class="form-label">Barangay Logo</label>
-          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:60px; height:60px; object-fit:cover;">` : ''}
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="d-block mb-2 rounded-circle" style="width:70px; height:70px; object-fit:cover;">` : ''}
           <input type="file" name="logo" class="form-control" accept="image/*">
         </div>
         <div class="mb-3">
@@ -2436,7 +2433,7 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
       <div class="col-md-4">
         <div class="card card-custom p-4 text-center">
           <h5 class="fw-bold text-primary-blue mb-3">My Digital Resident ID</h5>
-          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:80px; height:80px; object-fit:cover; border: 2px solid #2ecc71;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle mx-auto mb-2" style="width:90px; height:90px; object-fit:cover; border: 2px solid #2ecc71;">
           <h6 class="fw-bold m-0">${resident.first_name} ${resident.last_name}</h6>
           <span class="text-primary-blue small fw-bold">${resident.resident_number}</span>
           <div class="mt-3">
