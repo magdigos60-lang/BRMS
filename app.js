@@ -1,4 +1,4 @@
-name=app (12).js
+
 /**
  * BARANGAY RESIDENT MANAGEMENT SYSTEM
  * Single Monolithic Server Application (Express.js + Supabase JavaScript Client)
