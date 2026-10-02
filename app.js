@@ -175,17 +175,17 @@ const renderSystemHead = (title) => `
       background: linear-gradient(135deg, #ffffff 0%, var(--light-green) 100%);
     }
 
-    /* Standardized CR80 ID Card Frame (3.375in x 2.125in) */
+    /* Standardized CR80 ID Card Frame (National ID Format) */
     .id-card-frame {
       width: 3.375in;
       height: 2.125in;
-      border-radius: 10px;
+      border-radius: 12px;
       border: 2px solid var(--primary-blue);
-      background: #ffffff;
+      background: linear-gradient(135deg, #ffffff 0%, #f9fcff 100%);
       position: relative;
       overflow: hidden;
       font-size: 8pt;
-      box-shadow: 0 6px 12px rgba(0,0,0,0.12);
+      box-shadow: 0 8px 16px rgba(0,0,0,0.15);
       display: inline-block;
       margin: 6px;
       box-sizing: border-box;
@@ -193,56 +193,58 @@ const renderSystemHead = (title) => `
     .id-card-header {
       background: linear-gradient(90deg, var(--primary-navy) 0%, var(--accent-green) 100%);
       color: white;
-      padding: 4px 8px;
+      padding: 4px 10px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      height: 0.42in;
+      height: 0.45in;
     }
     .id-header-logo {
-      width: 0.32in;
-      height: 0.32in;
+      width: 0.35in;
+      height: 0.35in;
       object-fit: cover;
       border-radius: 50%;
-      border: 1px solid white;
+      border: 1.5px solid white;
     }
     .id-card-body {
-      padding: 6px;
+      padding: 6px 8px;
       display: flex;
       gap: 8px;
-      height: calc(2.125in - 0.72in);
+      height: calc(2.125in - 0.75in);
     }
     .id-photo {
-      width: 1.05in;
-      height: 1.05in;
+      width: 1.0in;
+      height: 1.15in;
       object-fit: cover;
       border: 2px solid var(--primary-blue);
-      border-radius: 6px;
+      border-radius: 4px;
       flex-shrink: 0;
     }
     .id-details {
       flex-grow: 1;
       font-size: 7.2pt;
-      line-height: 1.2;
+      line-height: 1.25;
       overflow: hidden;
     }
     .id-qr {
-      width: 1.05in;
-      height: 1.05in;
+      width: 0.95in;
+      height: 0.95in;
       object-fit: contain;
       flex-shrink: 0;
+      align-self: center;
     }
     .id-card-footer {
       position: absolute;
       bottom: 0;
       left: 0;
       right: 0;
-      height: 0.30in;
-      padding: 0 8px 3px 8px;
+      height: 0.28in;
+      padding: 0 8px 2px 8px;
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
       background: #ffffff;
+      border-top: 1px solid #e1f5fe;
     }
     .print-sheet-8 {
       display: grid;
@@ -323,9 +325,9 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         <!-- Sidebar Navigation -->
         <div class="col-md-3 col-lg-2 sidebar d-flex flex-column p-3 no-print">
           <div class="d-flex align-items-center mb-4 px-2">
-            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle shadow-sm" style="width: 55px; height: 55px; object-fit: cover; border: 2px solid #2ecc71;">` : '<i class="bi bi-building fs-2 me-2 text-accent-green"></i>'}
+            ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle shadow-sm" style="width: 70px; height: 70px; object-fit: cover; border: 2.5px solid #2ecc71;">` : '<i class="bi bi-building fs-1 me-2 text-accent-green"></i>'}
             <div>
-              <h6 class="m-0 fw-bold">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
+              <h6 class="m-0 fw-bold fs-5">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
               <small class="text-white-50">${user.full_name || user.role || 'User'}</small>
             </div>
           </div>
@@ -536,7 +538,7 @@ app.get('/login', async (req, res) => {
         border: 2px solid rgba(46, 204, 113, 0.3);
         border-radius: 20px;
         box-shadow: 0 20px 40px rgba(32, 84, 147, 0.18);
-        max-width: 520px;
+        max-width: 560px;
         width: 100%;
         padding: 42px 36px;
         transition: transform 0.3s ease;
@@ -545,29 +547,32 @@ app.get('/login', async (req, res) => {
         transform: translateY(-4px);
       }
       .brand-logo-img {
-        width: 110px;
-        height: 110px;
+        width: 120px;
+        height: 120px;
         object-fit: cover;
         border-radius: 50%;
-        border: 3px solid #2ecc71;
+        border: 3.5px solid #2ecc71;
         box-shadow: 0 4px 12px rgba(32, 84, 147, 0.2);
       }
       /* Horizontal rectangle login fields */
       .form-control-horizontal {
         height: 52px;
-        border-radius: 8px;
+        border-radius: 0 8px 8px 0;
         font-size: 1.05rem;
       }
       .input-group-horizontal {
         border-radius: 8px;
         overflow: hidden;
+        display: flex;
+        width: 100%;
       }
       .input-group-text {
         background-color: #d9edf7 !important;
         color: #205493 !important;
         border: 1px solid #ced4da;
-        width: 52px;
+        width: 55px;
         justify-content: center;
+        border-radius: 8px 0 0 8px;
       }
       .btn-glow {
         background-color: #205493;
@@ -718,7 +723,8 @@ app.post('/api/login', async (req, res) => {
     res.cookie('token', token, { httpOnly: true, maxAge: 12 * 3600 * 1000 });
 
     await supabase.from('login_history').insert([{ user_id: user.id, status: 'Success' }]);
-    await logActivity(user.id, 'User Login', 'User authenticated successfully.');
+    // Na-update ang pangalan ng admin account sa logs/sistema kung kinakailangan
+    await logActivity(user.id, 'User Login', `User ${user.full_name || user.username} authenticated successfully.`);
 
     if (['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff'].includes(user.role)) {
       return res.redirect('/admin/dashboard');
@@ -1489,7 +1495,7 @@ app.get('/api/admin/certificate/update/:id', authenticateToken, requireRole(['Su
 });
 
 // ==========================================
-// ROUTE 8: BARANGAY ID GENERATOR
+// ROUTE 8: BARANGAY ID GENERATOR (National ID Format)
 // ==========================================
 app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const settings = await getSettings();
@@ -1503,10 +1509,10 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
   const html = `
     <div class="card card-custom p-4 no-print">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay Resident Card Generator</h4>
+        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-card-heading me-2"></i>Barangay Resident Card Generator (National ID Format)</h4>
         <button class="btn btn-accent-custom fw-bold text-white" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print Selected Grid (8 IDs)</button>
       </div>
-      <p class="text-muted">Generate standard CR80 physical cards with optimized print layouts, high-visibility QR codes, and seal images.</p>
+      <p class="text-muted">Generate standard CR80 physical cards styled with National ID layout specifications, high-visibility QR codes, and official seal images.</p>
     </div>
 
     <div class="mt-4">
@@ -1517,30 +1523,30 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
               ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
               <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
                 <strong style="font-size: 7.5pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
-                <span style="font-size: 5.5pt; letter-spacing:0.5px;">OFFICIAL RESIDENT IDENTIFICATION</span>
+                <span style="font-size: 5.5pt; letter-spacing:0.5px;">REPUBLIC OF THE PHILIPPINES</span>
               </div>
-              <span class="badge bg-white text-dark px-1" style="font-size: 5pt; font-weight: 800;">VERIFIED</span>
+              <span class="badge bg-white text-dark px-1" style="font-size: 5pt; font-weight: 800;">PHIL. ID</span>
             </div>
 
             <div class="id-card-body">
               <img src="${r.photo_url || 'https://via.placeholder.com/150'}" class="id-photo">
               <div class="id-details">
-                <div class="text-primary-blue fw-bold" style="font-size: 8pt;">${r.resident_number}</div>
-                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt;">${r.first_name} ${r.last_name}</div>
-                <div class="text-muted mt-1">DOB: <strong>${r.date_of_birth}</strong></div>
-                <div class="text-muted">Sex: <strong>${r.gender}</strong> | Civil: <strong>${r.civil_status || 'Single'}</strong></div>
-                <div class="text-muted">Purok: <strong>${r.puroks ? r.puroks.name : '-'}</strong></div>
+                <div class="text-primary-blue fw-bold" style="font-size: 7.5pt;">ID No: ${r.resident_number}</div>
+                <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8pt; line-height: 1.1;">${r.first_name} ${r.last_name}</div>
+                <div class="text-muted mt-1" style="font-size: 6.5pt;">DOB: <strong>${r.date_of_birth}</strong></div>
+                <div class="text-muted" style="font-size: 6.5pt;">Sex: <strong>${r.gender}</strong> | Civil: <strong>${r.civil_status || 'Single'}</strong></div>
+                <div class="text-muted" style="font-size: 6.5pt;">Purok: <strong>${r.puroks ? r.puroks.name : '-'}</strong></div>
               </div>
               <img src="${r.qrDataUrl}" class="id-qr">
             </div>
 
             <div class="id-card-footer">
-              <div style="font-size: 4.5pt; max-width:1.8in;" class="text-muted lh-1">
-                If found, please return to Barangay Hall. Property of Barangay Administration.
+              <div style="font-size: 4.2pt; max-width:1.8in;" class="text-muted lh-1">
+                Official Barangay Identification Document.
               </div>
               <div class="text-center" style="min-width: 0.9in;">
-                ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:16px; object-fit:contain;"><br>` : ''}
-                <span style="font-size: 5pt; border-top: 1px solid #333; display: block; font-weight: 600;">Barangay Captain</span>
+                ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:14px; object-fit:contain;"><br>` : ''}
+                <span style="font-size: 4.8pt; border-top: 1px solid #333; display: block; font-weight: 600;">Barangay Captain</span>
               </div>
             </div>
           </div>
@@ -2555,7 +2561,7 @@ app.post('/api/resident/request-profile-update', authenticateToken, requireRole(
   res.redirect('/resident/profile');
 });
 
-// Resident Digital ID Display
+// Resident Digital ID Display (National ID Format)
 app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
@@ -2564,37 +2570,37 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
 
   const html = `
     <div class="text-center py-4">
-      <h4 class="fw-bold text-primary-blue mb-3">Official Digital Resident ID</h4>
+      <h4 class="fw-bold text-primary-blue mb-3">Official Digital Resident ID (National ID Format)</h4>
 
       <div class="id-card-frame shadow-lg text-start" style="width: 3.6in; height: 2.25in; border-width: 3px;">
         <div class="id-card-header">
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
           <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
             <strong style="font-size: 8pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
-            <span style="font-size: 6pt; letter-spacing:0.5px;">OFFICIAL RESIDENT IDENTIFICATION</span>
+            <span style="font-size: 6pt; letter-spacing:0.5px;">REPUBLIC OF THE PHILIPPINES</span>
           </div>
-          <span class="badge bg-white text-dark px-1" style="font-size: 5.5pt; font-weight: 800;">VERIFIED</span>
+          <span class="badge bg-white text-dark px-1" style="font-size: 5.5pt; font-weight: 800;">PHIL. ID</span>
         </div>
 
         <div class="id-card-body">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
+          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.05in; height: 1.2in;">
           <div class="id-details">
-            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident.resident_number}</div>
-            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident.first_name} ${resident.last_name}</div>
-            <div class="text-muted mt-1">DOB: <strong>${resident.date_of_birth}</strong></div>
-            <div class="text-muted">Sex: <strong>${resident.gender}</strong> | Civil: <strong>${resident.civil_status || 'Single'}</strong></div>
-            <div class="text-muted">Purok: <strong>${resident.puroks ? resident.puroks.name : '-'}</strong></div>
+            <div class="text-primary-blue fw-bold" style="font-size: 8pt;">ID No: ${resident.resident_number}</div>
+            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 8.5pt; line-height: 1.1;">${resident.first_name} ${resident.last_name}</div>
+            <div class="text-muted mt-1" style="font-size: 7pt;">DOB: <strong>${resident.date_of_birth}</strong></div>
+            <div class="text-muted" style="font-size: 7pt;">Sex: <strong>${resident.gender}</strong> | Civil: <strong>${resident.civil_status || 'Single'}</strong></div>
+            <div class="text-muted" style="font-size: 7pt;">Purok: <strong>${resident.puroks ? resident.puroks.name : '-'}</strong></div>
           </div>
-          <img src="${qrDataUrl}" class="id-qr" style="width: 1.1in; height: 1.1in;">
+          <img src="${qrDataUrl}" class="id-qr" style="width: 1.0in; height: 1.0in;">
         </div>
 
         <div class="id-card-footer">
           <div style="font-size: 4.8pt; max-width:2.0in;" class="text-muted lh-1">
-            If found, please return to Barangay Hall. Property of Barangay Administration.
+            Official Barangay Identification Document.
           </div>
           <div class="text-center" style="min-width: 1.0in;">
-            ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:18px; object-fit:contain;"><br>` : ''}
-            <span style="font-size: 5.5pt; border-top: 1px solid #333; display: block; font-weight: 600;">Barangay Captain</span>
+            ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:16px; object-fit:contain;"><br>` : ''}
+            <span style="font-size: 5.2pt; border-top: 1px solid #333; display: block; font-weight: 600;">Barangay Captain</span>
           </div>
         </div>
       </div>
