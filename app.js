@@ -253,6 +253,43 @@ const renderSystemHead = (title) => `
       margin: auto;
     }
 
+    /* ===== GLOBAL LOADING INDICATORS ===== */
+    #page-loader {
+      position: fixed; inset: 0; z-index: 99999;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+      background: rgba(244, 249, 246, 0.92);
+      backdrop-filter: blur(3px);
+      opacity: 1; visibility: visible;
+      transition: opacity .3s ease, visibility .3s ease;
+      /* failsafe: never stay stuck if JS fails */
+      animation: loaderFailsafe 0s linear 10s forwards;
+    }
+    #page-loader.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+    #page-loader .loader-ring {
+      width: 56px; height: 56px; border-radius: 50%;
+      border: 5px solid var(--light-blue);
+      border-top-color: var(--primary-blue);
+      border-right-color: var(--accent-green);
+      animation: loaderSpin .8s linear infinite;
+    }
+    #page-loader .loader-text {
+      font-weight: 600; letter-spacing: .5px; color: var(--primary-navy);
+    }
+    #top-progress {
+      position: fixed; top: 0; left: 0; height: 3px; width: 0; z-index: 100000;
+      background: linear-gradient(90deg, var(--primary-blue), var(--accent-green));
+      box-shadow: 0 0 8px var(--accent-green);
+      transition: width .4s ease, opacity .3s ease;
+    }
+    .btn-loading-spinner {
+      display: inline-block; width: 1em; height: 1em; margin-right: 6px; vertical-align: -2px;
+      border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+      animation: loaderSpin .7s linear infinite;
+    }
+    @keyframes loaderSpin { to { transform: rotate(360deg); } }
+    @keyframes loaderFailsafe { to { opacity: 0; visibility: hidden; pointer-events: none; } }
+    @media print { #page-loader, #top-progress { display: none !important; } }
+
     @media print {
       .no-print { display: none !important; }
       body { background: white !important; }
@@ -261,6 +298,11 @@ const renderSystemHead = (title) => `
   </style>
 </head>
 <body>
+  <div id="top-progress"></div>
+  <div id="page-loader">
+    <div class="loader-ring"></div>
+    <div class="loader-text" id="page-loader-text">Loading...</div>
+  </div>
 `;
 
 const renderSystemFooter = () => `
@@ -269,6 +311,93 @@ const renderSystemFooter = () => `
     function showNotification(title, message, isError = false) {
       alert((isError ? 'Error: ' : 'Info: ') + message);
     }
+
+    // ===== Loading indicator logic =====
+    (function () {
+      var loader = document.getElementById('page-loader');
+      var loaderText = document.getElementById('page-loader-text');
+      var bar = document.getElementById('top-progress');
+      var barTimer = null;
+
+      function startBar() {
+        if (!bar) return;
+        bar.style.opacity = '1';
+        bar.style.width = '15%';
+        var w = 15;
+        clearInterval(barTimer);
+        barTimer = setInterval(function () {
+          w += (90 - w) * 0.08;
+          bar.style.width = w + '%';
+        }, 250);
+      }
+      function resetBar() {
+        if (!bar) return;
+        clearInterval(barTimer);
+        bar.style.width = '100%';
+        setTimeout(function () { bar.style.opacity = '0'; bar.style.width = '0'; }, 300);
+      }
+      function showLoader(text) {
+        if (loaderText) loaderText.textContent = text || 'Loading...';
+        if (loader) loader.classList.remove('hidden');
+        startBar();
+      }
+      function hideLoader() {
+        if (loader) loader.classList.add('hidden');
+        resetBar();
+        document.querySelectorAll('button[data-was-loading], input[data-was-loading]').forEach(function (b) {
+          b.disabled = false;
+          if (b.dataset.origHtml !== undefined) b.innerHTML = b.dataset.origHtml;
+          b.removeAttribute('data-was-loading');
+        });
+      }
+
+      // Hide the first-paint loader once everything (CSS, images, fonts) has loaded
+      if (document.readyState === 'complete') hideLoader();
+      else window.addEventListener('load', hideLoader);
+      // Back/forward cache restore
+      window.addEventListener('pageshow', function (e) { if (e.persisted) hideLoader(); });
+
+      // Forms: show spinner on submit (skips if a confirm() or validation blocked it)
+      document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (e.defaultPrevented || !form || form.hasAttribute('data-no-loader')) return;
+        var isUpload = form.enctype === 'multipart/form-data';
+        showLoader(isUpload ? 'Uploading, please wait...' : 'Processing, please wait...');
+        // Disable submit buttons AFTER submission starts (prevents double-click duplicates)
+        setTimeout(function () {
+          form.querySelectorAll('button[type="submit"], button:not([type]), input[type="submit"]').forEach(function (b) {
+            b.setAttribute('data-was-loading', '1');
+            if (b.tagName === 'BUTTON') {
+              b.dataset.origHtml = b.innerHTML;
+              b.innerHTML = '<span class="btn-loading-spinner"></span>Please wait...';
+            }
+            b.disabled = true;
+          });
+        }, 0);
+      }, false);
+
+      // Internal links / action links: show loader while next page loads
+      document.addEventListener('click', function (e) {
+        var a = e.target.closest ? e.target.closest('a[href]') : null;
+        if (!a || e.defaultPrevented) return;
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        if (a.target && a.target !== '_self') return;
+        if (a.hasAttribute('download') || a.hasAttribute('data-bs-toggle') || a.hasAttribute('data-no-loader')) return;
+        var href = a.getAttribute('href') || '';
+        if (!href || href.charAt(0) === '#' || /^(javascript:|mailto:|tel:)/i.test(href)) return;
+        try {
+          var url = new URL(a.href, window.location.href);
+          if (url.origin !== window.location.origin) return;
+          if (url.pathname === window.location.pathname && url.search === window.location.search && url.hash) return;
+        } catch (err) { return; }
+        showLoader('Loading...');
+      }, false);
+
+      // Safety net: if navigation is cancelled (e.g. file download), don't leave the overlay stuck
+      window.addEventListener('beforeunload', function () { startBar(); });
+      window.__showLoader = showLoader;
+      window.__hideLoader = hideLoader;
+    })();
   </script>
 </body>
 </html>
