@@ -3426,7 +3426,8 @@ const renderScannerBody = () => `
     o.start(t0); o.stop(t0 + dur + 0.03);
   }
   var sounds = {
-    scan: function () { tone(1400, 0, 0.1, 'square', 0.12); },
+    // Loud buzzer: two slightly detuned low square/sawtooth waves for a harsh "BZZZT"
+    scan: function () { tone(220, 0, 0.35, 'square', 0.6); tone(226, 0, 0.35, 'sawtooth', 0.4); },
     success: function () { tone(880, 0, 0.12, 'sine', 0.3); tone(1320, 0.14, 0.22, 'sine', 0.3); },
     warn: function () { tone(600, 0, 0.15, 'triangle', 0.3); tone(600, 0.22, 0.15, 'triangle', 0.3); },
     error: function () { tone(220, 0, 0.35, 'sawtooth', 0.2); tone(170, 0.4, 0.4, 'sawtooth', 0.2); }
@@ -3455,7 +3456,7 @@ const renderScannerBody = () => `
     soundOn = !soundOn;
     try { localStorage.setItem('scanSound', soundOn ? 'on' : 'off'); } catch (e) {}
     refreshToggles();
-    if (soundOn) sounds.success();
+    if (soundOn) sounds.scan();
   };
   $('voiceBtn').onclick = function () {
     voiceOn = !voiceOn;
@@ -3833,14 +3834,8 @@ app.get('/resident/aid', authenticateToken, requireRole(['Resident']), async (re
     .select('*, aid_programs(*)').eq('resident_id', req.user.resident_id).order('created_at', { ascending: false });
 
   const { data: openPrograms } = await supabase.from('aid_programs').select('*').eq('status', 'Open').order('created_at', { ascending: false });
-  const openIds = (openPrograms || []).map(p => p.id);
-
-  let allBens = [];
-  if (openIds.length) {
-    const { data } = await supabase.from('aid_beneficiaries')
-      .select('program_id, resident_id, status, residents(first_name, last_name, puroks(name))').in('program_id', openIds);
-    allBens = data || [];
-  }
+  // Privacy: residents only ever see their own beneficiary records (never other residents' names)
+  const myProgramIds = new Set((mine || []).map(m => m.program_id));
 
   const pendingMine = (mine || []).filter(m => m.status === 'Pending' && m.aid_programs && m.aid_programs.status === 'Open');
 
@@ -3877,27 +3872,17 @@ app.get('/resident/aid', authenticateToken, requireRole(['Resident']), async (re
     </div>
 
     <div class="card card-custom p-4">
-      <h5 class="fw-bold text-primary-blue mb-3"><i class="bi bi-people me-2"></i>Current Aid Programs & Beneficiaries</h5>
-      ${(openPrograms || []).map(p => {
-        const list = allBens.filter(b => b.program_id === p.id);
-        return `
-          <div class="mb-4">
-            <h6 class="fw-bold text-accent-green">${escHtml(p.title)} <small class="text-muted">(${list.filter(b => b.status === 'Claimed').length} / ${list.length} claimed)</small></h6>
-            <div class="table-responsive">
-              <table class="table table-sm align-middle">
-                <thead class="table-light"><tr><th>Name</th><th>Purok</th><th>Status</th></tr></thead>
-                <tbody>
-                  ${list.map(b => `
-                    <tr class="${b.resident_id === req.user.resident_id ? 'table-success fw-bold' : ''}">
-                      <td>${b.residents ? `${escHtml(b.residents.first_name)} ${escHtml(b.residents.last_name)}` : '-'}${b.resident_id === req.user.resident_id ? ' (You)' : ''}</td>
-                      <td>${b.residents && b.residents.puroks ? escHtml(b.residents.puroks.name) : '-'}</td>
-                      <td><span class="badge ${b.status === 'Claimed' ? 'bg-success' : 'bg-warning text-dark'}">${escHtml(b.status)}</span></td>
-                    </tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No beneficiaries listed yet.</td></tr>'}
-                </tbody>
-              </table>
-            </div>
-          </div>`;
-      }).join('') || '<p class="text-muted">No open aid programs right now.</p>'}
+      <h5 class="fw-bold text-primary-blue mb-3"><i class="bi bi-megaphone me-2"></i>Current Aid Programs</h5>
+      ${(openPrograms || []).map(p => `
+        <div class="mb-3 pb-3 border-bottom">
+          <div class="d-flex justify-content-between align-items-start">
+            <h6 class="fw-bold text-accent-green mb-1">${escHtml(p.title)}</h6>
+            ${myProgramIds.has(p.id) ? '<span class="badge bg-success">You are a beneficiary</span>' : ''}
+          </div>
+          <span class="badge bg-info text-dark mb-1">${escHtml(p.aid_type)}</span>
+          <p class="small text-muted mb-1">${escHtml(p.description || '')}</p>
+          <p class="small mb-0"><i class="bi bi-calendar3 me-1"></i>${escHtml(p.distribution_date || 'Date to be announced')} &nbsp; <i class="bi bi-geo-alt me-1"></i>${escHtml(p.location || 'Barangay Hall')}</p>
+        </div>`).join('') || '<p class="text-muted">No open aid programs right now.</p>'}
     </div>
   `;
 
