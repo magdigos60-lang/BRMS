@@ -41,10 +41,18 @@ app.use(cors());
 // ==========================================
 // MIDDLEWARES (Auth & Role Validation)
 // ==========================================
+const redirectToLogin = (req, res) => {
+  // Remember scanner pages so staff land back on them after logging in
+  if (req.method === 'GET' && /^\/(scan|scanner)(\?.*)?$/.test(req.originalUrl)) {
+    res.cookie('return_to', req.originalUrl, { httpOnly: true, maxAge: 10 * 60 * 1000 });
+  }
+  return res.redirect('/login');
+};
+
 const authenticateToken = async (req, res, next) => {
   const token = req.cookies.token || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
   if (!token) {
-    if (req.accepts('html')) return res.redirect('/login');
+    if (req.accepts('html')) return redirectToLogin(req, res);
     return res.status(401).json({ success: false, message: 'Authentication required.' });
   }
 
@@ -53,14 +61,14 @@ const authenticateToken = async (req, res, next) => {
     const { data: user, error } = await supabase.from('users').select('*').eq('id', decoded.userId).single();
     if (error || !user || user.status !== 'Active') {
       res.clearCookie('token');
-      if (req.accepts('html')) return res.redirect('/login');
+      if (req.accepts('html')) return redirectToLogin(req, res);
       return res.status(403).json({ success: false, message: 'User account disabled or invalid.' });
     }
     req.user = user;
     next();
   } catch (err) {
     res.clearCookie('token');
-    if (req.accepts('html')) return res.redirect('/login');
+    if (req.accepts('html')) return redirectToLogin(req, res);
     return res.status(403).json({ success: false, message: 'Session expired or invalid.' });
   }
 };
@@ -423,6 +431,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
     { id: 'soloparents', label: 'Solo Parents', icon: 'bi-person-badge', link: '/admin/solo-parents' },
     { id: 'id-gen', label: 'Barangay ID Gen', icon: 'bi-card-heading', link: '/admin/id-generator' },
     { id: 'qr-scanner', label: 'QR Scanner', icon: 'bi-qr-code-scan', link: '/scanner' },
+    { id: 'scan-only', label: 'Scan-Only Page', icon: 'bi-upc-scan', link: '/scan' },
     { id: 'announcements', label: 'Announcements', icon: 'bi-megaphone', link: '/admin/announcements' },
     { id: 'events', label: 'Events', icon: 'bi-calendar-event', link: '/admin/events' },
     { id: 'officials', label: 'Barangay Officials', icon: 'bi-person-lines-fill', link: '/admin/officials' },
@@ -858,6 +867,9 @@ app.post('/api/login', async (req, res) => {
     await logActivity(user.id, 'User Login', 'User authenticated successfully.');
 
     if (['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff'].includes(user.role)) {
+      const returnTo = req.cookies.return_to;
+      res.clearCookie('return_to');
+      if (returnTo && /^\/(scan|scanner)(\?.*)?$/.test(returnTo)) return res.redirect(returnTo);
       return res.redirect('/admin/dashboard');
     } else {
       return res.redirect('/resident/dashboard');
@@ -1164,6 +1176,7 @@ app.get('/admin/dashboard', authenticateToken, requireRole(['Super Admin', 'Bara
             <a href="/admin/residents?filter=Pending" class="btn btn-outline-primary text-start"><i class="bi bi-person-check me-2"></i> Review Pending Registrations (${pendingRegistrations || 0})</a>
             <a href="/admin/certificates" class="btn btn-outline-success text-start"><i class="bi bi-file-earmark-check me-2"></i> Process Certificates (${pendingCerts || 0})</a>
             <a href="/scanner" class="btn btn-primary-custom text-center py-2 fw-bold text-white"><i class="bi bi-qr-code-scan me-2"></i> Open QR Verification Scanner</a>
+            <a href="/scan" class="btn btn-outline-primary text-start"><i class="bi bi-upc-scan me-2"></i> Scan-Only Page (full screen)</a>
           </div>
         </div>
       </div>
@@ -1690,68 +1703,8 @@ app.get('/admin/id-generator', authenticateToken, requireRole(['Super Admin', 'B
 });
 
 // ==========================================
-// ROUTE 9: QR SCANNER PAGE (With Camera Scanner Support)
+// ROUTE 9: QR SCANNER (page + JSON API defined further below, after STAFF_ROLES)
 // ==========================================
-app.get('/scanner', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
-  const settings = await getSettings();
-
-  const html = `
-    <div class="card card-custom p-4" style="max-width: 650px; margin: auto;">
-      <div class="text-center mb-3">
-        <i class="bi bi-qr-code-scan text-primary-blue fs-1"></i>
-        <h4 class="fw-bold text-primary-blue mt-2">QR Code Official Scanner & Camera</h4>
-        <p class="text-muted small">Verify resident authenticity via camera scanner or text token input.</p>
-      </div>
-
-      <!-- Camera live scanner container element -->
-      <div class="mb-4 text-center">
-        <div id="reader" style="width: 100%; max-width: 450px; margin: auto; display: none;" class="border rounded p-2 bg-black"></div>
-        <button type="button" id="toggleCameraBtn" class="btn btn-accent-custom text-white fw-bold mt-2" onclick="startCameraScanner()"><i class="bi bi-camera-video me-1"></i> Start Camera QR Scanner</button>
-      </div>
-
-      <form action="/api/scanner/verify" method="POST" class="mb-4">
-        <div class="input-group">
-          <input type="text" id="qr_token" name="qr_token" class="form-control" placeholder="Scan or enter QR Verification Token..." required>
-          <button type="submit" class="btn btn-primary-custom fw-bold text-white">Verify Record</button>
-        </div>
-      </form>
-
-      <div id="scannerResult" class="p-3 border rounded bg-light-green text-center">
-        <span class="text-muted"><i class="bi bi-info-circle me-1"></i> Ready for verification input or camera scan.</span>
-      </div>
-    </div>
-
-    <!-- Include html5-qrcode library for live camera scanning -->
-    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <script>
-      function startCameraScanner() {
-        const readerDiv = document.getElementById('reader');
-        readerDiv.style.display = 'block';
-        document.getElementById('toggleCameraBtn').style.display = 'none';
-
-        const html5QrCode = new Html5Qrcode("reader");
-        html5QrCode.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          (decodedText, decodedResult) => {
-            document.getElementById('qr_token').value = decodedText;
-            html5QrCode.stop().then(() => {
-              document.forms[0].submit();
-            }).catch(err => console.error(err));
-          },
-          (errorMessage) => {
-            // scanning continuously
-          }
-        ).catch(err => {
-          alert("Unable to access camera: " + err);
-        });
-      }
-    </script>
-  `;
-
-  res.send(renderAppLayout(req, 'qr-scanner', html, settings));
-});
-
 app.post('/api/scanner/verify', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff']), async (req, res) => {
   const { qr_token } = req.body;
   const settings = await getSettings();
@@ -3391,6 +3344,485 @@ app.post('/api/scanner/claim', authenticateToken, requireRole(STAFF_ROLES), asyn
   }
 
   res.send(renderAppLayout(req, 'qr-scanner', `${msg}<div class="text-center"><a href="/scanner" class="btn btn-primary-custom text-white">Scan Next Resident</a></div>`, settings));
+});
+
+
+// ==========================================
+// SCANNER: shared UI (beep + voice), scan-only page, JSON API
+// ==========================================
+const renderScannerBody = () => `
+<style>
+  #scanStatus { border-radius: 14px; padding: 16px; text-align: center; font-weight: 700; font-size: 1.15rem; transition: background .2s, color .2s; }
+  #scanStatus .st-icon { font-size: 2.2rem; display: block; margin-bottom: 4px; line-height: 1.1; }
+  #scanStatus small { display: block; font-weight: 500; margin-top: 2px; }
+  .st-idle { background: var(--light-blue); color: var(--primary-navy); }
+  .st-checking { background: #fff3cd; color: #664d03; }
+  .st-success { background: #d1e7dd; color: #0f5132; }
+  .st-error { background: #f8d7da; color: #842029; }
+  .st-warn { background: #fff3cd; color: #664d03; }
+  #scanStatus .btn-loading-spinner { width: 2rem; height: 2rem; border-width: 4px; margin: 0 auto 6px; display: block; }
+  #reader { width: 100%; max-width: 460px; margin: auto; display: none; }
+  .scan-photo { width: 84px; height: 84px; object-fit: cover; border-radius: 50%; background: #e9ecef; }
+  .scan-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; margin-bottom: 6px; background: #f1faf4; border: 1px solid #cfe8d7; }
+  .scan-row.done { background: #e9ecef; border-color: #dee2e6; opacity: .8; }
+</style>
+
+<div id="scanApp">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <h5 class="fw-bold text-primary-blue m-0"><i class="bi bi-qr-code-scan me-2"></i>QR Scanner</h5>
+    <div class="btn-group btn-group-sm">
+      <button type="button" id="soundBtn" class="btn btn-outline-primary"></button>
+      <button type="button" id="voiceBtn" class="btn btn-outline-primary"></button>
+    </div>
+  </div>
+
+  <div id="scanStatus" class="st-idle"></div>
+
+  <div class="text-center my-3">
+    <div id="reader" class="border rounded p-2 bg-black"></div>
+    <button type="button" id="camBtn" class="btn btn-accent-custom text-white fw-bold mt-2"><i class="bi bi-camera-video me-1"></i> Start Camera</button>
+  </div>
+
+  <form id="manualForm" class="mb-3" data-no-loader autocomplete="off">
+    <div class="input-group">
+      <input type="text" id="qr_token" class="form-control" placeholder="Scan with scanner gun or type QR token..." required>
+      <button type="submit" class="btn btn-primary-custom fw-bold text-white">Verify</button>
+    </div>
+  </form>
+
+  <div id="scanResult"></div>
+</div>
+
+<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var soundOn = true, voiceOn = true, busy = false, cam = null, camRunning = false, resumeTimer = null;
+  try {
+    soundOn = localStorage.getItem('scanSound') !== 'off';
+    voiceOn = localStorage.getItem('scanVoice') !== 'off';
+  } catch (e) {}
+
+  // ---------- Sound (beep) ----------
+  var audioCtx = null;
+  function getCtx() {
+    if (!audioCtx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  function tone(freq, start, dur, type, vol) {
+    var ctx = getCtx();
+    if (!ctx) return;
+    var o = ctx.createOscillator(), g = ctx.createGain(), t0 = ctx.currentTime + start;
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol || 0.25, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t0); o.stop(t0 + dur + 0.03);
+  }
+  var sounds = {
+    scan: function () { tone(1400, 0, 0.1, 'square', 0.12); },
+    success: function () { tone(880, 0, 0.12, 'sine', 0.3); tone(1320, 0.14, 0.22, 'sine', 0.3); },
+    warn: function () { tone(600, 0, 0.15, 'triangle', 0.3); tone(600, 0.22, 0.15, 'triangle', 0.3); },
+    error: function () { tone(220, 0, 0.35, 'sawtooth', 0.2); tone(170, 0.4, 0.4, 'sawtooth', 0.2); }
+  };
+  function beep(kind) {
+    if (soundOn && sounds[kind]) sounds[kind]();
+    if (navigator.vibrate) { try { navigator.vibrate(kind === 'error' ? [200, 100, 200] : 120); } catch (e) {} }
+  }
+
+  // ---------- Voice ----------
+  function speak(text) {
+    if (!voiceOn || !text || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en-US'; u.rate = 0.95; u.volume = 1;
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+
+  function refreshToggles() {
+    $('soundBtn').innerHTML = '<i class="bi ' + (soundOn ? 'bi-volume-up-fill' : 'bi-volume-mute-fill') + ' me-1"></i>Beep: ' + (soundOn ? 'On' : 'Off');
+    $('voiceBtn').innerHTML = '<i class="bi ' + (voiceOn ? 'bi-megaphone-fill' : 'bi-megaphone') + ' me-1"></i>Voice: ' + (voiceOn ? 'On' : 'Off');
+  }
+  $('soundBtn').onclick = function () {
+    soundOn = !soundOn;
+    try { localStorage.setItem('scanSound', soundOn ? 'on' : 'off'); } catch (e) {}
+    refreshToggles();
+    if (soundOn) sounds.success();
+  };
+  $('voiceBtn').onclick = function () {
+    voiceOn = !voiceOn;
+    try { localStorage.setItem('scanVoice', voiceOn ? 'on' : 'off'); } catch (e) {}
+    refreshToggles();
+    if (voiceOn) speak('Voice is on');
+    else if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  };
+  document.addEventListener('pointerdown', getCtx, { once: true }); // unlock audio on first touch
+
+  // ---------- Helpers ----------
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = text;
+    return e;
+  }
+  var ICONS = { idle: 'bi-qr-code-scan', success: 'bi-check-circle-fill', error: 'bi-x-octagon-fill', warn: 'bi-exclamation-triangle-fill' };
+  function setStatus(kind, title, sub) {
+    var box = $('scanStatus');
+    box.className = 'st-' + kind;
+    box.innerHTML = '';
+    if (kind === 'checking') box.appendChild(el('span', 'btn-loading-spinner'));
+    else box.appendChild(el('i', 'bi st-icon ' + ICONS[kind]));
+    box.appendChild(el('div', '', title));
+    if (sub) box.appendChild(el('small', '', sub));
+  }
+  function post(url, payload) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      if (r.status === 401 || r.status === 403) {
+        setTimeout(function () { window.location.href = '/login'; }, 2500);
+        return { success: false, level: 'error', message: 'Session expired. Please log in again.', spoken: 'Session expired. Please log in again.' };
+      }
+      return r.json();
+    }).catch(function () {
+      return { success: false, level: 'error', message: 'Network error. Check your connection.', spoken: 'Network error.' };
+    });
+  }
+  function announce(d) {
+    var kind = d.success ? 'success' : (d.level === 'warn' ? 'warn' : 'error');
+    setStatus(kind, d.message || '', d.detail || '');
+    beep(kind);
+    speak(d.spoken || d.message);
+    return kind;
+  }
+
+  // ---------- Camera ----------
+  function pauseScan() { if (cam && camRunning) { try { cam.pause(true); } catch (e) {} } }
+  function resumeScan() {
+    clearTimeout(resumeTimer);
+    if (cam && camRunning) { try { cam.resume(); } catch (e) {} }
+    busy = false;
+    $('scanResult').innerHTML = '';
+    setStatus('idle', 'Ready to scan', camRunning ? 'Point the camera at a resident QR code' : 'Start the camera or use a scanner');
+    $('qr_token').value = '';
+    $('qr_token').focus();
+  }
+  function startCamera() {
+    getCtx();
+    if (typeof Html5Qrcode === 'undefined') { setStatus('error', 'Camera library failed to load', 'Check your internet connection'); return; }
+    $('reader').style.display = 'block';
+    $('camBtn').disabled = true;
+    cam = cam || new Html5Qrcode('reader');
+    cam.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 250, height: 250 } }, function (text) {
+      if (busy) return;
+      pauseScan();
+      handleToken(String(text).trim());
+    }, function () {}).then(function () {
+      camRunning = true;
+      $('camBtn').disabled = false;
+      $('camBtn').innerHTML = '<i class="bi bi-stop-circle me-1"></i> Stop Camera';
+      resumeScan();
+    }).catch(function (err) {
+      $('reader').style.display = 'none';
+      $('camBtn').disabled = false;
+      setStatus('error', 'Unable to access camera', String(err));
+      beep('error');
+    });
+  }
+  function stopCamera() {
+    if (!cam) return;
+    cam.stop().then(function () {
+      camRunning = false;
+      $('reader').style.display = 'none';
+      $('camBtn').innerHTML = '<i class="bi bi-camera-video me-1"></i> Start Camera';
+      setStatus('idle', 'Camera stopped', 'Use a scanner or start the camera again');
+    }).catch(function () {});
+  }
+  $('camBtn').onclick = function () { if (camRunning) stopCamera(); else startCamera(); };
+
+  // ---------- Scan flow ----------
+  function handleToken(token) {
+    if (!token) return;
+    busy = true;
+    clearTimeout(resumeTimer);
+    $('scanResult').innerHTML = '';
+    beep('scan');
+    setStatus('checking', 'Checking...', '');
+    post('/api/scanner/lookup', { qr_token: token }).then(function (d) {
+      announce(d);
+      if (!d.success) { resumeTimer = setTimeout(resumeScan, 3000); return; }
+      renderResident(d, token);
+    });
+  }
+
+  function renderResident(d, token) {
+    var box = $('scanResult');
+    box.innerHTML = '';
+    var card = el('div', 'card card-custom p-3 border-success');
+    var top = el('div', 'd-flex align-items-center gap-3 mb-2');
+    if (d.resident.photo) { var img = el('img', 'scan-photo'); img.src = d.resident.photo; img.alt = ''; top.appendChild(img); }
+    else { top.appendChild(el('div', 'scan-photo d-flex align-items-center justify-content-center fs-2 text-secondary')).innerHTML = '<i class="bi bi-person-fill"></i>'; }
+    var info = el('div');
+    info.appendChild(el('h5', 'fw-bold m-0', d.resident.name));
+    info.appendChild(el('small', 'text-primary-blue fw-bold d-block', d.resident.number));
+    info.appendChild(el('small', 'd-block text-muted', 'Purok: ' + (d.resident.purok || '-')));
+    info.appendChild(el('small', 'd-block text-muted', d.resident.address || ''));
+    info.appendChild(el('span', 'badge bg-success mt-1', d.resident.status || 'Active'));
+    top.appendChild(info);
+    card.appendChild(top);
+
+    var pending = 0;
+    function itemDone() {
+      pending--;
+      if (pending <= 0) resumeTimer = setTimeout(resumeScan, 3500);
+    }
+    function addRow(parent, title, subtitle, btnLabel, btnIcon, run) {
+      pending++;
+      var row = el('div', 'scan-row');
+      var txt = el('div');
+      txt.appendChild(el('strong', '', title));
+      if (subtitle) txt.appendChild(el('small', 'd-block text-muted', subtitle));
+      row.appendChild(txt);
+      var btn = el('button', 'btn btn-sm btn-accent-custom text-white fw-bold');
+      btn.type = 'button';
+      btn.innerHTML = '<i class="bi ' + btnIcon + ' me-1"></i>' + btnLabel;
+      btn.onclick = function () {
+        if (!window.confirm(btnLabel + ' - are you sure?')) return;
+        clearTimeout(resumeTimer);
+        btn.disabled = true;
+        btn.innerHTML = '<span class="btn-loading-spinner"></span>Working...';
+        setStatus('checking', 'Processing...', '');
+        run().then(function (r) {
+          var kind = announce(r);
+          if (r.success || r.final) {
+            row.className = 'scan-row done';
+            var tag = el('span', 'badge ' + (r.success ? 'bg-success' : 'bg-secondary'), r.badge || (r.success ? 'Done' : 'Closed'));
+            btn.replaceWith(tag);
+            itemDone();
+          } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi ' + btnIcon + ' me-1"></i>' + btnLabel;
+          }
+        });
+      };
+      row.appendChild(btn);
+      parent.appendChild(row);
+    }
+
+    if (d.certificates.length) {
+      var cwrap = el('div', 'mt-2');
+      cwrap.appendChild(el('h6', 'fw-bold text-primary-blue', 'Certificates Ready for Release'));
+      d.certificates.forEach(function (c) {
+        addRow(cwrap, c.type, c.number, 'Mark Released', 'bi-file-earmark-check', function () {
+          return post('/api/scanner/release-certificate', { certificate_id: c.id, qr_token: token });
+        });
+      });
+      card.appendChild(cwrap);
+    }
+    var awrap = el('div', 'mt-2');
+    awrap.appendChild(el('h6', 'fw-bold text-accent-green', 'Aid Available to Claim'));
+    if (d.aid.length) {
+      d.aid.forEach(function (a) {
+        addRow(awrap, a.title, a.type, 'Release Aid', 'bi-check2-circle', function () {
+          return post('/api/scanner/claim-json', { beneficiary_id: a.id, qr_token: token });
+        });
+      });
+    } else {
+      awrap.appendChild(el('p', 'text-muted small m-0', 'No unclaimed aid for this resident.'));
+    }
+    card.appendChild(awrap);
+
+    var next = el('button', 'btn btn-primary-custom text-white fw-bold w-100 mt-3');
+    next.type = 'button';
+    next.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i> Scan Next';
+    next.onclick = resumeScan;
+    card.appendChild(next);
+    box.appendChild(card);
+  }
+
+  $('manualForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    getCtx();
+    if (busy) return;
+    handleToken($('qr_token').value.trim());
+  });
+
+  refreshToggles();
+  setStatus('idle', 'Ready to scan', 'Start the camera or use a scanner');
+  $('qr_token').focus();
+})();
+</script>
+`;
+
+// Embedded version (inside the admin layout)
+app.get('/scanner', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  const settings = await getSettings();
+  const html = `
+    <div class="card card-custom p-4 mb-3" style="max-width: 650px; margin: auto;">
+      ${renderScannerBody()}
+    </div>
+    <div class="card card-custom p-3" style="max-width: 650px; margin: auto;">
+      <h6 class="fw-bold text-primary-blue"><i class="bi bi-link-45deg me-1"></i> Scan-Only Link</h6>
+      <p class="small text-muted mb-2">A clean full-screen page with only the scanner. Staff must still be logged in. Bookmark it or add it to the phone home screen.</p>
+      <div class="input-group input-group-sm">
+        <input type="text" id="scanLinkField" class="form-control" readonly>
+        <button type="button" class="btn btn-outline-primary" id="copyScanLink"><i class="bi bi-clipboard me-1"></i>Copy</button>
+        <a href="/scan" target="_blank" class="btn btn-primary-custom text-white"><i class="bi bi-box-arrow-up-right me-1"></i>Open</a>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var f = document.getElementById('scanLinkField');
+        f.value = window.location.origin + '/scan';
+        document.getElementById('copyScanLink').onclick = function () {
+          f.select();
+          if (navigator.clipboard) navigator.clipboard.writeText(f.value);
+          else document.execCommand('copy');
+          this.innerHTML = '<i class="bi bi-check2 me-1"></i>Copied';
+        };
+      })();
+    </script>
+  `;
+  res.send(renderAppLayout(req, 'qr-scanner', html, settings));
+});
+
+// Scan-only page (no sidebar, phone/kiosk friendly)
+app.get('/scan', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  const settings = await getSettings();
+  res.send(`
+    ${renderSystemHead('Scanner')}
+    <div class="container py-3" style="max-width: 640px;">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <div class="d-flex align-items-center">
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle" style="width:44px;height:44px;object-fit:cover;">` : '<i class="bi bi-building fs-2 me-2 text-primary-blue"></i>'}
+          <div>
+            <div class="fw-bold text-primary-blue lh-1">${escHtml(settings.barangay_name || 'Barangay Portal')}</div>
+            <small class="text-muted">Scan-Only Mode</small>
+          </div>
+        </div>
+        <div class="d-flex gap-2">
+          <a href="/admin/dashboard" class="btn btn-sm btn-outline-secondary"><i class="bi bi-house"></i></a>
+          <a href="/logout" class="btn btn-sm btn-outline-danger"><i class="bi bi-box-arrow-right"></i></a>
+        </div>
+      </div>
+      <div class="card card-custom p-3">
+        ${renderScannerBody()}
+      </div>
+    </div>
+    ${renderSystemFooter()}
+  `);
+});
+
+// JSON: look up a resident from a scanned QR token
+app.post('/api/scanner/lookup', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  const token = String(req.body.qr_token || '').trim();
+  if (!token) {
+    return res.json({ success: false, level: 'error', message: 'No QR code detected.', spoken: 'No code detected.' });
+  }
+  try {
+    const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('qr_token', token).maybeSingle();
+    if (!resident) {
+      return res.json({
+        success: false, level: 'error',
+        message: 'Verification failed', detail: 'No resident matches this QR code.',
+        spoken: 'Verification failed. Resident not found.'
+      });
+    }
+
+    const { data: certRows } = await supabase.from('certificate_requests')
+      .select('id, certificate_type, request_number').eq('resident_id', resident.id).eq('status', 'READY_FOR_RELEASE');
+    const { data: aidRows } = await supabase.from('aid_beneficiaries')
+      .select('id, aid_programs(title, aid_type, status)').eq('resident_id', resident.id).eq('status', 'Pending');
+
+    const certificates = (certRows || []).map(c => ({ id: c.id, type: c.certificate_type, number: c.request_number }));
+    const aid = (aidRows || []).filter(a => a.aid_programs && a.aid_programs.status === 'Open')
+      .map(a => ({ id: a.id, title: a.aid_programs.title, type: a.aid_programs.aid_type }));
+
+    const name = `${resident.first_name} ${resident.last_name}`;
+    let spoken = `${name} verified.`;
+    if (aid.length) spoken += ` ${aid.length} aid ${aid.length === 1 ? 'item' : 'items'} available to claim.`;
+    if (certificates.length) spoken += ` ${certificates.length} ${certificates.length === 1 ? 'certificate' : 'certificates'} ready for release.`;
+
+    res.json({
+      success: true, level: 'ok',
+      message: 'Resident verified', detail: name,
+      spoken,
+      resident: {
+        name, number: resident.resident_number, address: resident.address,
+        purok: resident.puroks ? resident.puroks.name : '', status: resident.resident_status,
+        photo: resident.photo_url || ''
+      },
+      certificates, aid
+    });
+  } catch (err) {
+    console.error('Scanner lookup error:', err);
+    res.json({ success: false, level: 'error', message: 'Server error', detail: 'Please try again.', spoken: 'Server error. Please try again.' });
+  }
+});
+
+// JSON: release aid after a verified scan
+app.post('/api/scanner/claim-json', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  try {
+    const { beneficiary_id, qr_token } = req.body;
+    const { data: resident } = await supabase.from('residents').select('id, first_name, last_name').eq('qr_token', String(qr_token || '')).maybeSingle();
+    const { data: ben } = await supabase.from('aid_beneficiaries').select('*, aid_programs(title, status)').eq('id', beneficiary_id).maybeSingle();
+
+    if (!resident || !ben || ben.resident_id !== resident.id) {
+      return res.json({ success: false, level: 'error', message: 'Claim failed', detail: 'The scanned ID does not match this aid record.', spoken: 'Claim failed. ID does not match.' });
+    }
+    if (!ben.aid_programs || ben.aid_programs.status !== 'Open') {
+      return res.json({ success: false, level: 'warn', final: true, badge: 'Closed', message: 'Program closed', detail: 'This aid program is no longer open.', spoken: 'Program closed.' });
+    }
+    const name = `${resident.first_name} ${resident.last_name}`;
+    const { data: updated } = await supabase.from('aid_beneficiaries')
+      .update({ status: 'Claimed', claimed_at: new Date(), claimed_by: req.user.id })
+      .eq('id', ben.id).eq('status', 'Pending').select();
+    if (updated && updated.length) {
+      await logActivity(req.user.id, 'Aid Claimed', `${name} claimed "${ben.aid_programs.title}" via QR verification`);
+      return res.json({ success: true, level: 'ok', badge: 'Released', message: 'Aid released', detail: `${name} - ${ben.aid_programs.title}`, spoken: `Aid released to ${name}. ${ben.aid_programs.title}.` });
+    }
+    res.json({ success: false, level: 'warn', final: true, badge: 'Already claimed', message: 'Already claimed', detail: `${name} already received this aid.`, spoken: `Already claimed. ${name} already received this aid.` });
+  } catch (err) {
+    console.error('Scanner claim error:', err);
+    res.json({ success: false, level: 'error', message: 'Server error', detail: 'Please try again.', spoken: 'Server error. Please try again.' });
+  }
+});
+
+// JSON: mark a certificate as released after a verified scan
+app.post('/api/scanner/release-certificate', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  try {
+    const { certificate_id, qr_token } = req.body;
+    const { data: resident } = await supabase.from('residents').select('id, first_name, last_name').eq('qr_token', String(qr_token || '')).maybeSingle();
+    if (!resident) {
+      return res.json({ success: false, level: 'error', message: 'Release failed', detail: 'Resident not found.', spoken: 'Release failed. Resident not found.' });
+    }
+    const { data: cert } = await supabase.from('certificate_requests')
+      .select('id, certificate_type, request_number, status').eq('id', certificate_id).eq('resident_id', resident.id).maybeSingle();
+    if (!cert) {
+      return res.json({ success: false, level: 'error', message: 'Release failed', detail: 'Certificate does not belong to this resident.', spoken: 'Release failed. Certificate does not match.' });
+    }
+    const name = `${resident.first_name} ${resident.last_name}`;
+    if (cert.status !== 'READY_FOR_RELEASE') {
+      return res.json({ success: false, level: 'warn', final: true, badge: 'Already released', message: 'Already released', detail: `${cert.certificate_type} is not waiting for release.`, spoken: 'Already released.' });
+    }
+    await supabase.from('certificate_requests').update({ status: 'RELEASED', updated_at: new Date() }).eq('id', cert.id).eq('status', 'READY_FOR_RELEASE');
+    await logActivity(req.user.id, 'Certificate Released', `${cert.certificate_type} (${cert.request_number}) released to ${name} via QR verification`);
+    res.json({ success: true, level: 'ok', badge: 'Released', message: 'Certificate released', detail: `${name} - ${cert.certificate_type}`, spoken: `${cert.certificate_type} released to ${name}.` });
+  } catch (err) {
+    console.error('Scanner certificate error:', err);
+    res.json({ success: false, level: 'error', message: 'Server error', detail: 'Please try again.', spoken: 'Server error. Please try again.' });
+  }
 });
 
 // ---------- RESIDENT PORTAL: my aid + beneficiary lists ----------
