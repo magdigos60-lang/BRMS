@@ -3426,8 +3426,11 @@ const renderScannerBody = () => `
     o.start(t0); o.stop(t0 + dur + 0.03);
   }
   var sounds = {
-    // Loud buzzer: two slightly detuned low square/sawtooth waves for a harsh "BZZZT"
-    scan: function () { tone(220, 0, 0.35, 'square', 0.6); tone(226, 0, 0.35, 'sawtooth', 0.4); },
+    // Loud double-pulse buzzer: "BZZ-BZZ" (two short harsh bursts at ~440 Hz)
+    scan: function () {
+      tone(440, 0, 0.14, 'square', 0.7); tone(447, 0, 0.14, 'sawtooth', 0.3);
+      tone(440, 0.2, 0.14, 'square', 0.7); tone(447, 0.2, 0.14, 'sawtooth', 0.3);
+    },
     success: function () { tone(880, 0, 0.12, 'sine', 0.3); tone(1320, 0.14, 0.22, 'sine', 0.3); },
     warn: function () { tone(600, 0, 0.15, 'triangle', 0.3); tone(600, 0.22, 0.15, 'triangle', 0.3); },
     error: function () { tone(220, 0, 0.35, 'sawtooth', 0.2); tone(170, 0.4, 0.4, 'sawtooth', 0.2); }
