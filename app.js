@@ -287,6 +287,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
     { id: 'certificates', label: 'Certificate Requests', icon: 'bi-file-earmark-text', link: '/admin/certificates' },
     { id: 'blotters', label: 'Blotter Management', icon: 'bi-shield-exclamation', link: '/admin/blotters' },
     { id: 'assistance', label: 'Assistance Requests', icon: 'bi-hand-thumbs-up', link: '/admin/assistance' },
+    { id: 'aid', label: 'Aid Distribution', icon: 'bi-box2-heart', link: '/admin/aid' },
     { id: 'appointments', label: 'Appointments', icon: 'bi-calendar-check', link: '/admin/appointments' },
     { id: 'seniors', label: 'Senior Citizens', icon: 'bi-person-heart', link: '/admin/seniors' },
     { id: 'pwds', label: 'PWD Management', icon: 'bi-universal-access', link: '/admin/pwds' },
@@ -310,6 +311,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
     { id: 'res-appointments', label: 'Book Appointment', icon: 'bi-calendar-plus', link: '/resident/appointments' },
     { id: 'res-complaints', label: 'Submit Complaint', icon: 'bi-exclamation-triangle', link: '/resident/complaints' },
     { id: 'res-assistance', label: 'Request Assistance', icon: 'bi-heart-pulse', link: '/resident/assistance' },
+    { id: 'res-aid', label: 'My Aid & Relief', icon: 'bi-box2-heart', link: '/resident/aid' },
     { id: 'res-announcements', label: 'Announcements', icon: 'bi-bell', link: '/resident/announcements' },
     { id: 'res-contacts', label: 'Emergency Contacts', icon: 'bi-telephone', link: '/resident/emergency-contacts' },
     { id: 'res-feedback', label: 'Submit Feedback', icon: 'bi-chat-left-text', link: '/resident/feedback' },
@@ -1630,6 +1632,8 @@ app.post('/api/scanner/verify', authenticateToken, requireRole(['Super Admin', '
   let resultHtml = '';
   if (resident) {
     const { data: cert } = await supabase.from('certificate_requests').select('*').eq('resident_id', resident.id).eq('status', 'READY_FOR_RELEASE').single();
+    const { data: aidRows } = await supabase.from('aid_beneficiaries').select('*, aid_programs(title, aid_type, status, location)').eq('resident_id', resident.id).eq('status', 'Pending');
+    const pendingAid = (aidRows || []).filter(a => a.aid_programs && a.aid_programs.status === 'Open');
 
     resultHtml = `
       <div class="card card-custom p-4 border-success">
@@ -1656,6 +1660,20 @@ app.post('/api/scanner/verify', authenticateToken, requireRole(['Super Admin', '
             ` : '<p class="text-muted small mt-2">No pending certificates ready for release.</p>'}
           </div>
         </div>
+
+        <hr>
+        <h6 class="fw-bold text-accent-green"><i class="bi bi-box2-heart me-1"></i> Aid Available to Claim</h6>
+        ${pendingAid.length ? pendingAid.map(a => `
+          <form action="/api/scanner/claim" method="POST" class="alert alert-success d-flex justify-content-between align-items-center p-2 mb-2">
+            <div>
+              <strong>${escHtml(a.aid_programs.title)}</strong>
+              <small class="d-block text-muted">${escHtml(a.aid_programs.aid_type)}</small>
+            </div>
+            <input type="hidden" name="beneficiary_id" value="${a.id}">
+            <input type="hidden" name="qr_token" value="${escHtml(qr_token)}">
+            <button type="submit" class="btn btn-sm btn-accent-custom text-white fw-bold" onclick="return confirm('Release this aid to the resident?')"><i class="bi bi-check2-circle me-1"></i> Release Aid</button>
+          </form>
+        `).join('') : '<p class="text-muted small">No unclaimed aid for this resident.</p>'}
         <div class="text-center mt-3">
           <a href="/scanner" class="btn btn-sm btn-outline-secondary">Scan Another Code</a>
         </div>
@@ -2455,8 +2473,11 @@ app.get('/resident/dashboard', authenticateToken, requireRole(['Resident']), asy
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
   const { data: announcements } = await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(3);
+  const { data: myAid } = await supabase.from('aid_beneficiaries').select('id, aid_programs(status)').eq('resident_id', req.user.resident_id).eq('status', 'Pending');
+  const aidReady = (myAid || []).filter(a => a.aid_programs && a.aid_programs.status === 'Open').length;
 
   const html = `
+    ${aidReady ? `<div class="alert alert-success d-flex justify-content-between align-items-center"><span><i class="bi bi-gift-fill me-2"></i><strong>You have ${aidReady} aid package${aidReady > 1 ? 's' : ''} ready to claim.</strong> Bring your Barangay ID for QR scanning.</span><a href="/resident/aid" class="btn btn-sm btn-accent-custom text-white fw-bold">View Details</a></div>` : ''}
     <div class="row g-3 mb-4">
       <div class="col-md-12">
         <div class="card card-custom p-4 bg-primary-blue text-white">
@@ -2954,6 +2975,372 @@ app.post('/api/resident/feedback/submit', authenticateToken, requireRole(['Resid
   const { service_type, rating, comments } = req.body;
   await supabase.from('feedback').insert([{ resident_id: req.user.resident_id, service_type, rating: parseInt(rating), comments }]);
   res.redirect('/resident/dashboard');
+});
+
+// ==========================================
+// ROUTE 21: AID / RELIEF DISTRIBUTION (Admin setup, Resident portal view, QR claiming)
+// ==========================================
+const STAFF_ROLES = ['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff'];
+const AID_MANAGER_ROLES = ['Super Admin', 'Barangay Admin', 'Barangay Secretary'];
+
+const escHtml = (v) => String(v === null || v === undefined ? '' : v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+// ---------- ADMIN: list programs ----------
+app.get('/admin/aid', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  const settings = await getSettings();
+  const { data: programs } = await supabase.from('aid_programs').select('*').order('created_at', { ascending: false });
+  const { data: bens } = await supabase.from('aid_beneficiaries').select('program_id, status');
+
+  const stats = {};
+  (bens || []).forEach(b => {
+    stats[b.program_id] = stats[b.program_id] || { total: 0, claimed: 0 };
+    stats[b.program_id].total++;
+    if (b.status === 'Claimed') stats[b.program_id].claimed++;
+  });
+
+  const canManage = AID_MANAGER_ROLES.includes(req.user.role);
+
+  const html = `
+    <div class="card card-custom p-4">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-box2-heart me-2"></i>Aid & Relief Distribution</h4>
+        ${canManage ? `<button class="btn btn-accent-custom fw-bold text-white" data-bs-toggle="modal" data-bs-target="#addAidModal"><i class="bi bi-plus-lg me-1"></i> New Aid Program</button>` : ''}
+      </div>
+      <p class="text-muted small">Create an aid program, choose the beneficiaries, and residents will see it in their portal. Claiming is verified by scanning the QR code on the resident's Barangay ID in the <a href="/scanner">QR Scanner</a>.</p>
+
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Aid Program</th>
+              <th>Type</th>
+              <th>Distribution</th>
+              <th>Claimed / Beneficiaries</th>
+              <th>Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(programs || []).map(p => {
+              const s = stats[p.id] || { total: 0, claimed: 0 };
+              return `
+                <tr>
+                  <td class="fw-bold text-primary-blue">${escHtml(p.title)}</td>
+                  <td><span class="badge bg-info text-dark">${escHtml(p.aid_type)}</span></td>
+                  <td class="small">${escHtml(p.distribution_date || '-')}<br><span class="text-muted">${escHtml(p.location || '')}</span></td>
+                  <td><span class="badge bg-accent-green text-white">${s.claimed} / ${s.total}</span></td>
+                  <td><span class="badge ${p.status === 'Open' ? 'bg-success' : 'bg-secondary'}">${escHtml(p.status)}</span></td>
+                  <td class="text-end"><a href="/admin/aid/${p.id}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i> Manage</a></td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="6" class="text-center py-4 text-muted">No aid programs yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Modal: New Aid Program -->
+    <div class="modal fade" id="addAidModal" tabindex="-1">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <form action="/api/admin/aid/add" method="POST">
+            <div class="modal-header bg-primary-blue text-white">
+              <h5 class="modal-title fw-bold">New Aid Program</h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="row g-3">
+                <div class="col-md-8"><label class="form-label">Aid Title *</label><input type="text" name="title" class="form-control" required placeholder="e.g. Rice & Grocery Relief Pack"></div>
+                <div class="col-md-4">
+                  <label class="form-label">Aid Type *</label>
+                  <select name="aid_type" class="form-select" required>
+                    <option>Food Pack</option><option>Cash Assistance</option><option>Medical</option><option>Educational</option><option>Livelihood</option><option>Other</option>
+                  </select>
+                </div>
+                <div class="col-md-6"><label class="form-label">Distribution Date</label><input type="date" name="distribution_date" class="form-control"></div>
+                <div class="col-md-6"><label class="form-label">Claiming Location</label><input type="text" name="location" class="form-control" placeholder="e.g. Barangay Hall"></div>
+                <div class="col-12"><label class="form-label">Description / Claiming Instructions</label><textarea name="description" class="form-control" rows="3" placeholder="e.g. Bring your Barangay ID. The QR code will be scanned at the claiming booth."></textarea></div>
+                <div class="col-12">
+                  <label class="form-label">Add Beneficiaries Automatically</label>
+                  <select name="group" class="form-select">
+                    <option value="none">None - I'll pick residents manually afterwards</option>
+                    <option value="all">All Active Residents</option>
+                    <option value="seniors">Senior Citizens</option>
+                    <option value="pwd">Persons with Disability (PWD)</option>
+                    <option value="solo">Solo Parents</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-primary-custom text-white">Create Aid Program</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `;
+
+  res.send(renderAppLayout(req, 'aid', html, settings));
+});
+
+app.post('/api/admin/aid/add', authenticateToken, requireRole(AID_MANAGER_ROLES), async (req, res) => {
+  try {
+    const { title, aid_type, distribution_date, location, description, group } = req.body;
+    const { data: program, error } = await supabase.from('aid_programs').insert([{
+      title, aid_type, distribution_date: distribution_date || null, location, description, status: 'Open', created_by: req.user.id
+    }]).select().single();
+    if (error) throw error;
+
+    let q = supabase.from('residents').select('id').eq('resident_status', 'Active');
+    if (group === 'seniors') q = q.eq('is_senior_citizen', true);
+    else if (group === 'pwd') q = q.eq('is_pwd', true);
+    else if (group === 'solo') q = q.eq('is_solo_parent', true);
+
+    if (['all', 'seniors', 'pwd', 'solo'].includes(group)) {
+      const { data: residents } = await q;
+      const rows = (residents || []).map(r => ({ program_id: program.id, resident_id: r.id, status: 'Pending' }));
+      if (rows.length) await supabase.from('aid_beneficiaries').insert(rows);
+    }
+
+    await logActivity(req.user.id, 'Create Aid Program', `Created aid program: ${title}`);
+    res.redirect(`/admin/aid/${program.id}`);
+  } catch (err) {
+    console.error('Create aid error:', err);
+    res.status(500).send('Error creating aid program: ' + err.message);
+  }
+});
+
+// ---------- ADMIN: manage one program ----------
+app.get('/admin/aid/:id', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  const settings = await getSettings();
+  const { data: program } = await supabase.from('aid_programs').select('*').eq('id', req.params.id).single();
+  if (!program) return res.status(404).send('Aid program not found');
+
+  const { data: bens } = await supabase.from('aid_beneficiaries')
+    .select('*, residents(first_name, last_name, resident_number, puroks(name))')
+    .eq('program_id', program.id).order('created_at', { ascending: true });
+
+  const existingIds = new Set((bens || []).map(b => b.resident_id));
+  const { data: allResidents } = await supabase.from('residents').select('id, first_name, last_name, resident_number').eq('resident_status', 'Active').order('last_name', { ascending: true });
+  const available = (allResidents || []).filter(r => !existingIds.has(r.id));
+
+  const claimed = (bens || []).filter(b => b.status === 'Claimed').length;
+  const canManage = AID_MANAGER_ROLES.includes(req.user.role);
+
+  const html = `
+    <div class="card card-custom p-4 mb-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <a href="/admin/aid" class="small text-decoration-none"><i class="bi bi-arrow-left"></i> Back to Aid Programs</a>
+          <h4 class="fw-bold text-primary-blue mt-1 mb-1">${escHtml(program.title)}</h4>
+          <span class="badge bg-info text-dark">${escHtml(program.aid_type)}</span>
+          <span class="badge ${program.status === 'Open' ? 'bg-success' : 'bg-secondary'}">${escHtml(program.status)}</span>
+          <p class="text-muted small mt-2 mb-0">${escHtml(program.description || '')}</p>
+          <p class="small mt-1 mb-0"><i class="bi bi-calendar3 me-1"></i>${escHtml(program.distribution_date || 'Date to be announced')} &nbsp; <i class="bi bi-geo-alt me-1"></i>${escHtml(program.location || 'Barangay Hall')}</p>
+        </div>
+        <div class="text-end">
+          <h3 class="fw-bold text-accent-green m-0">${claimed} / ${(bens || []).length}</h3>
+          <small class="text-muted">claimed</small>
+          <div class="mt-2 d-flex gap-2 justify-content-end">
+            <a href="/scanner" class="btn btn-sm btn-primary-custom text-white"><i class="bi bi-qr-code-scan me-1"></i> Open Scanner</a>
+            ${canManage ? `
+              <form action="/api/admin/aid/${program.id}/status" method="POST" class="d-inline">
+                <input type="hidden" name="status" value="${program.status === 'Open' ? 'Closed' : 'Open'}">
+                <button class="btn btn-sm btn-outline-secondary" onclick="return confirm('${program.status === 'Open' ? 'Close' : 'Reopen'} this aid program?')">${program.status === 'Open' ? 'Close Program' : 'Reopen'}</button>
+              </form>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    ${canManage ? `
+    <div class="card card-custom p-4 mb-3 no-print">
+      <h6 class="fw-bold text-accent-green mb-2">Add Beneficiaries</h6>
+      <form action="/api/admin/aid/${program.id}/beneficiaries" method="POST" class="row g-2">
+        <div class="col-md-9">
+          <select name="resident_ids" class="form-select" multiple size="5" required>
+            ${available.map(r => `<option value="${r.id}">${escHtml(r.last_name)}, ${escHtml(r.first_name)} (${escHtml(r.resident_number)})</option>`).join('')}
+          </select>
+          <small class="text-muted">Hold Ctrl / Cmd to select multiple residents.</small>
+        </div>
+        <div class="col-md-3 d-grid align-content-start">
+          <button class="btn btn-accent-custom text-white fw-bold" ${available.length ? '' : 'disabled'}><i class="bi bi-person-plus me-1"></i> Add Selected</button>
+        </div>
+      </form>
+    </div>` : ''}
+
+    <div class="card card-custom p-4">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="fw-bold text-primary-blue m-0">Beneficiary List</h6>
+        <button class="btn btn-sm btn-outline-primary no-print" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print List</button>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr><th>Resident ID</th><th>Name</th><th>Purok</th><th>Status</th><th>Claimed At</th><th class="text-end no-print">Action</th></tr>
+          </thead>
+          <tbody>
+            ${(bens || []).map(b => `
+              <tr>
+                <td class="fw-bold text-primary-blue">${b.residents ? escHtml(b.residents.resident_number) : '-'}</td>
+                <td>${b.residents ? `${escHtml(b.residents.first_name)} ${escHtml(b.residents.last_name)}` : 'Unknown'}</td>
+                <td>${b.residents && b.residents.puroks ? escHtml(b.residents.puroks.name) : '-'}</td>
+                <td><span class="badge ${b.status === 'Claimed' ? 'bg-success' : 'bg-warning text-dark'}">${escHtml(b.status)}</span></td>
+                <td class="small text-muted">${b.claimed_at ? new Date(b.claimed_at).toLocaleString() : '-'}</td>
+                <td class="text-end no-print">
+                  ${canManage && b.status !== 'Claimed' ? `
+                    <form action="/api/admin/aid/beneficiary/${b.id}/remove" method="POST" class="d-inline" onsubmit="return confirm('Remove this beneficiary?')">
+                      <button class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg"></i></button>
+                    </form>` : ''}
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" class="text-center py-4 text-muted">No beneficiaries yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  res.send(renderAppLayout(req, 'aid', html, settings));
+});
+
+app.post('/api/admin/aid/:id/beneficiaries', authenticateToken, requireRole(AID_MANAGER_ROLES), async (req, res) => {
+  try {
+    let ids = req.body.resident_ids || [];
+    if (!Array.isArray(ids)) ids = [ids];
+    const { data: existing } = await supabase.from('aid_beneficiaries').select('resident_id').eq('program_id', req.params.id);
+    const have = new Set((existing || []).map(e => e.resident_id));
+    const rows = ids.filter(id => !have.has(id)).map(id => ({ program_id: req.params.id, resident_id: id, status: 'Pending' }));
+    if (rows.length) await supabase.from('aid_beneficiaries').insert(rows);
+    await logActivity(req.user.id, 'Add Aid Beneficiaries', `Added ${rows.length} beneficiaries to aid program ${req.params.id}`);
+    res.redirect(`/admin/aid/${req.params.id}`);
+  } catch (err) {
+    res.status(500).send('Error adding beneficiaries: ' + err.message);
+  }
+});
+
+app.post('/api/admin/aid/beneficiary/:id/remove', authenticateToken, requireRole(AID_MANAGER_ROLES), async (req, res) => {
+  const { data: ben } = await supabase.from('aid_beneficiaries').select('program_id').eq('id', req.params.id).single();
+  await supabase.from('aid_beneficiaries').delete().eq('id', req.params.id).eq('status', 'Pending');
+  await logActivity(req.user.id, 'Remove Aid Beneficiary', `Removed beneficiary record ${req.params.id}`);
+  res.redirect(ben ? `/admin/aid/${ben.program_id}` : '/admin/aid');
+});
+
+app.post('/api/admin/aid/:id/status', authenticateToken, requireRole(AID_MANAGER_ROLES), async (req, res) => {
+  const status = req.body.status === 'Closed' ? 'Closed' : 'Open';
+  await supabase.from('aid_programs').update({ status }).eq('id', req.params.id);
+  await logActivity(req.user.id, 'Update Aid Program', `Set aid program ${req.params.id} to ${status}`);
+  res.redirect(`/admin/aid/${req.params.id}`);
+});
+
+// ---------- SCANNER: claim aid after QR verification ----------
+app.post('/api/scanner/claim', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  const settings = await getSettings();
+  const { beneficiary_id, qr_token } = req.body;
+
+  // Re-verify the scanned QR token so a claim can only be made with a valid ID scan
+  const { data: resident } = await supabase.from('residents').select('id, first_name, last_name, resident_status').eq('qr_token', qr_token).single();
+  const { data: ben } = await supabase.from('aid_beneficiaries').select('*, aid_programs(title, status)').eq('id', beneficiary_id).single();
+
+  let msg;
+  if (!resident || !ben || ben.resident_id !== resident.id) {
+    msg = `<div class="alert alert-danger text-center"><strong>Claim Failed!</strong><br>The scanned ID does not match this aid record.</div>`;
+  } else if (!ben.aid_programs || ben.aid_programs.status !== 'Open') {
+    msg = `<div class="alert alert-warning text-center"><strong>Program Closed.</strong><br>This aid program is no longer open for claiming.</div>`;
+  } else {
+    const { data: updated } = await supabase.from('aid_beneficiaries')
+      .update({ status: 'Claimed', claimed_at: new Date(), claimed_by: req.user.id })
+      .eq('id', ben.id).eq('status', 'Pending').select();
+    if (updated && updated.length) {
+      await logActivity(req.user.id, 'Aid Claimed', `${resident.first_name} ${resident.last_name} claimed "${ben.aid_programs.title}" via QR verification`);
+      msg = `<div class="alert alert-success text-center"><i class="bi bi-check-circle-fill fs-3 d-block mb-2"></i><strong>Aid Released!</strong><br>${escHtml(resident.first_name)} ${escHtml(resident.last_name)} claimed <strong>${escHtml(ben.aid_programs.title)}</strong>.</div>`;
+    } else {
+      msg = `<div class="alert alert-warning text-center"><strong>Already Claimed.</strong><br>This aid was already released to this resident.</div>`;
+    }
+  }
+
+  res.send(renderAppLayout(req, 'qr-scanner', `${msg}<div class="text-center"><a href="/scanner" class="btn btn-primary-custom text-white">Scan Next Resident</a></div>`, settings));
+});
+
+// ---------- RESIDENT PORTAL: my aid + beneficiary lists ----------
+app.get('/resident/aid', authenticateToken, requireRole(['Resident']), async (req, res) => {
+  const settings = await getSettings();
+
+  const { data: mine } = await supabase.from('aid_beneficiaries')
+    .select('*, aid_programs(*)').eq('resident_id', req.user.resident_id).order('created_at', { ascending: false });
+
+  const { data: openPrograms } = await supabase.from('aid_programs').select('*').eq('status', 'Open').order('created_at', { ascending: false });
+  const openIds = (openPrograms || []).map(p => p.id);
+
+  let allBens = [];
+  if (openIds.length) {
+    const { data } = await supabase.from('aid_beneficiaries')
+      .select('program_id, resident_id, status, residents(first_name, last_name, puroks(name))').in('program_id', openIds);
+    allBens = data || [];
+  }
+
+  const pendingMine = (mine || []).filter(m => m.status === 'Pending' && m.aid_programs && m.aid_programs.status === 'Open');
+
+  const html = `
+    ${pendingMine.length ? `
+      <div class="alert alert-success d-flex align-items-center">
+        <i class="bi bi-gift-fill fs-3 me-3"></i>
+        <div><strong>You have ${pendingMine.length} aid package${pendingMine.length > 1 ? 's' : ''} ready to claim!</strong><br>
+        <small>Bring your Barangay ID. Show the QR code on your ID (or your <a href="/resident/digital-id">Digital ID</a>) to the staff for scanning.</small></div>
+      </div>` : ''}
+
+    <div class="card card-custom p-4 mb-4">
+      <h4 class="fw-bold text-primary-blue mb-3"><i class="bi bi-box2-heart me-2"></i>My Aid & Relief</h4>
+      <div class="row g-3">
+        ${(mine || []).map(m => {
+          const p = m.aid_programs || {};
+          const claimed = m.status === 'Claimed';
+          return `
+            <div class="col-md-6">
+              <div class="card card-custom p-3 border-start border-4 ${claimed ? 'border-success' : 'border-warning'}">
+                <div class="d-flex justify-content-between">
+                  <h5 class="fw-bold text-primary-blue">${escHtml(p.title)}</h5>
+                  <span class="badge ${claimed ? 'bg-success' : 'bg-warning text-dark'} h-100">${claimed ? 'CLAIMED' : 'READY TO CLAIM'}</span>
+                </div>
+                <span class="badge bg-info text-dark align-self-start mb-2">${escHtml(p.aid_type)}</span>
+                <p class="small text-muted mb-1">${escHtml(p.description || '')}</p>
+                <p class="small mb-0"><i class="bi bi-calendar3 me-1"></i>${escHtml(p.distribution_date || 'Date to be announced')} &nbsp; <i class="bi bi-geo-alt me-1"></i>${escHtml(p.location || 'Barangay Hall')}</p>
+                ${claimed && m.claimed_at ? `<p class="small text-success mb-0 mt-1"><i class="bi bi-check-circle me-1"></i>Claimed on ${new Date(m.claimed_at).toLocaleString()}</p>` : ''}
+                ${!claimed && p.status !== 'Open' ? '<p class="small text-danger mb-0 mt-1">This program is closed.</p>' : ''}
+              </div>
+            </div>`;
+        }).join('') || '<div class="col-12 text-center text-muted py-3">You are not currently listed as a beneficiary of any aid program.</div>'}
+      </div>
+    </div>
+
+    <div class="card card-custom p-4">
+      <h5 class="fw-bold text-primary-blue mb-3"><i class="bi bi-people me-2"></i>Current Aid Programs & Beneficiaries</h5>
+      ${(openPrograms || []).map(p => {
+        const list = allBens.filter(b => b.program_id === p.id);
+        return `
+          <div class="mb-4">
+            <h6 class="fw-bold text-accent-green">${escHtml(p.title)} <small class="text-muted">(${list.filter(b => b.status === 'Claimed').length} / ${list.length} claimed)</small></h6>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead class="table-light"><tr><th>Name</th><th>Purok</th><th>Status</th></tr></thead>
+                <tbody>
+                  ${list.map(b => `
+                    <tr class="${b.resident_id === req.user.resident_id ? 'table-success fw-bold' : ''}">
+                      <td>${b.residents ? `${escHtml(b.residents.first_name)} ${escHtml(b.residents.last_name)}` : '-'}${b.resident_id === req.user.resident_id ? ' (You)' : ''}</td>
+                      <td>${b.residents && b.residents.puroks ? escHtml(b.residents.puroks.name) : '-'}</td>
+                      <td><span class="badge ${b.status === 'Claimed' ? 'bg-success' : 'bg-warning text-dark'}">${escHtml(b.status)}</span></td>
+                    </tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No beneficiaries listed yet.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+      }).join('') || '<p class="text-muted">No open aid programs right now.</p>'}
+    </div>
+  `;
+
+  res.send(renderAppLayout(req, 'res-aid', html, settings));
 });
 
 // ==========================================
