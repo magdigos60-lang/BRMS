@@ -490,6 +490,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
       { id: 'reports', label: 'Reports', icon: 'bi-bar-chart-line', link: '/admin/reports' },
       { id: 'activity-logs', label: 'Activity Logs', icon: 'bi-clock-history', link: '/admin/activity-logs' },
       { id: 'settings', label: 'System Settings', icon: 'bi-sliders', link: '/admin/settings' },
+      { id: 'my-account', label: 'My Account (Email & Password)', icon: 'bi-key', link: '/admin/account' },
     ]},
   ];
 
@@ -498,6 +499,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
     { group: 'My Account', icon: 'bi-person-circle', items: [
       { id: 'res-profile', label: 'My Profile & Photo', icon: 'bi-person-circle', link: '/resident/profile' },
       { id: 'res-digital-id', label: 'My Digital ID', icon: 'bi-card-checklist', link: '/resident/digital-id' },
+      { id: 'res-account', label: 'Change Password', icon: 'bi-key', link: '/resident/account' },
     ]},
     { group: 'Requests & Services', icon: 'bi-journal-check', items: [
       { id: 'res-certificates', label: 'Request Certificate', icon: 'bi-file-earmark-plus', link: '/resident/certificates' },
@@ -874,6 +876,7 @@ app.get('/login', async (req, res) => {
             <div class="text-center mt-4 border-top pt-3">
               <p class="small text-muted mb-1">Are you a resident without an account?</p>
               <a href="/register" class="text-accent-green fw-bold text-decoration-none"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
+              <div class="mt-2"><a href="/terms" class="small text-muted text-decoration-none"><i class="bi bi-file-text me-1"></i>Terms and Conditions</a></div>
             </div>
           </div>
         </div>
@@ -1082,6 +1085,11 @@ app.get('/register', async (req, res) => {
                 </div>
               </div>
 
+              <div class="form-check mt-4">
+                <input class="form-check-input" type="checkbox" name="accept_terms" id="acceptTerms" required>
+                <label class="form-check-label" for="acceptTerms">I have read and agree to the <a href="/terms" target="_blank" data-no-loader>Terms and Conditions</a> and the Data Privacy Notice. *</label>
+              </div>
+
               <button type="submit" class="btn btn-accent-custom w-100 py-2 mt-3 fw-bold">Submit Registration Request</button>
               <div class="text-center mt-3">
                 <a href="/login" class="text-decoration-none text-primary-blue">Back to Login</a>
@@ -1112,6 +1120,10 @@ app.post('/api/register', async (req, res) => {
     const password = req.body.password;
     const household_mode = req.body.household_mode === 'new' ? 'new' : 'existing';
     const household_name = (req.body.household_name || '').replace(/\s+/g, ' ').trim();
+
+    if (!req.body.accept_terms) {
+      return res.status(400).send('<script>alert("You must agree to the Terms and Conditions to register."); window.history.back();</script>');
+    }
 
     if (!household_name) {
       return res.status(400).send('<script>alert("Please enter your household name."); window.history.back();</script>');
@@ -1216,6 +1228,71 @@ app.post('/api/register', async (req, res) => {
 app.get('/logout', (req, res) => {
   res.clearCookie('token');
   res.redirect('/login');
+});
+
+// ==========================================
+// TERMS AND CONDITIONS (public page)
+// ==========================================
+app.get('/terms', async (req, res) => {
+  const settings = await getSettings();
+  const brgy = escHtml(settings.barangay_name || 'the Barangay');
+  res.send(`
+    ${renderSystemHead('Terms and Conditions')}
+    <div class="container py-5" style="max-width: 860px;">
+      <div class="card card-custom p-4 p-md-5 shadow">
+        <div class="text-center mb-4">
+          <i class="bi bi-file-earmark-text text-primary-blue display-5"></i>
+          <h2 class="fw-bold text-primary-blue mt-2">Terms and Conditions</h2>
+          <p class="text-muted mb-0">${brgy} Resident Management System</p>
+        </div>
+
+        <h5 class="fw-bold text-accent-green mt-3">1. Acceptance of Terms</h5>
+        <p>By registering for or using this portal, you agree to these Terms and Conditions. If you do not agree, please do not register or use the system.</p>
+
+        <h5 class="fw-bold text-accent-green mt-3">2. Eligibility and Accurate Information</h5>
+        <p>The portal is for bona fide residents of ${brgy}. You agree to provide true, complete, and current information. Giving false information, or registering on behalf of another person without authority, may lead to rejection or removal of your account and may have legal consequences.</p>
+
+        <h5 class="fw-bold text-accent-green mt-3">3. Registration and Approval</h5>
+        <p>All registrations are reviewed by Barangay officials. Approval is not automatic, and the Barangay may approve, reject, or request more documents at its discretion.</p>
+
+        <h5 class="fw-bold text-accent-green mt-3">4. Account Security</h5>
+        <ul>
+          <li>You are responsible for keeping your password confidential and for all activity under your account.</li>
+          <li>Change your password immediately if you suspect it has been compromised, and notify the Barangay Hall.</li>
+          <li>Do not share your account or your Barangay ID / QR code with other people.</li>
+        </ul>
+
+        <h5 class="fw-bold text-accent-green mt-3">5. Data Privacy Notice</h5>
+        <p>In line with the Data Privacy Act of 2012 (Republic Act No. 10173), the Barangay collects and processes your personal information (such as name, birth date, address, contact details, household, resident category, and photo) only for legitimate governance purposes, including resident records, issuance of certificates and IDs, aid and relief distribution, and community programs.</p>
+        <ul>
+          <li>Your information is accessible only to authorized Barangay personnel and is kept as long as necessary for these purposes or as required by law.</li>
+          <li>Your information will not be sold or disclosed to third parties except as required by law or by a lawful order.</li>
+          <li>You may ask the Barangay to access, correct, or update your information by submitting a profile correction request or visiting the Barangay Hall.</li>
+        </ul>
+
+        <h5 class="fw-bold text-accent-green mt-3">6. Barangay ID, QR Codes and Aid Distribution</h5>
+        <p>Your Barangay ID contains a QR code that identifies you in the system. It is used to verify your identity when claiming documents or aid. Aid is released once per household per program. Attempting to claim aid more than once, or using another person's ID, is prohibited.</p>
+
+        <h5 class="fw-bold text-accent-green mt-3">7. Acceptable Use</h5>
+        <p>You agree not to misuse the portal, including submitting false complaints or requests, attempting to access other users' records, or interfering with the system's operation.</p>
+
+        <h5 class="fw-bold text-accent-green mt-3">8. Suspension and Termination</h5>
+        <p>The Barangay may suspend or disable accounts that violate these Terms or that are found to contain false information.</p>
+
+        <h5 class="fw-bold text-accent-green mt-3">9. Changes to These Terms</h5>
+        <p>These Terms may be updated from time to time. Continued use of the portal after an update means you accept the revised Terms.</p>
+
+        <h5 class="fw-bold text-accent-green mt-3">10. Contact</h5>
+        <p>For questions or requests about your data or account, please contact the Barangay Hall${settings.contact_number ? ' at <strong>' + escHtml(settings.contact_number) + '</strong>' : ''}.</p>
+
+        <div class="text-center mt-4 no-print">
+          <a href="/register" class="btn btn-accent-custom text-white fw-bold me-2">Go to Registration</a>
+          <a href="/login" class="btn btn-outline-primary">Back to Login</a>
+        </div>
+      </div>
+    </div>
+    ${renderSystemFooter()}
+  `);
 });
 
 // ==========================================
@@ -1408,6 +1485,7 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
                       <a href="/api/admin/resident/reject/${r.id}" class="btn btn-sm btn-danger"><i class="bi bi-x-lg"></i> Reject</a>
                     ` : `
                       <a href="/admin/resident/view/${r.id}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i> View</a>
+                      <a href="/admin/resident/edit/${r.id}" class="btn btn-sm btn-outline-success"><i class="bi bi-pencil-square"></i> Edit</a>
                       ${r.resident_status === 'Active' ? `<a href="/api/admin/resident/archive/${r.id}" class="btn btn-sm btn-outline-secondary" onclick="return confirm('Archive this resident record?')"><i class="bi bi-archive"></i></a>` : ''}
                     `}
                   </td>
@@ -1542,7 +1620,10 @@ app.get('/admin/resident/view/:id', authenticateToken, requireRole(['Super Admin
 
       <div class="col-md-8">
         <div class="card card-custom p-4">
-          <h5 class="fw-bold text-primary-blue mb-3">Official Record Information</h5>
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="fw-bold text-primary-blue m-0">Official Record Information</h5>
+            ${['Super Admin', 'Barangay Admin', 'Barangay Secretary'].includes(req.user.role) ? `<a href="/admin/resident/edit/${resident.id}" class="btn btn-sm btn-accent-custom text-white fw-bold"><i class="bi bi-pencil-square me-1"></i> Edit Information</a>` : ''}
+          </div>
           <div class="row g-3">
             <div class="col-6"><strong>Date of Birth:</strong> ${resident.date_of_birth}</div>
             <div class="col-6"><strong>Gender:</strong> ${resident.gender}</div>
@@ -1584,6 +1665,131 @@ app.post('/api/admin/resident/:id/categories', authenticateToken, requireRole(['
     console.error('Update categories error:', err);
   }
   res.redirect(`/admin/resident/view/${req.params.id}`);
+});
+
+// ---------- Edit Resident Information ----------
+app.get('/admin/resident/edit/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
+  const settings = await getSettings();
+  const { data: r } = await supabase.from('residents').select('*').eq('id', req.params.id).single();
+  if (!r) return res.status(404).send('Resident not found');
+  const { data: puroks } = await supabase.from('puroks').select('*');
+
+  const opt = (value, current) => `<option value="${value}" ${current === value ? 'selected' : ''}>${value}</option>`;
+
+  const html = `
+    <div class="card card-custom p-4" style="max-width: 900px; margin: auto;">
+      <a href="/admin/resident/view/${r.id}" class="small text-decoration-none"><i class="bi bi-arrow-left"></i> Back to Resident Record</a>
+      <h4 class="fw-bold text-primary-blue mt-1 mb-1"><i class="bi bi-pencil-square me-2"></i>Edit Resident Information</h4>
+      <p class="text-muted small">Resident ID: <strong>${escHtml(r.resident_number)}</strong> (cannot be changed)</p>
+
+      <form action="/api/admin/resident/edit/${r.id}" method="POST">
+        <div class="row g-3">
+          <div class="col-md-3"><label class="form-label">First Name *</label><input type="text" name="first_name" class="form-control" required value="${escHtml(r.first_name)}"></div>
+          <div class="col-md-3"><label class="form-label">Middle Name</label><input type="text" name="middle_name" class="form-control" value="${escHtml(r.middle_name)}"></div>
+          <div class="col-md-3"><label class="form-label">Last Name *</label><input type="text" name="last_name" class="form-control" required value="${escHtml(r.last_name)}"></div>
+          <div class="col-md-3"><label class="form-label">Suffix</label><input type="text" name="suffix" class="form-control" value="${escHtml(r.suffix)}"></div>
+
+          <div class="col-md-4"><label class="form-label">Date of Birth *</label><input type="date" name="date_of_birth" class="form-control" required value="${escHtml(r.date_of_birth)}"></div>
+          <div class="col-md-4"><label class="form-label">Gender *</label><select name="gender" class="form-select">${opt('Male', r.gender)}${opt('Female', r.gender)}</select></div>
+          <div class="col-md-4"><label class="form-label">Civil Status *</label><select name="civil_status" class="form-select">${['Single', 'Married', 'Widowed', 'Separated'].map(v => opt(v, r.civil_status)).join('')}</select></div>
+
+          <div class="col-md-6">
+            <label class="form-label">Purok *</label>
+            <select name="purok_id" class="form-select">${(puroks || []).map(p => `<option value="${p.id}" ${r.purok_id === p.id ? 'selected' : ''}>${escHtml(p.name)}</option>`).join('')}</select>
+          </div>
+          <div class="col-md-6"><label class="form-label">Address *</label><input type="text" name="address" class="form-control" required value="${escHtml(r.address)}"></div>
+
+          <div class="col-md-4"><label class="form-label">Contact Number</label><input type="text" name="contact_number" class="form-control" value="${escHtml(r.contact_number)}"></div>
+          <div class="col-md-4"><label class="form-label">Email</label><input type="email" name="email" class="form-control" value="${escHtml(r.email)}"></div>
+          <div class="col-md-4"><label class="form-label">Occupation</label><input type="text" name="occupation" class="form-control" value="${escHtml(r.occupation)}"></div>
+
+          <div class="col-12">
+            <label class="form-label fw-bold">Resident Category</label>
+            ${renderCategoryCheckboxes(r, 'editCat')}
+          </div>
+
+          <div class="col-md-6">
+            <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="is_solo_parent" id="editSolo" ${r.is_solo_parent ? 'checked' : ''}><label class="form-check-label" for="editSolo">Solo Parent</label></div>
+            <label class="form-label small">Solo Parent Details</label>
+            <input type="text" name="solo_parent_details" class="form-control" value="${escHtml(r.solo_parent_details)}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mt-md-4 pt-md-2">PWD / Disability Details</label>
+            <input type="text" name="disability_details" class="form-control" value="${escHtml(r.disability_details)}">
+          </div>
+        </div>
+
+        <div class="mt-4 d-flex gap-2">
+          <button type="submit" class="btn btn-primary-custom text-white fw-bold px-4"><i class="bi bi-check2 me-1"></i> Save Changes</button>
+          <a href="/admin/resident/view/${r.id}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  `;
+
+  res.send(renderAppLayout(req, 'residents', html, settings));
+});
+
+app.post('/api/admin/resident/edit/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
+  try {
+    const b = req.body;
+    const first_name = (b.first_name || '').trim();
+    const last_name = (b.last_name || '').trim();
+    const date_of_birth = b.date_of_birth;
+    const address = (b.address || '').trim();
+    if (!first_name || !last_name || !date_of_birth || !address) {
+      return res.status(400).send('<script>alert("Please fill in all required fields."); window.history.back();</script>');
+    }
+
+    const { data: current } = await supabase.from('residents').select('id, email').eq('id', req.params.id).single();
+    if (!current) return res.status(404).send('Resident not found');
+
+    const newEmail = (b.email || '').trim().toLowerCase();
+    const emailChanged = !!newEmail && newEmail !== (current.email || '').toLowerCase();
+
+    // The linked login account uses the email as its username, so keep emails unique
+    if (emailChanged) {
+      const { data: taken } = await supabase.from('users').select('id, resident_id').eq('email', newEmail).maybeSingle();
+      if (taken && taken.resident_id !== current.id) {
+        return res.status(400).send('<script>alert("That email is already used by another account."); window.history.back();</script>');
+      }
+    }
+
+    const age = new Date().getFullYear() - new Date(date_of_birth).getFullYear();
+    const flags = categoryFlags(b);
+
+    const { error } = await supabase.from('residents').update({
+      first_name,
+      middle_name: (b.middle_name || '').trim(),
+      last_name,
+      suffix: (b.suffix || '').trim(),
+      date_of_birth,
+      gender: b.gender,
+      civil_status: b.civil_status,
+      purok_id: b.purok_id || null,
+      address,
+      contact_number: (b.contact_number || '').trim(),
+      email: newEmail || null,
+      occupation: (b.occupation || '').trim(),
+      ...flags,
+      is_senior_citizen: flags.is_senior_citizen || age >= 60,
+      is_solo_parent: !!b.is_solo_parent,
+      solo_parent_details: (b.solo_parent_details || '').trim(),
+      disability_details: (b.disability_details || '').trim()
+    }).eq('id', req.params.id);
+    if (error) throw error;
+
+    // Keep the linked login account in sync
+    const userUpdate = { full_name: `${first_name} ${last_name}` };
+    if (emailChanged) { userUpdate.email = newEmail; userUpdate.username = newEmail; }
+    await supabase.from('users').update(userUpdate).eq('resident_id', req.params.id);
+
+    await logActivity(req.user.id, 'Edit Resident', `Edited information of resident: ${first_name} ${last_name}`);
+    res.redirect(`/admin/resident/view/${req.params.id}`);
+  } catch (err) {
+    console.error('Edit resident error:', err);
+    res.status(500).send('Error updating resident: ' + err.message);
+  }
 });
 
 app.post('/api/admin/resident/upload-photo/:id', authenticateToken, upload.single('photo'), async (req, res) => {
@@ -4114,6 +4320,128 @@ app.get('/resident/aid', authenticateToken, requireRole(['Resident']), async (re
   `;
 
   res.send(renderAppLayout(req, 'res-aid', html, settings));
+});
+
+// ==========================================
+// MY ACCOUNT: change password (everyone) & change email (staff/admin)
+// ==========================================
+const accountAlert = (q) => {
+  if (q.ok) return `<div class="alert alert-success"><i class="bi bi-check-circle-fill me-2"></i>${escHtml(q.ok)}</div>`;
+  if (q.err) return `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>${escHtml(q.err)}</div>`;
+  return '';
+};
+
+const renderPasswordCard = (action) => `
+  <div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold text-primary-blue mb-3"><i class="bi bi-key me-2"></i>Change Password</h5>
+    <form action="${action}" method="POST">
+      <div class="mb-3"><label class="form-label">Current Password *</label><input type="password" name="current_password" class="form-control" required autocomplete="current-password"></div>
+      <div class="mb-3"><label class="form-label">New Password * <small class="text-muted">(at least 6 characters)</small></label><input type="password" name="new_password" class="form-control" required minlength="6" autocomplete="new-password"></div>
+      <div class="mb-3"><label class="form-label">Confirm New Password *</label><input type="password" name="confirm_password" class="form-control" required minlength="6" autocomplete="new-password"></div>
+      <button type="submit" class="btn btn-primary-custom text-white fw-bold"><i class="bi bi-check2 me-1"></i> Update Password</button>
+    </form>
+  </div>`;
+
+// Shared password-change logic. Returns an error string, or null on success.
+const changeOwnPassword = async (user, body) => {
+  const { current_password, new_password, confirm_password } = body;
+  if (!current_password || !new_password || !confirm_password) return 'Please fill in all password fields.';
+  if (new_password.length < 6) return 'New password must be at least 6 characters.';
+  if (new_password !== confirm_password) return 'New password and confirmation do not match.';
+  const ok = await bcrypt.compare(current_password, user.password_hash);
+  if (!ok) return 'Current password is incorrect.';
+  if (current_password === new_password) return 'New password must be different from the current password.';
+  const password_hash = await bcrypt.hash(new_password, await bcrypt.genSalt(10));
+  const { error } = await supabase.from('users').update({ password_hash }).eq('id', user.id);
+  if (error) { console.error('Password update error:', error); return 'Could not update password. Please try again.'; }
+  await logActivity(user.id, 'Change Password', 'User changed their own password.');
+  return null;
+};
+
+// ----- Admin / staff -----
+app.get('/admin/account', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  const settings = await getSettings();
+  const html = `
+    <div style="max-width: 640px; margin: auto;">
+      ${accountAlert(req.query)}
+      <div class="card card-custom p-4 mb-4">
+        <h5 class="fw-bold text-primary-blue mb-1"><i class="bi bi-person-circle me-2"></i>My Account</h5>
+        <p class="small text-muted mb-0">${escHtml(req.user.full_name || '')} &middot; ${escHtml(req.user.role)} &middot; Username: <strong>${escHtml(req.user.username)}</strong></p>
+      </div>
+
+      <div class="card card-custom p-4 mb-4">
+        <h5 class="fw-bold text-primary-blue mb-3"><i class="bi bi-envelope me-2"></i>Change Email</h5>
+        <form action="/api/admin/account/email" method="POST">
+          <div class="mb-3"><label class="form-label">Current Email</label><input type="text" class="form-control" value="${escHtml(req.user.email)}" disabled></div>
+          <div class="mb-3"><label class="form-label">New Email *</label><input type="email" name="new_email" class="form-control" required></div>
+          <div class="mb-3"><label class="form-label">Confirm with Current Password *</label><input type="password" name="current_password" class="form-control" required autocomplete="current-password"></div>
+          <button type="submit" class="btn btn-accent-custom text-white fw-bold"><i class="bi bi-check2 me-1"></i> Update Email</button>
+        </form>
+      </div>
+
+      ${renderPasswordCard('/api/admin/account/password')}
+    </div>
+  `;
+  res.send(renderAppLayout(req, 'my-account', html, settings));
+});
+
+app.post('/api/admin/account/email', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  try {
+    const new_email = String(req.body.new_email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(new_email)) return res.redirect('/admin/account?err=' + encodeURIComponent('Please enter a valid email address.'));
+    const ok = await bcrypt.compare(String(req.body.current_password || ''), req.user.password_hash);
+    if (!ok) return res.redirect('/admin/account?err=' + encodeURIComponent('Current password is incorrect.'));
+    if (new_email === String(req.user.email || '').toLowerCase()) return res.redirect('/admin/account?err=' + encodeURIComponent('That is already your email.'));
+
+    const { data: taken } = await supabase.from('users').select('id').eq('email', new_email).maybeSingle();
+    if (taken) return res.redirect('/admin/account?err=' + encodeURIComponent('That email is already used by another account.'));
+
+    const { error } = await supabase.from('users').update({ email: new_email }).eq('id', req.user.id);
+    if (error) throw error;
+    await logActivity(req.user.id, 'Change Email', `Email changed to ${new_email}`);
+    res.redirect('/admin/account?ok=' + encodeURIComponent('Email updated successfully. You can now sign in with the new email.'));
+  } catch (err) {
+    console.error('Change email error:', err);
+    res.redirect('/admin/account?err=' + encodeURIComponent('Could not update email. Please try again.'));
+  }
+});
+
+app.post('/api/admin/account/password', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
+  try {
+    const err = await changeOwnPassword(req.user, req.body);
+    if (err) return res.redirect('/admin/account?err=' + encodeURIComponent(err));
+    res.redirect('/admin/account?ok=' + encodeURIComponent('Password updated successfully.'));
+  } catch (e) {
+    console.error('Change password error:', e);
+    res.redirect('/admin/account?err=' + encodeURIComponent('Could not update password. Please try again.'));
+  }
+});
+
+// ----- Resident -----
+app.get('/resident/account', authenticateToken, requireRole(['Resident']), async (req, res) => {
+  const settings = await getSettings();
+  const html = `
+    <div style="max-width: 640px; margin: auto;">
+      ${accountAlert(req.query)}
+      <div class="card card-custom p-4 mb-4">
+        <h5 class="fw-bold text-primary-blue mb-1"><i class="bi bi-person-circle me-2"></i>My Login</h5>
+        <p class="small text-muted mb-0">Sign-in email: <strong>${escHtml(req.user.email)}</strong>. To correct your email or other details, send a request from <a href="/resident/profile">My Profile</a>.</p>
+      </div>
+      ${renderPasswordCard('/api/resident/account/password')}
+    </div>
+  `;
+  res.send(renderAppLayout(req, 'res-account', html, settings));
+});
+
+app.post('/api/resident/account/password', authenticateToken, requireRole(['Resident']), async (req, res) => {
+  try {
+    const err = await changeOwnPassword(req.user, req.body);
+    if (err) return res.redirect('/resident/account?err=' + encodeURIComponent(err));
+    res.redirect('/resident/account?ok=' + encodeURIComponent('Password updated successfully.'));
+  } catch (e) {
+    console.error('Resident change password error:', e);
+    res.redirect('/resident/account?err=' + encodeURIComponent('Could not update password. Please try again.'));
+  }
 });
 
 // ==========================================
