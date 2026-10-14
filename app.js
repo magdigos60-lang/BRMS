@@ -1004,6 +1004,37 @@ app.get('/register', async (req, res) => {
                 </div>
               </div>
 
+              <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-3">Household</h6>
+              <div class="mb-2">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="household_mode" id="hhExisting" value="existing" checked>
+                  <label class="form-check-label" for="hhExisting">My household is already registered (join it)</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="household_mode" id="hhNew" value="new">
+                  <label class="form-check-label" for="hhNew">Register a new household</label>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Household Name *</label>
+                <input type="text" name="household_name" id="hhName" class="form-control" required maxlength="100" placeholder="Existing household name">
+                <small class="text-muted" id="hhHelp">Type the exact household name used by your family members when they registered.</small>
+              </div>
+              <script>
+                (function () {
+                  var help = document.getElementById('hhHelp'), name = document.getElementById('hhName');
+                  function upd() {
+                    var isNew = document.getElementById('hhNew').checked;
+                    help.textContent = isNew
+                      ? 'Choose a name for your new household (e.g. the family surname). Other family members will use this same name to join.'
+                      : 'Type the exact household name used by your family members when they registered.';
+                    name.placeholder = isNew ? 'e.g. Dela Cruz Family' : 'Existing household name';
+                  }
+                  document.getElementById('hhExisting').addEventListener('change', upd);
+                  document.getElementById('hhNew').addEventListener('change', upd);
+                })();
+              </script>
+
               <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-3">Account Credentials</h6>
               <div class="row">
                 <div class="col-md-6 mb-3">
@@ -1044,6 +1075,12 @@ app.post('/api/register', async (req, res) => {
     const occupation = (req.body.occupation || '').trim();
     const email = (req.body.email || '').trim().toLowerCase();
     const password = req.body.password;
+    const household_mode = req.body.household_mode === 'new' ? 'new' : 'existing';
+    const household_name = (req.body.household_name || '').replace(/\s+/g, ' ').trim();
+
+    if (!household_name) {
+      return res.status(400).send('<script>alert("Please enter your household name."); window.history.back();</script>');
+    }
 
     if (!first_name || !last_name || !date_of_birth || !address || !email || !password) {
       return res.status(400).send('<script>alert("Please fill in all required fields."); window.history.back();</script>');
@@ -1052,6 +1089,28 @@ app.post('/api/register', async (req, res) => {
     const { data: existingUser } = await supabase.from('users').select('*').eq('email', email).single();
     if (existingUser) {
       return res.status(400).send('<script>alert("Email is already registered."); window.location="/register";</script>');
+    }
+
+    // ----- Household: join an existing one by name, or register a new one -----
+    // (Names are matched privately on the server; the public form never lists other households.)
+    const likeName = household_name.replace(/[\\%_]/g, m => '\\' + m);
+    const { data: foundHh } = await supabase.from('households').select('id').ilike('household_name', likeName).limit(1).maybeSingle();
+    if (household_mode === 'existing' && !foundHh) {
+      return res.status(400).send('<script>alert("No household with that name was found. Check the spelling, or choose Register a new household."); window.history.back();</script>');
+    }
+    if (household_mode === 'new' && foundHh) {
+      return res.status(400).send('<script>alert("A household with that name already exists. Choose My household is already registered to join it, or use a different name."); window.history.back();</script>');
+    }
+    let household_id = foundHh ? foundHh.id : null;
+    let createdHouseholdId = null;
+    if (household_mode === 'new') {
+      const household_number = `HH-${Date.now().toString().slice(-6)}`;
+      const { data: newHh, error: hhErr } = await supabase.from('households').insert([{
+        household_number, household_name, head_resident_name: `${first_name} ${last_name}`, purok_id, address
+      }]).select().single();
+      if (hhErr) throw hhErr;
+      household_id = newHh.id;
+      createdHouseholdId = newHh.id;
     }
 
     const year = new Date().getFullYear();
@@ -1078,10 +1137,14 @@ app.post('/api/register', async (req, res) => {
       occupation, 
       email,
       resident_status: 'Pending', 
-      is_senior_citizen
+      is_senior_citizen,
+      household_id
     }]).select().single();
 
-    if (resErr) throw resErr;
+    if (resErr) {
+      if (createdHouseholdId) await supabase.from('households').delete().eq('id', createdHouseholdId);
+      throw resErr;
+    }
 
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
@@ -1552,6 +1615,12 @@ app.get('/admin/households', authenticateToken, requireRole(['Super Admin', 'Bar
   const settings = await getSettings();
   const { data: households } = await supabase.from('households').select('*, puroks(name)');
   const { data: puroks } = await supabase.from('puroks').select('*');
+  const { data: members } = await supabase.from('residents')
+    .select('id, first_name, last_name, resident_number, resident_status, household_id')
+    .not('household_id', 'is', null).order('last_name', { ascending: true });
+
+  const byHousehold = {};
+  (members || []).forEach(m => { (byHousehold[m.household_id] = byHousehold[m.household_id] || []).push(m); });
 
   const html = `
     <div class="card card-custom p-4">
@@ -1559,28 +1628,44 @@ app.get('/admin/households', authenticateToken, requireRole(['Super Admin', 'Bar
         <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-house-door me-2"></i>Household Records</h4>
         <button class="btn btn-accent-custom fw-bold text-white" data-bs-toggle="modal" data-bs-target="#addHouseholdModal"><i class="bi bi-plus-lg me-1"></i> Register Household</button>
       </div>
+      <p class="small text-muted">Click a household to see its members. Aid is released once per household.</p>
 
       <div class="table-responsive">
         <table class="table table-hover align-middle">
           <thead class="table-light">
             <tr>
               <th>Household No</th>
+              <th>Household Name</th>
               <th>Head of Household</th>
               <th>Purok Zone</th>
               <th>Address</th>
+              <th>Members</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
-            ${(households || []).map(h => `
-              <tr>
-                <td class="fw-bold text-primary-blue">${h.household_number}</td>
-                <td class="fw-semibold">${h.head_resident_name}</td>
-                <td>${h.puroks ? h.puroks.name : '-'}</td>
-                <td>${h.address}</td>
-                <td><span class="badge bg-success">${h.status}</span></td>
+            ${(households || []).map(h => {
+              const mem = byHousehold[h.id] || [];
+              return `
+              <tr style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#hhMembers${h.id}" aria-expanded="false">
+                <td class="fw-bold text-primary-blue">${escHtml(h.household_number)}</td>
+                <td class="fw-semibold">${escHtml(h.household_name || '-')}</td>
+                <td>${escHtml(h.head_resident_name || '-')}</td>
+                <td>${h.puroks ? escHtml(h.puroks.name) : '-'}</td>
+                <td>${escHtml(h.address || '-')}</td>
+                <td><span class="badge bg-primary"><i class="bi bi-people me-1"></i>${mem.length}</span></td>
+                <td><span class="badge bg-success">${escHtml(h.status || 'Active')}</span></td>
               </tr>
-            `).join('') || '<tr><td colspan="5" class="text-center py-4 text-muted">No household records registered.</td></tr>'}
+              <tr class="collapse" id="hhMembers${h.id}">
+                <td colspan="7" class="bg-light">
+                  ${mem.length ? `
+                    <div class="small fw-bold text-accent-green mb-1">Members of ${escHtml(h.household_name || h.household_number)}</div>
+                    <ul class="list-unstyled mb-0 small">
+                      ${mem.map(m => `<li class="py-1"><i class="bi bi-person me-1"></i>${escHtml(m.last_name)}, ${escHtml(m.first_name)} <span class="text-muted">(${escHtml(m.resident_number)})</span> <span class="badge ${m.resident_status === 'Active' ? 'bg-success' : 'bg-warning text-dark'}">${escHtml(m.resident_status)}</span></li>`).join('')}
+                    </ul>` : '<span class="small text-muted">No residents are linked to this household yet.</span>'}
+                </td>
+              </tr>`;
+            }).join('') || '<tr><td colspan="7" class="text-center py-4 text-muted">No household records registered.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1596,10 +1681,11 @@ app.get('/admin/households', authenticateToken, requireRole(['Super Admin', 'Bar
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+              <div class="mb-3"><label class="form-label">Household Name *</label><input type="text" name="household_name" class="form-control" required maxlength="100" placeholder="e.g. Dela Cruz Family"></div>
               <div class="mb-3"><label class="form-label">Head of Household Name *</label><input type="text" name="head_resident_name" class="form-control" required></div>
               <div class="mb-3">
                 <label class="form-label">Purok Zone *</label>
-                <select name="purok_id" class="form-select">${(puroks || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('')}</select>
+                <select name="purok_id" class="form-select">${(puroks || []).map(p => `<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}</select>
               </div>
               <div class="mb-3"><label class="form-label">Address *</label><input type="text" name="address" class="form-control" required></div>
             </div>
@@ -1617,8 +1703,13 @@ app.get('/admin/households', authenticateToken, requireRole(['Super Admin', 'Bar
 
 app.post('/api/admin/household/add', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   const { head_resident_name, purok_id, address } = req.body;
+  const household_name = (req.body.household_name || '').replace(/\s+/g, ' ').trim();
+  if (!household_name) return res.status(400).send('<script>alert("Household name is required."); window.history.back();</script>');
+  const likeName = household_name.replace(/[\\%_]/g, m => '\\' + m);
+  const { data: dup } = await supabase.from('households').select('id').ilike('household_name', likeName).limit(1).maybeSingle();
+  if (dup) return res.status(400).send('<script>alert("A household with that name already exists."); window.history.back();</script>');
   const household_number = `HH-${Date.now().toString().slice(-6)}`;
-  await supabase.from('households').insert([{ household_number, head_resident_name, purok_id, address }]);
+  await supabase.from('households').insert([{ household_number, household_name, head_resident_name, purok_id, address }]);
   res.redirect('/admin/households');
 });
 
@@ -3244,11 +3335,11 @@ app.get('/admin/aid/:id', authenticateToken, requireRole(STAFF_ROLES), async (re
   if (!program) return res.status(404).send('Aid program not found');
 
   const { data: bens } = await supabase.from('aid_beneficiaries')
-    .select('*, residents(first_name, last_name, resident_number, puroks(name))')
+    .select('*, residents(first_name, last_name, resident_number, puroks(name), households(household_name, household_number))')
     .eq('program_id', program.id).order('created_at', { ascending: true });
 
   const existingIds = new Set((bens || []).map(b => b.resident_id));
-  const { data: allResidents } = await supabase.from('residents').select('id, first_name, last_name, resident_number').eq('resident_status', 'Active').order('last_name', { ascending: true });
+  const { data: allResidents } = await supabase.from('residents').select('id, first_name, last_name, resident_number, households(household_name)').eq('resident_status', 'Active').order('last_name', { ascending: true });
   const available = (allResidents || []).filter(r => !existingIds.has(r.id));
 
   const claimed = (bens || []).filter(b => b.status === 'Claimed').length;
@@ -3286,7 +3377,7 @@ app.get('/admin/aid/:id', authenticateToken, requireRole(STAFF_ROLES), async (re
       <form action="/api/admin/aid/${program.id}/beneficiaries" method="POST" class="row g-2">
         <div class="col-md-9">
           <select name="resident_ids" class="form-select" multiple size="5" required>
-            ${available.map(r => `<option value="${r.id}">${escHtml(r.last_name)}, ${escHtml(r.first_name)} (${escHtml(r.resident_number)})</option>`).join('')}
+            ${available.map(r => `<option value="${r.id}">${escHtml(r.last_name)}, ${escHtml(r.first_name)} (${escHtml(r.resident_number)})${r.households && r.households.household_name ? ' - ' + escHtml(r.households.household_name) : ''}</option>`).join('')}
           </select>
           <small class="text-muted">Hold Ctrl / Cmd to select multiple residents.</small>
         </div>
@@ -3304,13 +3395,14 @@ app.get('/admin/aid/:id', authenticateToken, requireRole(STAFF_ROLES), async (re
       <div class="table-responsive">
         <table class="table table-hover align-middle">
           <thead class="table-light">
-            <tr><th>Resident ID</th><th>Name</th><th>Purok</th><th>Status</th><th>Claimed At</th><th class="text-end no-print">Action</th></tr>
+            <tr><th>Resident ID</th><th>Name</th><th>Household</th><th>Purok</th><th>Status</th><th>Claimed At</th><th class="text-end no-print">Action</th></tr>
           </thead>
           <tbody>
             ${(bens || []).map(b => `
               <tr>
                 <td class="fw-bold text-primary-blue">${b.residents ? escHtml(b.residents.resident_number) : '-'}</td>
                 <td>${b.residents ? `${escHtml(b.residents.first_name)} ${escHtml(b.residents.last_name)}` : 'Unknown'}</td>
+                <td class="small">${b.residents && b.residents.households ? escHtml(b.residents.households.household_name || b.residents.households.household_number) : '<span class="text-muted">-</span>'}</td>
                 <td>${b.residents && b.residents.puroks ? escHtml(b.residents.puroks.name) : '-'}</td>
                 <td><span class="badge ${b.status === 'Claimed' ? 'bg-success' : 'bg-warning text-dark'}">${escHtml(b.status)}</span></td>
                 <td class="small text-muted">${b.claimed_at ? new Date(b.claimed_at).toLocaleString() : '-'}</td>
@@ -3321,7 +3413,7 @@ app.get('/admin/aid/:id', authenticateToken, requireRole(STAFF_ROLES), async (re
                     </form>` : ''}
                 </td>
               </tr>
-            `).join('') || '<tr><td colspan="6" class="text-center py-4 text-muted">No beneficiaries yet.</td></tr>'}
+            `).join('') || '<tr><td colspan="7" class="text-center py-4 text-muted">No beneficiaries yet.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -3360,6 +3452,34 @@ app.post('/api/admin/aid/:id/status', authenticateToken, requireRole(AID_MANAGER
   res.redirect(`/admin/aid/${req.params.id}`);
 });
 
+// ---------- Household-based aid: one claim per household per program ----------
+async function getHouseholdMemberIds(residentId) {
+  const { data: r } = await supabase.from('residents').select('household_id').eq('id', residentId).maybeSingle();
+  if (!r || !r.household_id) return [residentId]; // no household linked: treated as its own household
+  const { data: members } = await supabase.from('residents').select('id').eq('household_id', r.household_id);
+  const ids = (members || []).map(m => m.id);
+  return ids.length ? ids : [residentId];
+}
+
+// Claims the aid for the scanned resident AND closes the same aid for every other member of the household.
+async function claimAidForHousehold(ben, staffId) {
+  const memberIds = await getHouseholdMemberIds(ben.resident_id);
+  const { data: already } = await supabase.from('aid_beneficiaries').select('id')
+    .eq('program_id', ben.program_id).in('resident_id', memberIds).eq('status', 'Claimed').limit(1);
+  if (already && already.length) return { ok: false };
+
+  const stamp = { status: 'Claimed', claimed_at: new Date(), claimed_by: staffId };
+  const { data: updated } = await supabase.from('aid_beneficiaries').update(stamp).eq('id', ben.id).eq('status', 'Pending').select();
+  if (!updated || !updated.length) return { ok: false };
+
+  const others = memberIds.filter(id => id !== ben.resident_id);
+  if (others.length) {
+    await supabase.from('aid_beneficiaries').update(stamp)
+      .eq('program_id', ben.program_id).in('resident_id', others).eq('status', 'Pending');
+  }
+  return { ok: true, members: memberIds.length };
+}
+
 // ---------- SCANNER: claim aid after QR verification ----------
 app.post('/api/scanner/claim', authenticateToken, requireRole(STAFF_ROLES), async (req, res) => {
   const settings = await getSettings();
@@ -3375,14 +3495,12 @@ app.post('/api/scanner/claim', authenticateToken, requireRole(STAFF_ROLES), asyn
   } else if (!ben.aid_programs || ben.aid_programs.status !== 'Open') {
     msg = `<div class="alert alert-warning text-center"><strong>Program Closed.</strong><br>This aid program is no longer open for claiming.</div>`;
   } else {
-    const { data: updated } = await supabase.from('aid_beneficiaries')
-      .update({ status: 'Claimed', claimed_at: new Date(), claimed_by: req.user.id })
-      .eq('id', ben.id).eq('status', 'Pending').select();
-    if (updated && updated.length) {
+    const claim = await claimAidForHousehold(ben, req.user.id);
+    if (claim.ok) {
       await logActivity(req.user.id, 'Aid Claimed', `${resident.first_name} ${resident.last_name} claimed "${ben.aid_programs.title}" via QR verification`);
-      msg = `<div class="alert alert-success text-center"><i class="bi bi-check-circle-fill fs-3 d-block mb-2"></i><strong>Aid Released!</strong><br>${escHtml(resident.first_name)} ${escHtml(resident.last_name)} claimed <strong>${escHtml(ben.aid_programs.title)}</strong>.</div>`;
+      msg = `<div class="alert alert-success text-center"><i class="bi bi-check-circle-fill fs-3 d-block mb-2"></i><strong>Aid Released!</strong><br>${escHtml(resident.first_name)} ${escHtml(resident.last_name)} claimed <strong>${escHtml(ben.aid_programs.title)}</strong>.<br><small>Recorded for the whole household.</small></div>`;
     } else {
-      msg = `<div class="alert alert-warning text-center"><strong>Already Claimed.</strong><br>This aid was already released to this resident.</div>`;
+      msg = `<div class="alert alert-warning text-center"><strong>Already Claimed.</strong><br>This aid was already released to this resident or another member of the same household.</div>`;
     }
   }
 
@@ -3832,14 +3950,12 @@ app.post('/api/scanner/claim-json', authenticateToken, requireRole(STAFF_ROLES),
       return res.json({ success: false, level: 'warn', final: true, badge: 'Closed', message: 'Program closed', detail: 'This aid program is no longer open.', spoken: 'Program closed.' });
     }
     const name = `${resident.first_name} ${resident.last_name}`;
-    const { data: updated } = await supabase.from('aid_beneficiaries')
-      .update({ status: 'Claimed', claimed_at: new Date(), claimed_by: req.user.id })
-      .eq('id', ben.id).eq('status', 'Pending').select();
-    if (updated && updated.length) {
+    const claim = await claimAidForHousehold(ben, req.user.id);
+    if (claim.ok) {
       await logActivity(req.user.id, 'Aid Claimed', `${name} claimed "${ben.aid_programs.title}" via QR verification`);
-      return res.json({ success: true, level: 'ok', badge: 'Released', message: 'Aid released', detail: `${name} - ${ben.aid_programs.title}`, spoken: `Aid released to ${name}. ${ben.aid_programs.title}.` });
+      return res.json({ success: true, level: 'ok', badge: 'Released', message: 'Aid released', detail: `${name} - ${ben.aid_programs.title} (one claim for the whole household)`, spoken: `Aid released to ${name}. ${ben.aid_programs.title}. One claim for the whole household.` });
     }
-    res.json({ success: false, level: 'warn', final: true, badge: 'Already claimed', message: 'Already claimed', detail: `${name} already received this aid.`, spoken: `Already claimed. ${name} already received this aid.` });
+    res.json({ success: false, level: 'warn', final: true, badge: 'Already claimed', message: 'Already claimed', detail: `${name}'s household already received this aid.`, spoken: `Already claimed. ${name}'s household already received this aid.` });
   } catch (err) {
     console.error('Scanner claim error:', err);
     res.json({ success: false, level: 'error', message: 'Server error', detail: 'Please try again.', spoken: 'Server error. Please try again.' });
