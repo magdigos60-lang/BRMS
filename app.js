@@ -419,6 +419,29 @@ const renderSystemFooter = () => `
 </html>
 `;
 
+// ---------- Resident categories (College Student / Household Head / Senior Citizen / PWD) ----------
+const categoryFlags = (b) => ({
+  is_college_student: !!b.cat_college,
+  is_household_head: !!b.cat_head,
+  is_senior_citizen: !!b.cat_senior,
+  is_pwd: !!b.cat_pwd
+});
+
+const categoryTags = (r) => [
+  r.is_college_student && 'College Student',
+  r.is_household_head && 'Household Head',
+  r.is_senior_citizen && 'Senior Citizen',
+  r.is_pwd && 'PWD'
+].filter(Boolean);
+
+const renderCategoryCheckboxes = (r = {}, prefix = 'cat') => `
+  <div class="row g-2">
+    <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="cat_college" id="${prefix}College" ${r.is_college_student ? 'checked' : ''}><label class="form-check-label" for="${prefix}College">College Student</label></div></div>
+    <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="cat_head" id="${prefix}Head" ${r.is_household_head ? 'checked' : ''}><label class="form-check-label" for="${prefix}Head">Household Head</label></div></div>
+    <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="cat_senior" id="${prefix}Senior" ${r.is_senior_citizen ? 'checked' : ''}><label class="form-check-label" for="${prefix}Senior">Senior Citizen</label></div></div>
+    <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="cat_pwd" id="${prefix}Pwd" ${r.is_pwd ? 'checked' : ''}><label class="form-check-label" for="${prefix}Pwd">Person with Disability (PWD)</label></div></div>
+  </div>`;
+
 // Layout Wrapper with Responsive Sidebar (Pinalaki ang Logos at tinanggal ang outer lines)
 const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
   const user = req.user || {};
@@ -1004,6 +1027,10 @@ app.get('/register', async (req, res) => {
                 </div>
               </div>
 
+              <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-3">Resident Category</h6>
+              <p class="small text-muted mb-2">Tick all that apply to you. These help the barangay decide who qualifies for aid programs.</p>
+              <div class="mb-3">${renderCategoryCheckboxes({}, 'regCat')}</div>
+
               <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-3">Household</h6>
               <div class="mb-2">
                 <div class="form-check">
@@ -1137,7 +1164,8 @@ app.post('/api/register', async (req, res) => {
       occupation, 
       email,
       resident_status: 'Pending', 
-      is_senior_citizen,
+      ...categoryFlags(req.body),
+      is_senior_citizen: is_senior_citizen || !!req.body.cat_senior,
       household_id
     }]).select().single();
 
@@ -1413,6 +1441,10 @@ app.get('/admin/residents', authenticateToken, requireRole(['Super Admin', 'Bara
                 <div class="col-md-6"><label class="form-label">Address *</label><input type="text" name="address" class="form-control" required></div>
                 <div class="col-md-6"><label class="form-label">Contact Number</label><input type="text" name="contact_number" class="form-control"></div>
                 <div class="col-md-6"><label class="form-label">Email</label><input type="email" name="email" class="form-control"></div>
+                <div class="col-12">
+                  <label class="form-label fw-bold">Resident Category</label>
+                  ${renderCategoryCheckboxes({}, 'addCat')}
+                </div>
               </div>
             </div>
             <div class="modal-footer">
@@ -1443,7 +1475,8 @@ app.post('/api/admin/resident/add', authenticateToken, requireRole(['Super Admin
     await supabase.from('residents').insert([{
       resident_number, first_name, middle_name, last_name, date_of_birth, gender,
       civil_status, purok_id, address, contact_number, email, resident_status: 'Active',
-      is_senior_citizen: age >= 60
+      ...categoryFlags(req.body),
+      is_senior_citizen: age >= 60 || !!req.body.cat_senior
     }]);
 
     await logActivity(req.user.id, 'Add Resident', `Added new resident record: ${first_name} ${last_name}`);
@@ -1510,10 +1543,17 @@ app.get('/admin/resident/view/:id', authenticateToken, requireRole(['Super Admin
             <div class="col-6"><strong>Contact:</strong> ${resident.contact_number}</div>
             <div class="col-6"><strong>Email:</strong> ${resident.email || 'N/A'}</div>
             <div class="col-12"><strong>Address:</strong> ${resident.address}</div>
-            <div class="col-4"><strong>Senior Citizen:</strong> ${resident.is_senior_citizen ? 'Yes' : 'No'}</div>
-            <div class="col-4"><strong>PWD:</strong> ${resident.is_pwd ? 'Yes' : 'No'}</div>
             <div class="col-4"><strong>Solo Parent:</strong> ${resident.is_solo_parent ? 'Yes' : 'No'}</div>
+            <div class="col-8"><strong>Household:</strong> ${resident.households ? escHtml(resident.households.household_name || resident.households.household_number) : 'Not linked'}</div>
           </div>
+
+          <hr class="my-4">
+          <h6 class="fw-bold text-accent-green mb-2">Resident Category</h6>
+          <p class="small text-muted mb-2">Current: ${categoryTags(resident).length ? categoryTags(resident).map(t => `<span class="badge bg-info text-dark me-1">${t}</span>`).join('') : 'None'}</p>
+          <form action="/api/admin/resident/${resident.id}/categories" method="POST">
+            ${renderCategoryCheckboxes(resident, 'viewCat')}
+            <button type="submit" class="btn btn-sm btn-primary-custom text-white mt-3"><i class="bi bi-check2 me-1"></i> Save Categories</button>
+          </form>
 
           <hr class="my-4">
           <h6 class="fw-bold text-accent-green mb-2">Issued Certificates History</h6>
@@ -1526,6 +1566,16 @@ app.get('/admin/resident/view/:id', authenticateToken, requireRole(['Super Admin
   `;
 
   res.send(renderAppLayout(req, 'residents', html, settings));
+});
+
+app.post('/api/admin/resident/:id/categories', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
+  try {
+    await supabase.from('residents').update(categoryFlags(req.body)).eq('id', req.params.id);
+    await logActivity(req.user.id, 'Update Resident Category', `Updated categories for resident ID: ${req.params.id}`);
+  } catch (err) {
+    console.error('Update categories error:', err);
+  }
+  res.redirect(`/admin/resident/view/${req.params.id}`);
 });
 
 app.post('/api/admin/resident/upload-photo/:id', authenticateToken, upload.single('photo'), async (req, res) => {
@@ -3278,14 +3328,18 @@ app.get('/admin/aid', authenticateToken, requireRole(STAFF_ROLES), async (req, r
                 <div class="col-md-6"><label class="form-label">Claiming Location</label><input type="text" name="location" class="form-control" placeholder="e.g. Barangay Hall"></div>
                 <div class="col-12"><label class="form-label">Description / Claiming Instructions</label><textarea name="description" class="form-control" rows="3" placeholder="e.g. Bring your Barangay ID. The QR code will be scanned at the claiming booth."></textarea></div>
                 <div class="col-12">
-                  <label class="form-label">Add Beneficiaries Automatically</label>
-                  <select name="group" class="form-select">
-                    <option value="none">None - I'll pick residents manually afterwards</option>
-                    <option value="all">All Active Residents</option>
-                    <option value="seniors">Senior Citizens</option>
-                    <option value="pwd">Persons with Disability (PWD)</option>
-                    <option value="solo">Solo Parents</option>
-                  </select>
+                  <label class="form-label fw-bold">Who will receive this aid?</label>
+                  <div class="border rounded p-3 bg-light">
+                    <div class="row g-2">
+                      <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="group" value="college" id="grpCollege"><label class="form-check-label" for="grpCollege">College Students</label></div></div>
+                      <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="group" value="head" id="grpHead"><label class="form-check-label" for="grpHead">Household Heads</label></div></div>
+                      <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="group" value="seniors" id="grpSeniors"><label class="form-check-label" for="grpSeniors">Senior Citizens</label></div></div>
+                      <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="group" value="pwd" id="grpPwd"><label class="form-check-label" for="grpPwd">PWD</label></div></div>
+                      <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="group" value="solo" id="grpSolo"><label class="form-check-label" for="grpSolo">Solo Parents</label></div></div>
+                      <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="group" value="all" id="grpAll"><label class="form-check-label" for="grpAll">All Active Residents</label></div></div>
+                    </div>
+                    <small class="text-muted d-block mt-2">Tick one or more groups to add them automatically. <strong>Leave all unticked to select residents manually</strong> after creating the program.</small>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3303,18 +3357,21 @@ app.get('/admin/aid', authenticateToken, requireRole(STAFF_ROLES), async (req, r
 
 app.post('/api/admin/aid/add', authenticateToken, requireRole(AID_MANAGER_ROLES), async (req, res) => {
   try {
-    const { title, aid_type, distribution_date, location, description, group } = req.body;
+    const { title, aid_type, distribution_date, location, description } = req.body;
     const { data: program, error } = await supabase.from('aid_programs').insert([{
       title, aid_type, distribution_date: distribution_date || null, location, description, status: 'Open', created_by: req.user.id
     }]).select().single();
     if (error) throw error;
 
-    let q = supabase.from('residents').select('id').eq('resident_status', 'Active');
-    if (group === 'seniors') q = q.eq('is_senior_citizen', true);
-    else if (group === 'pwd') q = q.eq('is_pwd', true);
-    else if (group === 'solo') q = q.eq('is_solo_parent', true);
+    // Checkboxes may arrive as a single value or an array. No selection = manual picking afterwards.
+    let groups = req.body.group || [];
+    if (!Array.isArray(groups)) groups = [groups];
+    const columnFor = { college: 'is_college_student', head: 'is_household_head', seniors: 'is_senior_citizen', pwd: 'is_pwd', solo: 'is_solo_parent' };
+    const conditions = groups.filter(g => columnFor[g]).map(g => `${columnFor[g]}.eq.true`);
 
-    if (['all', 'seniors', 'pwd', 'solo'].includes(group)) {
+    if (groups.includes('all') || conditions.length) {
+      let q = supabase.from('residents').select('id').eq('resident_status', 'Active');
+      if (!groups.includes('all')) q = q.or(conditions.join(','));
       const { data: residents } = await q;
       const rows = (residents || []).map(r => ({ program_id: program.id, resident_id: r.id, status: 'Pending' }));
       if (rows.length) await supabase.from('aid_beneficiaries').insert(rows);
@@ -3339,7 +3396,7 @@ app.get('/admin/aid/:id', authenticateToken, requireRole(STAFF_ROLES), async (re
     .eq('program_id', program.id).order('created_at', { ascending: true });
 
   const existingIds = new Set((bens || []).map(b => b.resident_id));
-  const { data: allResidents } = await supabase.from('residents').select('id, first_name, last_name, resident_number, households(household_name)').eq('resident_status', 'Active').order('last_name', { ascending: true });
+  const { data: allResidents } = await supabase.from('residents').select('id, first_name, last_name, resident_number, is_college_student, is_household_head, is_senior_citizen, is_pwd, households(household_name)').eq('resident_status', 'Active').order('last_name', { ascending: true });
   const available = (allResidents || []).filter(r => !existingIds.has(r.id));
 
   const claimed = (bens || []).filter(b => b.status === 'Claimed').length;
@@ -3377,7 +3434,7 @@ app.get('/admin/aid/:id', authenticateToken, requireRole(STAFF_ROLES), async (re
       <form action="/api/admin/aid/${program.id}/beneficiaries" method="POST" class="row g-2">
         <div class="col-md-9">
           <select name="resident_ids" class="form-select" multiple size="5" required>
-            ${available.map(r => `<option value="${r.id}">${escHtml(r.last_name)}, ${escHtml(r.first_name)} (${escHtml(r.resident_number)})${r.households && r.households.household_name ? ' - ' + escHtml(r.households.household_name) : ''}</option>`).join('')}
+            ${available.map(r => `<option value="${r.id}">${escHtml(r.last_name)}, ${escHtml(r.first_name)} (${escHtml(r.resident_number)})${r.households && r.households.household_name ? ' - ' + escHtml(r.households.household_name) : ''}${categoryTags(r).length ? ' [' + categoryTags(r).join(', ') + ']' : ''}</option>`).join('')}
           </select>
           <small class="text-muted">Hold Ctrl / Cmd to select multiple residents.</small>
         </div>
