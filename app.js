@@ -168,6 +168,14 @@ const renderSystemHead = (title) => `
       background-color: var(--accent-green);
       color: white;
     }
+    .sidebar .nav-link.sub-link {
+      padding: 8px 14px 8px 30px;
+      font-size: 0.92rem;
+      margin: 1px 10px;
+    }
+    .sidebar .menu-group-toggle .menu-chevron { transition: transform .2s; }
+    .sidebar .menu-group-toggle.collapsed .menu-chevron { transform: rotate(-90deg); }
+    .sidebar .menu-group-toggle:hover { background-color: rgba(255,255,255,0.12); }
     .card-custom {
       background-color: var(--pure-white);
       border-radius: 12px;
@@ -416,46 +424,87 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
   const user = req.user || {};
   const isAdmin = ['Super Admin', 'Barangay Admin', 'Barangay Secretary', 'Barangay Staff'].includes(user.role);
 
+  // Related pages are combined under one collapsible category.
   const adminMenu = [
     { id: 'dashboard', label: 'Dashboard', icon: 'bi-speedometer2', link: '/admin/dashboard' },
-    { id: 'residents', label: 'Resident Management', icon: 'bi-people', link: '/admin/residents' },
-    { id: 'households', label: 'Households', icon: 'bi-house-door', link: '/admin/households' },
-    { id: 'puroks', label: 'Puroks', icon: 'bi-geo-alt', link: '/admin/puroks' },
-    { id: 'certificates', label: 'Certificate Requests', icon: 'bi-file-earmark-text', link: '/admin/certificates' },
-    { id: 'blotters', label: 'Blotter Management', icon: 'bi-shield-exclamation', link: '/admin/blotters' },
-    { id: 'assistance', label: 'Assistance Requests', icon: 'bi-hand-thumbs-up', link: '/admin/assistance' },
-    { id: 'aid', label: 'Aid Distribution', icon: 'bi-box2-heart', link: '/admin/aid' },
-    { id: 'appointments', label: 'Appointments', icon: 'bi-calendar-check', link: '/admin/appointments' },
-    { id: 'seniors', label: 'Senior Citizens', icon: 'bi-person-heart', link: '/admin/seniors' },
-    { id: 'pwds', label: 'PWD Management', icon: 'bi-universal-access', link: '/admin/pwds' },
-    { id: 'soloparents', label: 'Solo Parents', icon: 'bi-person-badge', link: '/admin/solo-parents' },
-    { id: 'id-gen', label: 'Barangay ID Gen', icon: 'bi-card-heading', link: '/admin/id-generator' },
-    { id: 'qr-scanner', label: 'QR Scanner', icon: 'bi-qr-code-scan', link: '/scanner' },
-    { id: 'scan-only', label: 'Scan-Only Page', icon: 'bi-upc-scan', link: '/scan' },
-    { id: 'announcements', label: 'Announcements', icon: 'bi-megaphone', link: '/admin/announcements' },
-    { id: 'events', label: 'Events', icon: 'bi-calendar-event', link: '/admin/events' },
-    { id: 'officials', label: 'Barangay Officials', icon: 'bi-person-lines-fill', link: '/admin/officials' },
-    { id: 'users', label: 'User Accounts', icon: 'bi-person-gear', link: '/admin/users' },
-    { id: 'reports', label: 'Reports', icon: 'bi-bar-chart-line', link: '/admin/reports' },
-    { id: 'activity-logs', label: 'Activity Logs', icon: 'bi-clock-history', link: '/admin/activity-logs' },
-    { id: 'settings', label: 'System Settings', icon: 'bi-sliders', link: '/admin/settings' },
+    { group: 'Residents', icon: 'bi-people', items: [
+      { id: 'residents', label: 'Resident Management', icon: 'bi-people', link: '/admin/residents' },
+      { id: 'households', label: 'Households', icon: 'bi-house-door', link: '/admin/households' },
+      { id: 'puroks', label: 'Puroks', icon: 'bi-geo-alt', link: '/admin/puroks' },
+    ]},
+    { group: 'Requests & Services', icon: 'bi-journal-check', items: [
+      { id: 'certificates', label: 'Certificate Requests', icon: 'bi-file-earmark-text', link: '/admin/certificates' },
+      { id: 'blotters', label: 'Blotter Management', icon: 'bi-shield-exclamation', link: '/admin/blotters' },
+      { id: 'assistance', label: 'Assistance Requests', icon: 'bi-hand-thumbs-up', link: '/admin/assistance' },
+      { id: 'appointments', label: 'Appointments', icon: 'bi-calendar-check', link: '/admin/appointments' },
+    ]},
+    { group: 'Aid & Sectors', icon: 'bi-box2-heart', items: [
+      { id: 'aid', label: 'Aid Distribution', icon: 'bi-box2-heart', link: '/admin/aid' },
+      { id: 'seniors', label: 'Senior Citizens', icon: 'bi-person-heart', link: '/admin/seniors' },
+      { id: 'pwds', label: 'PWD Management', icon: 'bi-universal-access', link: '/admin/pwds' },
+      { id: 'soloparents', label: 'Solo Parents', icon: 'bi-person-badge', link: '/admin/solo-parents' },
+    ]},
+    { group: 'ID & Scanning', icon: 'bi-qr-code-scan', items: [
+      { id: 'id-gen', label: 'Barangay ID Gen', icon: 'bi-card-heading', link: '/admin/id-generator' },
+      { id: 'qr-scanner', label: 'QR Scanner', icon: 'bi-qr-code-scan', link: '/scanner' },
+      { id: 'scan-only', label: 'Scan-Only Page', icon: 'bi-upc-scan', link: '/scan' },
+    ]},
+    { group: 'Community', icon: 'bi-megaphone', items: [
+      { id: 'announcements', label: 'Announcements', icon: 'bi-megaphone', link: '/admin/announcements' },
+      { id: 'events', label: 'Events', icon: 'bi-calendar-event', link: '/admin/events' },
+      { id: 'officials', label: 'Barangay Officials', icon: 'bi-person-lines-fill', link: '/admin/officials' },
+    ]},
+    { group: 'Administration', icon: 'bi-gear', items: [
+      { id: 'users', label: 'User Accounts', icon: 'bi-person-gear', link: '/admin/users' },
+      { id: 'reports', label: 'Reports', icon: 'bi-bar-chart-line', link: '/admin/reports' },
+      { id: 'activity-logs', label: 'Activity Logs', icon: 'bi-clock-history', link: '/admin/activity-logs' },
+      { id: 'settings', label: 'System Settings', icon: 'bi-sliders', link: '/admin/settings' },
+    ]},
   ];
 
   const residentMenu = [
     { id: 'res-dashboard', label: 'Dashboard', icon: 'bi-speedometer2', link: '/resident/dashboard' },
-    { id: 'res-profile', label: 'My Profile & Photo', icon: 'bi-person-circle', link: '/resident/profile' },
-    { id: 'res-digital-id', label: 'My Digital ID', icon: 'bi-card-checklist', link: '/resident/digital-id' },
-    { id: 'res-certificates', label: 'Request Certificate', icon: 'bi-file-earmark-plus', link: '/resident/certificates' },
-    { id: 'res-appointments', label: 'Book Appointment', icon: 'bi-calendar-plus', link: '/resident/appointments' },
-    { id: 'res-complaints', label: 'Submit Complaint', icon: 'bi-exclamation-triangle', link: '/resident/complaints' },
-    { id: 'res-assistance', label: 'Request Assistance', icon: 'bi-heart-pulse', link: '/resident/assistance' },
+    { group: 'My Account', icon: 'bi-person-circle', items: [
+      { id: 'res-profile', label: 'My Profile & Photo', icon: 'bi-person-circle', link: '/resident/profile' },
+      { id: 'res-digital-id', label: 'My Digital ID', icon: 'bi-card-checklist', link: '/resident/digital-id' },
+    ]},
+    { group: 'Requests & Services', icon: 'bi-journal-check', items: [
+      { id: 'res-certificates', label: 'Request Certificate', icon: 'bi-file-earmark-plus', link: '/resident/certificates' },
+      { id: 'res-appointments', label: 'Book Appointment', icon: 'bi-calendar-plus', link: '/resident/appointments' },
+      { id: 'res-complaints', label: 'Submit Complaint', icon: 'bi-exclamation-triangle', link: '/resident/complaints' },
+      { id: 'res-assistance', label: 'Request Assistance', icon: 'bi-heart-pulse', link: '/resident/assistance' },
+      { id: 'res-feedback', label: 'Submit Feedback', icon: 'bi-chat-left-text', link: '/resident/feedback' },
+    ]},
     { id: 'res-aid', label: 'My Aid & Relief', icon: 'bi-box2-heart', link: '/resident/aid' },
-    { id: 'res-announcements', label: 'Announcements', icon: 'bi-bell', link: '/resident/announcements' },
-    { id: 'res-contacts', label: 'Emergency Contacts', icon: 'bi-telephone', link: '/resident/emergency-contacts' },
-    { id: 'res-feedback', label: 'Submit Feedback', icon: 'bi-chat-left-text', link: '/resident/feedback' },
+    { group: 'Community', icon: 'bi-bell', items: [
+      { id: 'res-announcements', label: 'Announcements', icon: 'bi-bell', link: '/resident/announcements' },
+      { id: 'res-contacts', label: 'Emergency Contacts', icon: 'bi-telephone', link: '/resident/emergency-contacts' },
+    ]},
   ];
 
   const menuItems = isAdmin ? adminMenu : residentMenu;
+
+  const renderMenuLink = (item, sub) => `
+    <li class="nav-item">
+      <a href="${item.link}" class="nav-link ${sub ? 'sub-link' : ''} ${activeModule === item.id ? 'active' : ''}">
+        <i class="bi ${item.icon} me-2"></i> ${item.label}
+      </a>
+    </li>`;
+
+  const renderMenu = menuItems.map((entry, i) => {
+    if (!entry.group) return renderMenuLink(entry, false);
+    const open = entry.items.some(it => it.id === activeModule);
+    return `
+    <li class="nav-item">
+      <a class="nav-link menu-group-toggle d-flex align-items-center ${open ? '' : 'collapsed'}" data-bs-toggle="collapse" href="#menuGroup${i}" role="button" aria-expanded="${open}" aria-controls="menuGroup${i}">
+        <i class="bi ${entry.icon} me-2"></i> <span class="flex-grow-1">${entry.group}</span>
+        <i class="bi bi-chevron-down menu-chevron small"></i>
+      </a>
+      <div class="collapse ${open ? 'show' : ''}" id="menuGroup${i}">
+        <ul class="nav flex-column">${entry.items.map(it => renderMenuLink(it, true)).join('')}</ul>
+      </div>
+    </li>`;
+  }).join('');
 
   return `
     ${renderSystemHead(settings.barangay_name || 'Barangay Portal')}
@@ -472,13 +521,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
           </div>
           <hr class="text-white-50 mt-0">
           <ul class="nav nav-pills flex-column mb-auto overflow-y-auto" style="max-height: calc(100vh - 180px);">
-            ${menuItems.map(item => `
-              <li class="nav-item">
-                <a href="${item.link}" class="nav-link ${activeModule === item.id ? 'active' : ''}">
-                  <i class="bi ${item.icon} me-2"></i> ${item.label}
-                </a>
-              </li>
-            `).join('')}
+            ${renderMenu}
           </ul>
           <hr class="text-white-50">
           <div class="dropdown">
@@ -3426,10 +3469,10 @@ const renderScannerBody = () => `
     o.start(t0); o.stop(t0 + dur + 0.03);
   }
   var sounds = {
-    // Loud double-pulse buzzer: "BZZ-BZZ" (two short harsh bursts at ~440 Hz)
+    // Clear, loud two-note "ding-dong" chime (soft sine tones, no buzzing)
     scan: function () {
-      tone(440, 0, 0.14, 'square', 0.7); tone(447, 0, 0.14, 'sawtooth', 0.3);
-      tone(440, 0.2, 0.14, 'square', 0.7); tone(447, 0.2, 0.14, 'sawtooth', 0.3);
+      tone(880, 0, 0.18, 'sine', 0.9);
+      tone(1318, 0.12, 0.3, 'sine', 0.9);
     },
     success: function () { tone(880, 0, 0.12, 'sine', 0.3); tone(1320, 0.14, 0.22, 'sine', 0.3); },
     warn: function () { tone(600, 0, 0.15, 'triangle', 0.3); tone(600, 0.22, 0.15, 'triangle', 0.3); },
