@@ -721,6 +721,7 @@ app.get('/login', async (req, res) => {
   const bgImg = 'https://scontent.fmnl33-4.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=zPWWgjIxijoQ7kNvwFRKLVb&_nc_oc=AdpZBQL9o8MZk4xIiBL9pR6vKPkB7bvmqkM4R26op6LLy9SHE6Qd009laEUr-_vlHfE&_nc_zt=23&_nc_ht=scontent.fmnl33-4.fna&_nc_gid=A3E_5De3Kcc14pam4H4mgA&_nc_ss=7b2a8&oh=00_AQN0FSG7xTxJGzBY3rAhHoIZqJoNuUuFP2P_2cdm47NTxw&oe=6AC4DD7C';
   
   const { data: officials } = await supabase.from('barangay_officials').select('*');
+  const { data: publicAnnouncements } = await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(6);
 
   res.send(`
     ${renderSystemHead('Login')}
@@ -838,6 +839,58 @@ app.get('/login', async (req, res) => {
         border: none;
         box-shadow: 0 4px 10px rgba(0,0,0,0.1);
       }
+      .btn-create-account {
+        background-color: #2ecc71;
+        border: none;
+        border-radius: 10px;
+        padding: 12px;
+        font-size: 1rem;
+        letter-spacing: 0.5px;
+        color: #ffffff;
+        box-shadow: 0 4px 15px rgba(46, 204, 113, 0.4);
+        transition: all 0.25s ease;
+      }
+      .btn-create-account:hover {
+        background-color: #27ae60;
+        color: #ffffff;
+        box-shadow: 0 6px 20px rgba(39, 174, 96, 0.55);
+      }
+      .about-section {
+        padding: 90px 20px;
+        background: #ffffff;
+      }
+      .about-card {
+        border-radius: 16px;
+        border: 1px solid #a3e4d7;
+        background: linear-gradient(135deg, #f4fbff 0%, #e1f5fe 100%);
+        height: 100%;
+      }
+      .about-icon {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #205493 0%, #2ecc71 100%);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        margin: 0 auto 12px;
+      }
+      .announcements-section {
+        padding: 90px 20px;
+        background: linear-gradient(180deg, #e1f5fe 0%, #d9edf7 100%);
+      }
+      .announcement-card {
+        border-radius: 14px;
+        background: #ffffff;
+        box-shadow: 0 6px 18px rgba(32, 84, 147, 0.1);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+      .announcement-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 24px rgba(32, 84, 147, 0.18);
+      }
     </style>
 
     <!-- SECTION 1: LOGIN CARD CONTAINER (Horizontal Split Rectangle with Blue/Green BG) -->
@@ -875,21 +928,96 @@ app.get('/login', async (req, res) => {
             </form>
 
             <div class="text-center mt-4 border-top pt-3">
-              <p class="small text-muted mb-1">Are you a resident without an account?</p>
-              <a href="/register" class="text-accent-green fw-bold text-decoration-none"><i class="bi bi-person-plus-fill me-1"></i> Register as Resident</a>
+              <p class="small text-muted mb-2">New here? Residents need an account to use the portal.</p>
+              <a href="/register" class="btn btn-create-account w-100 fw-bold"><i class="bi bi-person-plus-fill me-2"></i>Create Account</a>
               <div class="mt-2 small"><a href="/terms" target="_blank" class="text-muted text-decoration-none"><i class="bi bi-file-earmark-text me-1"></i>Terms and Conditions</a></div>
             </div>
           </div>
         </div>
       </div>
 
-      <a href="#officials-section" class="scroll-down-hint mt-4">
-        <span class="d-block small">Scroll down to view Barangay Officials & Pictures</span>
+      <a href="#about-section" class="scroll-down-hint mt-4">
+        <span class="d-block small">Scroll down for Barangay Info, Announcements & Officials</span>
         <i class="bi bi-chevron-down fs-5"></i>
       </a>
     </div>
 
-    <!-- SECTION 2: SCROLLABLE BARANGAY OFFICIALS SHOWCASE WITH PICTURES -->
+    <!-- SECTION 2: ABOUT THE BARANGAY -->
+    <div id="about-section" class="about-section">
+      <div class="container">
+        <div class="text-center mb-5">
+          <h2 class="fw-bold" style="color: #0b2545;"><i class="bi bi-info-circle-fill me-2 text-accent-green"></i>About ${escHtml(settings.barangay_name || 'Our Barangay')}</h2>
+          <p class="text-muted">Get to know your barangay and how to reach us.</p>
+          <div class="mx-auto bg-accent-green" style="height: 4px; width: 80px; border-radius: 2px;"></div>
+        </div>
+        <div class="row g-4 justify-content-center">
+          <div class="col-md-6 col-lg-3">
+            <div class="card about-card p-4 text-center shadow-sm">
+              <div class="about-icon"><i class="bi bi-building"></i></div>
+              <h6 class="fw-bold text-primary-blue">Barangay</h6>
+              <p class="mb-0 text-dark">${escHtml(settings.barangay_name || 'Not yet provided')}</p>
+            </div>
+          </div>
+          <div class="col-md-6 col-lg-3">
+            <div class="card about-card p-4 text-center shadow-sm">
+              <div class="about-icon"><i class="bi bi-geo-alt-fill"></i></div>
+              <h6 class="fw-bold text-primary-blue">Location</h6>
+              <p class="mb-0 text-dark">${escHtml([settings.municipality, settings.province].filter(Boolean).join(', ') || 'Not yet provided')}</p>
+            </div>
+          </div>
+          <div class="col-md-6 col-lg-3">
+            <div class="card about-card p-4 text-center shadow-sm">
+              <div class="about-icon"><i class="bi bi-person-badge-fill"></i></div>
+              <h6 class="fw-bold text-primary-blue">Barangay Captain</h6>
+              <p class="mb-0 text-dark">${escHtml(settings.barangay_captain || 'Not yet provided')}</p>
+            </div>
+          </div>
+          <div class="col-md-6 col-lg-3">
+            <div class="card about-card p-4 text-center shadow-sm">
+              <div class="about-icon"><i class="bi bi-telephone-fill"></i></div>
+              <h6 class="fw-bold text-primary-blue">Emergency Hotline</h6>
+              <p class="mb-0 text-dark">${escHtml(settings.contact_number || 'Not yet provided')}</p>
+            </div>
+          </div>
+        </div>
+        <div class="text-center mt-5">
+          <p class="text-muted mb-3">Through this portal, residents can request certificates, book appointments, file complaints, apply for assistance, and view their Digital Barangay ID.</p>
+          <a href="/register" class="btn btn-create-account px-4 fw-bold"><i class="bi bi-person-plus-fill me-2"></i>Create Account</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 3: PUBLIC ANNOUNCEMENTS -->
+    <div id="announcements-section" class="announcements-section">
+      <div class="container">
+        <div class="text-center mb-5">
+          <h2 class="fw-bold" style="color: #0b2545;"><i class="bi bi-megaphone-fill me-2 text-accent-green"></i>Barangay Announcements</h2>
+          <p class="text-muted">The latest news and advisories from your barangay.</p>
+          <div class="mx-auto bg-accent-green" style="height: 4px; width: 80px; border-radius: 2px;"></div>
+        </div>
+        <div class="row g-4 justify-content-center">
+          ${(publicAnnouncements || []).map(a => `
+            <div class="col-md-6 col-lg-4">
+              <div class="card announcement-card p-4 h-100 border-start border-4 ${a.priority === 'Emergency' ? 'border-danger' : 'border-primary'}">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <small class="text-secondary"><i class="bi bi-calendar3 me-1"></i>${a.created_at ? new Date(a.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : ''}</small>
+                  <span class="badge ${a.priority === 'Emergency' ? 'bg-danger' : 'bg-primary'} text-white">${escHtml(a.priority || 'Normal')}</span>
+                </div>
+                <h5 class="fw-bold text-primary-blue">${escHtml(a.title)}</h5>
+                <p class="text-muted small mb-0" style="white-space: pre-line;">${escHtml(a.content)}</p>
+              </div>
+            </div>
+          `).join('') || `
+            <div class="col-12 text-center text-muted py-4">
+              <i class="bi bi-megaphone fs-1 text-secondary"></i>
+              <p class="mt-2">No announcements at this time. Please check back soon.</p>
+            </div>
+          `}
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 4: SCROLLABLE BARANGAY OFFICIALS SHOWCASE WITH PICTURES -->
     <div id="officials-section" class="officials-section">
       <div class="container">
         <div class="text-center mb-5">
