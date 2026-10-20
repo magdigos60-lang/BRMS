@@ -44,6 +44,7 @@ const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
+app.use('/public', express.static(path.join(__dirname, 'public'), { maxAge: '7d' }));
 app.use(cors());
 
 // ==========================================
@@ -101,7 +102,9 @@ const logActivity = async (userId, action, details = '', ip = '') => {
 // ==========================================
 // CONSTANTS & LOGIC CONSTANTS
 // ==========================================
-const DEFAULT_LOGIN_BG = 'https://scontent.fmnl33-4.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=zPWWgjIxijoQ7kNvwFRKLVb&_nc_oc=AdpZBQL9o8MZk4xIiBL9pR6vKPkB7bvmqkM4R26op6LLy9SHE6Qd009laEUr-_vlHfE&_nc_zt=23&_nc_ht=scontent.fmnl33-4.fna&_nc_gid=A3E_5De3Kcc14pam4H4mgA&_nc_ss=7b2a8&oh=00_AQN0FSG7xTxJGzBY3rAhHoIZqJoNuUuFP2P_2cdm47NTxw&oe=6AC4DD7C';
+const fs = require('fs');
+const LOCAL_LOGIN_BG = ['jpg', 'jpeg', 'png', 'webp'].map(e => 'login-bg.' + e).find(f => fs.existsSync(path.join(__dirname, 'public', f)));
+const DEFAULT_LOGIN_BG = process.env.LOGIN_BG_URL || (LOCAL_LOGIN_BG ? '/public/' + LOCAL_LOGIN_BG : 'https://scontent.fmnl7-1.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=9kiVrKuYCaEQ7kNvwF5Fqvg&_nc_oc=AdoHRQdsyCcxTqk4w0KR7R2Zb0enrC3hW7pK-daM2VkR25d4VzUTYRPuDeVAO-0OqxE&_nc_zt=23&_nc_ht=scontent.fmnl7-1.fna&_nc_gid=YqF5baJjuA9AxDmeY4t-cQ&_nc_ss=7b2a8&oh=00_AQNGaJ1omjdjMSMRvX3nmmA0cmDu2W92J5Tr5Xc7qjcUPA&oe=6ADCD0BC');
 
 // ==========================================
 // INLINE CORE HTML/CSS SYSTEM STYLES ENGINE
@@ -718,7 +721,7 @@ app.post('/api/setup', async (req, res) => {
 // ==========================================
 app.get('/login', async (req, res) => {
   const settings = await getSettings();
-  const bgImg = 'https://scontent.fmnl33-4.fna.fbcdn.net/v/t39.30808-6/825351115_2246821486242027_8708722577315615068_n.jpg?stp=dst-jpg_tt6&cstp=mx1060x992&ctp=s1060x992&_nc_cat=110&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeHpk_cBk3_TrQDPpACbx68fjQwB0jaJYXWNDAHSNolhdfR3vwGsh31cD5-A7Nb3qzplS4aAfDftzWcsmyDXAsnf&_nc_ohc=zPWWgjIxijoQ7kNvwFRKLVb&_nc_oc=AdpZBQL9o8MZk4xIiBL9pR6vKPkB7bvmqkM4R26op6LLy9SHE6Qd009laEUr-_vlHfE&_nc_zt=23&_nc_ht=scontent.fmnl33-4.fna&_nc_gid=A3E_5De3Kcc14pam4H4mgA&_nc_ss=7b2a8&oh=00_AQN0FSG7xTxJGzBY3rAhHoIZqJoNuUuFP2P_2cdm47NTxw&oe=6AC4DD7C';
+  const bgImg = DEFAULT_LOGIN_BG;
   
   const { data: officials } = await supabase.from('barangay_officials').select('*');
   const { data: publicAnnouncements } = await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(6);
@@ -737,6 +740,7 @@ app.get('/login', async (req, res) => {
         min-height: 100vh;
         /* Green sa taas, Blue sa baba, hindi masyadong madilim */
         background: linear-gradient(180deg, rgba(46, 204, 113, 0.75), rgba(32, 84, 147, 0.75)), url('${bgImg}');
+        background-color: #205493;
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
