@@ -317,6 +317,68 @@ const renderSystemHead = (title) => `
     @keyframes loaderFailsafe { to { opacity: 0; visibility: hidden; pointer-events: none; } }
     @media print { #page-loader, #top-progress { display: none !important; } }
 
+    /* ===== MOBILE / COMPACT LAYOUT ===== */
+    .main-pane { height: 100vh; overflow-y: auto; background-color: #f4f9f6; }
+    .mobile-topbar {
+      position: sticky; top: 0; z-index: 1030; height: 52px; padding: 0 12px;
+      display: flex; align-items: center; gap: 10px; color: #fff;
+      background: linear-gradient(90deg, var(--primary-navy) 0%, var(--primary-blue) 100%);
+      box-shadow: 0 2px 6px rgba(0,0,0,.15);
+    }
+    .mobile-topbar img { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
+    .mobile-topbar .t-name { font-weight: 700; font-size: .95rem; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+    .mobile-topbar .t-name small { display: block; font-weight: 400; font-size: .7rem; opacity: .8; }
+    .mobile-topbar .btn-menu { background: transparent; border: 0; color: #fff; font-size: 1.6rem; padding: 0 4px; }
+    .offcanvas.mobile-menu { background: linear-gradient(180deg, var(--primary-navy) 0%, var(--primary-blue) 100%); color: #fff; width: 280px; }
+    .offcanvas.mobile-menu .nav-link { color: rgba(255,255,255,.88); font-weight: 500; padding: 10px 14px; margin: 2px 0; border-radius: 6px; }
+    .offcanvas.mobile-menu .nav-link.sub-link { padding: 8px 12px 8px 28px; font-size: .92rem; }
+    .offcanvas.mobile-menu .nav-link:hover, .offcanvas.mobile-menu .nav-link.active { background-color: var(--accent-green); color: #fff; }
+    .offcanvas.mobile-menu .menu-group-toggle .menu-chevron { transition: transform .2s; }
+    .offcanvas.mobile-menu .menu-group-toggle.collapsed .menu-chevron { transform: rotate(-90deg); }
+    .bottom-nav {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 1030; height: 58px;
+      display: flex; background: #fff; border-top: 1px solid #d1e7dd; box-shadow: 0 -2px 8px rgba(32,84,147,.1);
+      padding-bottom: env(safe-area-inset-bottom);
+      box-sizing: content-box;
+    }
+    .bottom-nav a, .bottom-nav button {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 1px; color: #5b6b82; text-decoration: none; font-size: .66rem; font-weight: 600;
+      background: transparent; border: 0; padding: 4px 2px;
+    }
+    .bottom-nav i { font-size: 1.3rem; line-height: 1; }
+    .bottom-nav .active { color: var(--primary-blue); }
+    .bottom-nav .active i { color: var(--accent-green); }
+
+    @media (max-width: 767.98px) {
+      html, body { overflow-x: hidden; }
+      .main-pane { height: auto; min-height: calc(100vh - 52px); overflow: visible; padding: 10px !important; }
+      .main-pane.has-bottom-nav { padding-bottom: 76px !important; }
+      .main-pane .card-custom.p-4, .main-pane .card.p-4, .main-pane .p-4 { padding: 12px !important; }
+      .main-pane .p-5 { padding: 16px !important; }
+      .main-pane h3 { font-size: 1.15rem; }
+      .main-pane h4 { font-size: 1.05rem; }
+      .main-pane h5 { font-size: 1rem; }
+      .main-pane h6 { font-size: .9rem; }
+      .main-pane h2 { font-size: 1.5rem; }
+      .main-pane .display-1, .main-pane .display-3 { font-size: 2.6rem; }
+      .main-pane .mb-4 { margin-bottom: .85rem !important; }
+      .main-pane .row { --bs-gutter-x: .6rem; --bs-gutter-y: .6rem; }
+      .main-pane .form-label { font-size: .8rem; margin-bottom: 2px; }
+      .main-pane .form-control, .main-pane .form-select { font-size: 16px; padding: .4rem .6rem; }
+      .main-pane .btn { padding: .4rem .7rem; font-size: .9rem; }
+      .main-pane .table { font-size: .8rem; }
+      .main-pane .table > :not(caption) > * > * { padding: .35rem .4rem; }
+      .main-pane .alert { padding: .6rem .75rem; font-size: .88rem; }
+      .main-pane .modal-dialog { margin: .5rem; }
+      .id-card-frame { display: block; margin: 4px auto 6px; max-width: 100%; }
+    }
+    @media (max-width: 359px) {
+      .id-card-frame { transform: scale(.9); transform-origin: top center; }
+    }
+    @media (min-width: 768px) { .mobile-topbar, .bottom-nav { display: none !important; } }
+    @media print { .mobile-topbar, .bottom-nav { display: none !important; } }
+
     @media print {
       .no-print { display: none !important; }
       body { background: white !important; }
@@ -527,27 +589,58 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
       </a>
     </li>`;
 
-  const renderMenu = menuItems.map((entry, i) => {
+  const renderMenuFor = (pfx) => menuItems.map((entry, i) => {
     if (!entry.group) return renderMenuLink(entry, false);
     const open = entry.items.some(it => it.id === activeModule);
     return `
     <li class="nav-item">
-      <a class="nav-link menu-group-toggle d-flex align-items-center ${open ? '' : 'collapsed'}" data-bs-toggle="collapse" href="#menuGroup${i}" role="button" aria-expanded="${open}" aria-controls="menuGroup${i}">
+      <a class="nav-link menu-group-toggle d-flex align-items-center ${open ? '' : 'collapsed'}" data-bs-toggle="collapse" href="#${pfx}menuGroup${i}" role="button" aria-expanded="${open}" aria-controls="${pfx}menuGroup${i}">
         <i class="bi ${entry.icon} me-2"></i> <span class="flex-grow-1">${entry.group}</span>
         <i class="bi bi-chevron-down menu-chevron small"></i>
       </a>
-      <div class="collapse ${open ? 'show' : ''}" id="menuGroup${i}">
+      <div class="collapse ${open ? 'show' : ''}" id="${pfx}menuGroup${i}">
         <ul class="nav flex-column">${entry.items.map(it => renderMenuLink(it, true)).join('')}</ul>
       </div>
     </li>`;
   }).join('');
+  const renderMenu = renderMenuFor('d');
+  const renderMobileMenu = renderMenuFor('m');
+
+  const bottomItems = [
+    { id: 'res-dashboard', label: 'Home', icon: 'bi-house-door', link: '/resident/dashboard' },
+    { id: 'res-digital-id', label: 'My ID', icon: 'bi-qr-code', link: '/resident/digital-id' },
+    { id: 'res-certificates', label: 'Request', icon: 'bi-file-earmark-plus', link: '/resident/certificates' },
+    { id: 'res-aid', label: 'Aid', icon: 'bi-box2-heart', link: '/resident/aid' },
+  ];
+  const bottomNav = isAdmin ? '' : `
+    <nav class="bottom-nav no-print">
+      ${bottomItems.map(b => `<a href="${b.link}" class="${activeModule === b.id ? 'active' : ''}"><i class="bi ${b.icon}"></i>${b.label}</a>`).join('')}
+      <button type="button" data-bs-toggle="offcanvas" data-bs-target="#mobileMenu"><i class="bi bi-list"></i>More</button>
+    </nav>`;
 
   return `
     ${renderSystemHead(settings.barangay_name || 'Barangay Portal')}
     <div class="container-fluid p-0">
       <div class="row g-0">
         <!-- Sidebar Navigation -->
-        <div class="col-md-3 col-lg-2 sidebar d-flex flex-column p-3 no-print">
+        <div class="mobile-topbar no-print">
+          ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" alt="">` : '<i class="bi bi-building fs-4"></i>'}
+          <div class="t-name">${settings.barangay_name || 'BARANGAY PORTAL'}<small>${user.full_name || user.role || 'User'}</small></div>
+          <button type="button" class="btn-menu" data-bs-toggle="offcanvas" data-bs-target="#mobileMenu" aria-label="Menu"><i class="bi bi-list"></i></button>
+        </div>
+        <div class="offcanvas offcanvas-start mobile-menu no-print" tabindex="-1" id="mobileMenu">
+          <div class="offcanvas-header">
+            <h6 class="offcanvas-title fw-bold">${settings.barangay_name || 'BARANGAY PORTAL'}</h6>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+          </div>
+          <div class="offcanvas-body pt-0">
+            <ul class="nav nav-pills flex-column">${renderMobileMenu}</ul>
+            <hr class="text-white-50">
+            <a class="nav-link text-white" href="/account"><i class="bi bi-key me-2"></i>Account &amp; Password</a>
+            <a class="nav-link text-white" href="/logout"><i class="bi bi-box-arrow-right me-2"></i>Sign out</a>
+          </div>
+        </div>
+        <div class="col-md-3 col-lg-2 sidebar d-none d-md-flex flex-column p-3 no-print">
           <div class="d-flex align-items-center mb-4 px-2">
             ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="me-2 rounded-circle shadow-sm" style="width: 70px; height: 70px; object-fit: cover; border: none;">` : '<i class="bi bi-building fs-1 me-2 text-accent-green"></i>'}
             <div>
@@ -573,8 +666,8 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         </div>
 
         <!-- Main Content Area -->
-        <div class="col-md-9 col-lg-10 p-4 overflow-y-auto" style="height: 100vh; background-color: #f4f9f6;">
-          <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom no-print">
+        <div class="col-md-9 col-lg-10 p-4 main-pane ${isAdmin ? '' : 'has-bottom-nav'}">
+          <div class="d-none d-md-flex justify-content-between align-items-center mb-4 pb-2 border-bottom no-print">
             <h4 class="fw-bold text-primary-blue m-0">${settings.system_name || 'Barangay Resident Management System'}</h4>
             <span class="badge bg-accent-green px-3 py-2 text-white"><i class="bi bi-check-circle me-1"></i> System Online</span>
           </div>
@@ -582,6 +675,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
         </div>
       </div>
     </div>
+    ${bottomNav}
     ${renderSystemFooter()}
   `;
 };
@@ -890,6 +984,18 @@ app.get('/login', async (req, res) => {
         background: #ffffff;
         box-shadow: 0 6px 18px rgba(32, 84, 147, 0.1);
         transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+      @media (max-width: 767.98px) {
+        .login-section { padding: 16px 12px 70px; background-attachment: scroll; }
+        .horizontal-login-card { border-radius: 14px; }
+        .horizontal-login-card .p-5 { padding: 18px !important; }
+        .brand-logo-img { width: 84px; height: 84px; }
+        .horizontal-login-card h3 { font-size: 1.15rem; }
+        .horizontal-login-card h4 { font-size: 1.1rem; margin-bottom: .8rem !important; }
+        .form-control-horizontal { height: 42px; font-size: 16px; }
+        .about-section, .announcements-section, .officials-section { padding: 36px 14px; }
+        .official-photo { width: 96px; height: 96px; }
+        .scroll-down-hint { bottom: 10px; padding: 5px 12px; font-size: .75rem; }
       }
       .announcement-card:hover {
         transform: translateY(-4px);
