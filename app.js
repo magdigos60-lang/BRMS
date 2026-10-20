@@ -11,6 +11,7 @@ const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const QRCode = require('qrcode');
 const multer = require('multer');
@@ -564,6 +565,7 @@ const renderAppLayout = (req, activeModule, contentHtml, settings = {}) => {
     { group: 'My Account', icon: 'bi-person-circle', items: [
       { id: 'res-profile', label: 'My Profile & Photo', icon: 'bi-person-circle', link: '/resident/profile' },
       { id: 'res-digital-id', label: 'My Digital ID', icon: 'bi-card-checklist', link: '/resident/digital-id' },
+      { id: 'res-family', label: 'My Family & Accounts', icon: 'bi-people', link: '/resident/family' },
       { id: 'res-account', label: 'Account & Password', icon: 'bi-key', link: '/account' },
     ]},
     { group: 'Requests & Services', icon: 'bi-journal-check', items: [
@@ -1210,7 +1212,7 @@ app.get('/register', async (req, res) => {
               <h3 class="fw-bold text-primary-blue"><i class="bi bi-person-badge me-2"></i>Resident Public Registration</h3>
               <p class="text-muted">Complete the official form. Registrations undergo approval by Barangay Officials.</p>
             </div>
-            <form action="/api/register" method="POST">
+            <form action="/api/register" method="POST" enctype="multipart/form-data">
               <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3">Personal Information</h6>
               <div class="row">
                 <div class="col-md-4 mb-3">
@@ -1341,11 +1343,33 @@ app.get('/register', async (req, res) => {
                         '<div class="col-md-2"><label class="form-label small mb-0">Gender *</label><select name="members[' + i + '][gender]" class="form-select form-select-sm">' + opts(['Male', 'Female']) + '</select></div>' +
                         '<div class="col-md-2"><label class="form-label small mb-0">Civil Status *</label><select name="members[' + i + '][civil_status]" class="form-select form-select-sm">' + opts(['Single', 'Married', 'Widowed', 'Separated']) + '</select></div>' +
                         '<div class="col-md-3"><label class="form-label small mb-0">Contact Number</label><input type="text" name="members[' + i + '][contact_number]" class="form-control form-control-sm" placeholder="Optional"></div>' +
+                        '<div class="col-md-6"><label class="form-label small mb-0">Photo (optional)</label><input type="file" name="member_photo_' + i + '" class="form-control form-control-sm member-photo" accept="image/*"></div>' +
                         '<div class="col-12 mt-2"><span class="small fw-bold">Category:</span></div>' +
                         chk(i, 'cat_college', 'College', 'College Student') +
                         chk(i, 'cat_senior', 'Senior', 'Senior Citizen') +
                         chk(i, 'cat_pwd', 'Pwd', 'PWD') +
                       '</div>';
+                    // Shrink big phone photos in the browser before upload (max 600px, JPEG)
+                    div.querySelector('.member-photo').addEventListener('change', function (ev) {
+                      var input = ev.target, f = input.files && input.files[0];
+                      if (!f || f.type.indexOf('image/') !== 0 || !window.DataTransfer) return;
+                      var img = new Image(), url = URL.createObjectURL(f);
+                      img.onload = function () {
+                        var s = Math.min(1, 600 / Math.max(img.width, img.height));
+                        var c = document.createElement('canvas');
+                        c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+                        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                        c.toBlob(function (blob) {
+                          URL.revokeObjectURL(url);
+                          if (!blob) return;
+                          var dt = new DataTransfer();
+                          dt.items.add(new File([blob], 'photo.jpg', { type: 'image/jpeg' }));
+                          input.files = dt.files;
+                        }, 'image/jpeg', 0.85);
+                      };
+                      img.onerror = function () { URL.revokeObjectURL(url); };
+                      img.src = url;
+                    });
                     div.querySelector('.remove-member').addEventListener('click', function () {
                       div.remove();
                       renumber();
@@ -1388,7 +1412,24 @@ app.get('/register', async (req, res) => {
   `);
 });
 
-app.post('/api/register', async (req, res) => {
+// Random temporary password (no look-alike characters such as 0/O or 1/l/I)
+const genTempPassword = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = crypto.randomBytes(8);
+  let p = '';
+  for (let i = 0; i < 8; i++) p += chars[bytes[i] % chars.length];
+  return p;
+};
+const toDataUrl = (file) => (file && file.size > 0 && String(file.mimetype).startsWith('image/'))
+  ? `data:${file.mimetype};base64,${file.buffer.toString('base64')}` : null;
+
+// Registration is multipart so each family member can have a photo (fields: member_photo_<index>)
+const registerUpload = (req, res, next) => upload.any()(req, res, (err) => {
+  if (err) return res.status(400).send('<script>alert("Upload error: ' + String(err.message).replace(/["\\\n]/g, ' ') + ' (photos must be 10MB or smaller)."); window.history.back();</script>');
+  next();
+});
+
+app.post('/api/register', registerUpload, async (req, res) => {
   try {
     const first_name = (req.body.first_name || '').trim();
     const middle_name = (req.body.middle_name || '').trim();
@@ -1418,10 +1459,15 @@ app.post('/api/register', async (req, res) => {
     }
 
     // ----- Family members entered by the head (members[0][first_name], ...) -----
-    const rawMembers = req.body.members
-      ? (Array.isArray(req.body.members) ? req.body.members : Object.values(req.body.members))
-      : [];
-    const members = rawMembers.slice(0, 15).map(m => ({
+    // Object.entries skips holes (removed members) and keeps each member's original form index, which links the photo field
+    const rawMembers = Object.entries(req.body.members || {})
+      .filter(([, v]) => v && typeof v === 'object')
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .slice(0, 15);
+    const filesByField = {};
+    (req.files || []).forEach(f => { filesByField[f.fieldname] = f; });
+    const members = rawMembers.map(([formIdx, m]) => ({
+      photo_url: toDataUrl(filesByField['member_photo_' + formIdx]),
       relationship: String((m && m.relationship) || '').trim(),
       first_name: String((m && m.first_name) || '').trim(),
       middle_name: String((m && m.middle_name) || '').trim(),
@@ -1498,12 +1544,15 @@ app.post('/api/register', async (req, res) => {
 
     // ----- Family members: each becomes a resident (Pending) with the same household, purok and address -----
     let memberNumbers = [];
+    let memberRecords = []; // { resident_number, full_name } in the same order as members
     if (members.length) {
       const memberRows = members.map((m, idx) => {
         const num = makeNumber(idx + 2);
         memberNumbers.push(num);
+        memberRecords.push({ resident_number: num, full_name: `${m.first_name} ${m.last_name}`, relationship: m.relationship || 'Other Relative' });
         return {
           resident_number: num,
+          photo_url: m.photo_url,
           first_name: m.first_name,
           middle_name: m.middle_name,
           last_name: m.last_name,
@@ -1523,7 +1572,12 @@ app.post('/api/register', async (req, res) => {
           household_id
         };
       });
-      const { error: memErr } = await supabase.from('residents').insert(memberRows);
+      const { data: insertedMembers, error: memErr } = await supabase.from('residents').insert(memberRows).select('id, resident_number');
+      if (!memErr) {
+        const idByNumber = {};
+        (insertedMembers || []).forEach(r => { idByNumber[r.resident_number] = r.id; });
+        memberRecords.forEach(r => { r.resident_id = idByNumber[r.resident_number]; });
+      }
       if (memErr) {
         await supabase.from('residents').delete().eq('id', resident.id);
         await supabase.from('households').delete().eq('id', createdHouseholdId);
@@ -1544,14 +1598,55 @@ app.post('/api/register', async (req, res) => {
       resident_id: resident.id
     }]);
 
+    // ----- Auto-create a login for every family member (temporary password the head can see) -----
+    // Needs: alter table users add column if not exists temp_password text;
+    let credentials = [];
+    let accountsFailed = false;
+    if (memberRecords.length) {
+      const accountRows = await Promise.all(memberRecords.filter(r => r.resident_id).map(async (r) => {
+        const temp = genTempPassword();
+        return {
+          username: r.resident_number,
+          email: `${r.resident_number.toLowerCase()}@family.local`,
+          password_hash: await bcrypt.hash(temp, 10),
+          temp_password: temp,
+          full_name: r.full_name,
+          role: 'Resident',
+          status: 'Pending',
+          resident_id: r.resident_id,
+          _rel: r.relationship
+        };
+      }));
+      const { error: accErr } = await supabase.from('users').insert(accountRows.map(({ _rel, ...row }) => row));
+      if (accErr) {
+        console.error('Family account creation error:', accErr);
+        accountsFailed = true;
+      } else {
+        credentials = accountRows.map(a => ({ name: a.full_name, relationship: a._rel, username: a.username, password: a.temp_password }));
+      }
+    }
+
+    const credentialsHtml = credentials.length ? `
+          <hr>
+          <h5 class="fw-bold text-primary-blue text-start"><i class="bi bi-key me-2"></i>Family Member Login Accounts</h5>
+          <p class="small text-muted text-start">Each family member has their own account. Write these down or print this page. They can log in once the barangay approves your registration, and should change the temporary password on first login. You can see these again later under <em>My Family &amp; Accounts</em> after you log in.</p>
+          <div class="table-responsive text-start">
+            <table class="table table-sm table-bordered bg-white align-middle">
+              <thead class="table-light"><tr><th>Member</th><th>Username</th><th>Temporary Password</th></tr></thead>
+              <tbody>${credentials.map(c => `<tr><td>${escHtml(c.name)}<br><small class="text-muted">${escHtml(c.relationship)}</small></td><td><code>${escHtml(c.username)}</code></td><td><code>${escHtml(c.password)}</code></td></tr>`).join('')}</tbody>
+            </table>
+          </div>
+          <button type="button" class="btn btn-outline-primary btn-sm no-print" onclick="window.print()"><i class="bi bi-printer me-1"></i> Print</button>` : (accountsFailed ? '<div class="alert alert-warning small mt-3 text-start">Your family members were registered, but their login accounts could not be created automatically. Please inform the Barangay office.</div>' : '');
+
     res.send(`
       ${renderSystemHead('Registration Pending')}
       <div class="container text-center pt-5">
-        <div class="card p-5 shadow-lg d-inline-block bg-light-green" style="max-width: 520px;">
+        <div class="card p-5 shadow-lg d-inline-block bg-light-green" style="max-width: 640px;">
           <i class="bi bi-clock-history text-warning display-1"></i>
           <h3 class="mt-3 text-primary-blue fw-bold">Registration Received</h3>
           <p class="text-muted">Your resident registration reference is <strong>${resident_number}</strong>.${members.length ? ` <strong>${members.length}</strong> family member${members.length > 1 ? 's were' : ' was'} also registered under your household.` : ''} Please wait for official approval from Barangay Admin before logging in. Once approved, you can view and show the Barangay ID of every member of your household from <em>My Digital ID</em>.</p>
-          <a href="/login" class="btn btn-primary-custom mt-3">Return to Login</a>
+          ${credentialsHtml}
+          <a href="/login" class="btn btn-primary-custom mt-3 no-print">Return to Login</a>
         </div>
       </div>
       ${renderSystemFooter()}
@@ -1857,14 +1952,10 @@ app.get('/api/admin/resident/approve/:id', authenticateToken, requireRole(['Supe
         .eq('household_id', target.household_id).eq('resident_status', 'Pending').neq('id', target.id);
       const ids = (pendingMembers || []).map(m => m.id);
       if (ids.length) {
-        // Only auto-approve members without their own login account (those are approved individually)
-        const { data: withLogin } = await supabase.from('users').select('resident_id').in('resident_id', ids);
-        const hasLogin = new Set((withLogin || []).map(u => u.resident_id));
-        const toApprove = ids.filter(id => !hasLogin.has(id));
-        if (toApprove.length) {
-          await supabase.from('residents').update({ resident_status: 'Active' }).in('id', toApprove);
-          familyCount = toApprove.length;
-        }
+        // Family members are registered by the head, so they are approved together with the head (including their auto-created logins)
+        await supabase.from('residents').update({ resident_status: 'Active' }).in('id', ids);
+        await supabase.from('users').update({ status: 'Active' }).in('resident_id', ids).eq('status', 'Pending');
+        familyCount = ids.length;
       }
     }
     await logActivity(req.user.id, 'Approve Resident', `Approved resident ID: ${req.params.id}${familyCount ? ` and ${familyCount} household member(s)` : ''}`);
@@ -1886,10 +1977,8 @@ app.get('/api/admin/resident/reject/:id', authenticateToken, requireRole(['Super
         .eq('household_id', target.household_id).eq('resident_status', 'Pending').neq('id', target.id);
       const ids = (pendingMembers || []).map(m => m.id);
       if (ids.length) {
-        const { data: withLogin } = await supabase.from('users').select('resident_id').in('resident_id', ids);
-        const hasLogin = new Set((withLogin || []).map(u => u.resident_id));
-        const toArchive = ids.filter(id => !hasLogin.has(id));
-        if (toArchive.length) await supabase.from('residents').update({ resident_status: 'Archived' }).in('id', toArchive);
+        await supabase.from('residents').update({ resident_status: 'Archived' }).in('id', ids);
+        await supabase.from('users').update({ status: 'Disabled' }).in('resident_id', ids);
       }
     }
     await logActivity(req.user.id, 'Reject Resident', `Rejected registration for resident ID: ${req.params.id}`);
@@ -3409,12 +3498,111 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
     ${family.length ? `
       <div class="text-center pb-4">
         <h5 class="fw-bold text-primary-blue mb-1"><i class="bi bi-people me-2"></i>My Household Members' IDs</h5>
+        ${resident.is_household_head ? '<p class="small mb-2"><a href="/resident/family"><i class="bi bi-camera me-1"></i>Update member photos / see their login details</a></p>' : ''}
         <p class="small text-muted mb-3">Each family member is a registered resident with their own ID and QR code. Show the member's QR code when they claim aid or documents.</p>
         ${familyCards.join('')}
       </div>` : ''}
   `;
 
   res.send(renderAppLayout(req, 'res-digital-id', html, settings));
+});
+
+// ---------- My Family & Accounts (household head): member photos + temporary login credentials ----------
+const FAMILY_MESSAGES = {
+  photo_ok: ['success', 'The photo was updated.'],
+  photo_bad: ['danger', 'Please choose a valid image file (PNG or JPG).'],
+  denied: ['danger', 'You can only manage members of your own household.'],
+  error: ['danger', 'Something went wrong. Please try again.']
+};
+
+app.get('/resident/family', authenticateToken, requireRole(['Resident']), async (req, res) => {
+  const settings = await getSettings();
+  const { data: me } = await supabase.from('residents').select('id, household_id, is_household_head').eq('id', req.user.resident_id).maybeSingle();
+  const msg = FAMILY_MESSAGES[req.query.msg];
+
+  if (!me || !me.is_household_head || !me.household_id) {
+    return res.send(renderAppLayout(req, 'res-family', `
+      <div class="card card-custom p-4 text-center" style="max-width: 600px; margin: auto;">
+        <i class="bi bi-people fs-1 text-primary-blue"></i>
+        <h5 class="fw-bold text-primary-blue mt-2">My Family &amp; Accounts</h5>
+        <p class="text-muted mb-0">This page is for the head of the household. To change your own photo, go to <a href="/resident/profile">My Profile &amp; Photo</a>.</p>
+      </div>`, settings));
+  }
+
+  const { data: members } = await supabase.from('residents').select('id, first_name, last_name, resident_number, relationship, resident_status, photo_url')
+    .eq('household_id', me.household_id).neq('id', me.id).order('created_at', { ascending: true });
+  const ids = (members || []).map(m => m.id);
+  let accounts = [];
+  if (ids.length) {
+    const { data: accs } = await supabase.from('users').select('resident_id, username, temp_password, status').in('resident_id', ids);
+    accounts = accs || [];
+  }
+  const accByResident = {};
+  accounts.forEach(a => { accByResident[a.resident_id] = a; });
+
+  const cards = (members || []).map(m => {
+    const a = accByResident[m.id];
+    const cred = !a
+      ? '<span class="text-muted small">No account was created for this member. Please ask the Barangay office.</span>'
+      : (a.temp_password
+        ? `<div class="small"><strong>Username:</strong> <code>${escHtml(a.username)}</code></div>
+           <div class="small"><strong>Temporary password:</strong> <code>${escHtml(a.temp_password)}</code></div>
+           <div class="small text-muted mt-1">${m.resident_status === 'Active' ? 'Share this with the member and ask them to change it after logging in.' : 'The member can log in once the barangay approves the registration.'}</div>`
+        : `<div class="small"><strong>Username:</strong> <code>${escHtml(a.username)}</code></div>
+           <div class="small text-success"><i class="bi bi-check-circle me-1"></i>The member already set their own password.</div>`);
+    return `
+      <div class="col-md-6">
+        <div class="card card-custom p-3 h-100">
+          <div class="d-flex gap-3 align-items-start">
+            <img src="${m.photo_url || 'https://via.placeholder.com/100'}" class="rounded-circle flex-shrink-0" style="width:80px; height:80px; object-fit:cover;" alt="">
+            <div class="flex-grow-1" style="min-width:0;">
+              <h6 class="fw-bold text-primary-blue m-0">${escHtml(m.first_name)} ${escHtml(m.last_name)}</h6>
+              <small class="text-muted d-block">${escHtml(m.relationship || 'Family member')} &middot; ${escHtml(m.resident_number)}</small>
+              <span class="badge ${m.resident_status === 'Active' ? 'bg-success' : 'bg-warning text-dark'} mt-1">${m.resident_status === 'Active' ? 'Active' : 'Awaiting approval'}</span>
+            </div>
+          </div>
+          <div class="bg-light-green rounded p-2 mt-3">${cred}</div>
+          <form action="/api/resident/family/${m.id}/upload-photo" method="POST" enctype="multipart/form-data" class="mt-3">
+            <label class="form-label small fw-bold mb-1">Update photo</label>
+            <div class="input-group input-group-sm">
+              <input type="file" name="photo" class="form-control" accept="image/*" required>
+              <button type="submit" class="btn btn-primary-custom text-white"><i class="bi bi-upload me-1"></i>Upload</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+  }).join('');
+
+  const html = `
+    <div style="max-width: 980px; margin: auto;">
+      ${msg ? `<div class="alert alert-${msg[0]}">${msg[1]}</div>` : ''}
+      <div class="card card-custom p-4 mb-3">
+        <h4 class="fw-bold text-primary-blue m-0"><i class="bi bi-people me-2"></i>My Family &amp; Accounts</h4>
+        <p class="text-muted small mb-0 mt-2">Each family member has their own login. Temporary passwords are shown here until the member changes theirs. You can also update the photo of any member of your household.</p>
+      </div>
+      <div class="row g-3">
+        ${cards || '<div class="col-12 text-center text-muted py-4">No other family members are registered under your household.</div>'}
+      </div>
+    </div>`;
+  res.send(renderAppLayout(req, 'res-family', html, settings));
+});
+
+app.post('/api/resident/family/:id/upload-photo', authenticateToken, requireRole(['Resident']), upload.single('photo'), async (req, res) => {
+  const back = (k) => res.redirect('/resident/family?msg=' + k);
+  try {
+    const { data: me } = await supabase.from('residents').select('id, household_id, is_household_head').eq('id', req.user.resident_id).maybeSingle();
+    const { data: target } = await supabase.from('residents').select('id, household_id, first_name, last_name').eq('id', req.params.id).maybeSingle();
+    if (!me || !me.is_household_head || !me.household_id || !target || target.household_id !== me.household_id) return back('denied');
+    const photo = toDataUrl(req.file);
+    if (!photo) return back('photo_bad');
+    const { error } = await supabase.from('residents').update({ photo_url: photo }).eq('id', target.id);
+    if (error) throw error;
+    await logActivity(req.user.id, 'Family Member Photo Update', `Head updated the photo of ${target.first_name} ${target.last_name}.`, req.ip);
+    back('photo_ok');
+  } catch (err) {
+    console.error('Family photo error:', err);
+    back('error');
+  }
 });
 
 // Resident Certificate Request
@@ -4724,7 +4912,8 @@ app.post('/api/account/change-password', authenticateToken, async (req, res) => 
     if (new_password !== confirm_password) return back('pw_mismatch');
     if (new_password === current_password) return back('pw_same');
     const password_hash = await bcrypt.hash(String(new_password), 10);
-    const { error } = await supabase.from('users').update({ password_hash }).eq('id', req.user.id);
+    let { error } = await supabase.from('users').update({ password_hash, temp_password: null }).eq('id', req.user.id);
+    if (error) ({ error } = await supabase.from('users').update({ password_hash }).eq('id', req.user.id)); // column not added yet
     if (error) throw error;
     await logActivity(req.user.id, 'Change Password', 'User changed their own password.', req.ip);
     back('pw_ok');
@@ -4878,7 +5067,9 @@ app.post('/api/admin/user/:id/update', authenticateToken, requireRole(['Super Ad
       if (newPw.length < 6) return alertBack(res, 'The new password must be at least 6 characters.');
       upd.password_hash = await bcrypt.hash(newPw, 10);
     }
-    const { error } = await supabase.from('users').update(upd).eq('id', target.id);
+    if (newPw) upd.temp_password = null;
+    let { error } = await supabase.from('users').update(upd).eq('id', target.id);
+    if (error && newPw) { delete upd.temp_password; ({ error } = await supabase.from('users').update(upd).eq('id', target.id)); } // column not added yet
     if (error) throw error;
     if (isResident && target.resident_id && email !== target.email) {
       await supabase.from('residents').update({ email }).eq('id', target.resident_id);
