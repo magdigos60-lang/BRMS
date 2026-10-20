@@ -1167,38 +1167,85 @@ app.get('/register', async (req, res) => {
                 </div>
               </div>
 
-              <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-3">Resident Category</h6>
+              <div class="alert alert-info small py-2 mt-2">
+                <i class="bi bi-info-circle me-1"></i> <strong>Only the head of the family registers.</strong> Add your spouse, children, parents and other household members below. Each of them will be recorded as a resident and will receive their own Barangay ID once approved.
+              </div>
+
+              <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-3">Your Category (Head of Family)</h6>
               <p class="small text-muted mb-2">Tick all that apply to you. These help the barangay decide who qualifies for aid programs.</p>
-              <div class="mb-3">${renderCategoryCheckboxes({}, 'regCat')}</div>
+              <div class="mb-3">
+                <div class="row g-2">
+                  <div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="cat_college" id="regCatCollege"><label class="form-check-label" for="regCatCollege">College Student</label></div></div>
+                  <div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="cat_senior" id="regCatSenior"><label class="form-check-label" for="regCatSenior">Senior Citizen</label></div></div>
+                  <div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="cat_pwd" id="regCatPwd"><label class="form-check-label" for="regCatPwd">Person with Disability (PWD)</label></div></div>
+                </div>
+              </div>
 
               <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-3 mt-3">Household</h6>
-              <div class="mb-2">
-                <div class="form-check">
-                  <input class="form-check-input" type="radio" name="household_mode" id="hhExisting" value="existing" checked>
-                  <label class="form-check-label" for="hhExisting">My household is already registered (join it)</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="radio" name="household_mode" id="hhNew" value="new">
-                  <label class="form-check-label" for="hhNew">Register a new household</label>
-                </div>
-              </div>
               <div class="mb-3">
                 <label class="form-label">Household Name *</label>
-                <input type="text" name="household_name" id="hhName" class="form-control" required maxlength="100" placeholder="Existing household name">
-                <small class="text-muted" id="hhHelp">Type the exact household name used by your family members when they registered.</small>
+                <input type="text" name="household_name" id="hhName" class="form-control" required maxlength="100" placeholder="e.g. Dela Cruz Family">
+                <small class="text-muted">Choose a name for your household, such as the family surname. You will be recorded as the Head of Household.</small>
               </div>
+
+              <h6 class="fw-bold text-accent-green border-bottom pb-2 mb-2 mt-4">Family Members</h6>
+              <p class="small text-muted mb-2">Add your spouse, children (especially college students or PWD), your mother or father (if senior citizens), and any other household members. Everyone listed becomes a resident with an ID. You can leave this empty if you live alone.</p>
+              <div id="memberList"></div>
+              <button type="button" id="addMemberBtn" class="btn btn-outline-primary btn-sm mb-3"><i class="bi bi-person-plus me-1"></i> Add Family Member</button>
+
               <script>
                 (function () {
-                  var help = document.getElementById('hhHelp'), name = document.getElementById('hhName');
-                  function upd() {
-                    var isNew = document.getElementById('hhNew').checked;
-                    help.textContent = isNew
-                      ? 'Choose a name for your new household (e.g. the family surname). Other family members will use this same name to join.'
-                      : 'Type the exact household name used by your family members when they registered.';
-                    name.placeholder = isNew ? 'e.g. Dela Cruz Family' : 'Existing household name';
+                  var list = document.getElementById('memberList');
+                  var addBtn = document.getElementById('addMemberBtn');
+                  var MAX = 15, counter = 0;
+
+                  function esc(t) { return String(t); }
+                  function opts(arr) {
+                    return arr.map(function (o) { return '<option value="' + o + '">' + o + '</option>'; }).join('');
                   }
-                  document.getElementById('hhExisting').addEventListener('change', upd);
-                  document.getElementById('hhNew').addEventListener('change', upd);
+                  function chk(i, key, id, label) {
+                    return '<div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="members[' + i + '][' + key + ']" id="m' + i + id + '"><label class="form-check-label small" for="m' + i + id + '">' + label + '</label></div></div>';
+                  }
+                  function renumber() {
+                    var rows = list.querySelectorAll('.member-row');
+                    rows.forEach(function (r, idx) { r.querySelector('.member-title').textContent = 'Family Member #' + (idx + 1); });
+                    addBtn.disabled = rows.length >= MAX;
+                  }
+                  function addMember() {
+                    if (list.querySelectorAll('.member-row').length >= MAX) return;
+                    var i = counter++;
+                    var div = document.createElement('div');
+                    div.className = 'card p-3 mb-3 member-row border-primary';
+                    div.innerHTML =
+                      '<div class="d-flex justify-content-between align-items-center mb-2">' +
+                        '<strong class="member-title text-primary-blue"></strong>' +
+                        '<button type="button" class="btn btn-sm btn-outline-danger remove-member"><i class="bi bi-trash"></i> Remove</button>' +
+                      '</div>' +
+                      '<div class="row g-2">' +
+                        '<div class="col-md-3"><label class="form-label small mb-0">Relationship *</label><select name="members[' + i + '][relationship]" class="form-select form-select-sm" required>' + opts(['Spouse', 'Child', 'Mother', 'Father', 'Sibling', 'Grandparent', 'Other Relative']) + '</select></div>' +
+                        '<div class="col-md-3"><label class="form-label small mb-0">First Name *</label><input type="text" name="members[' + i + '][first_name]" class="form-control form-control-sm" required></div>' +
+                        '<div class="col-md-3"><label class="form-label small mb-0">Middle Name</label><input type="text" name="members[' + i + '][middle_name]" class="form-control form-control-sm"></div>' +
+                        '<div class="col-md-3"><label class="form-label small mb-0">Last Name *</label><input type="text" name="members[' + i + '][last_name]" class="form-control form-control-sm" required></div>' +
+                        '<div class="col-md-2"><label class="form-label small mb-0">Suffix</label><input type="text" name="members[' + i + '][suffix]" class="form-control form-control-sm"></div>' +
+                        '<div class="col-md-3"><label class="form-label small mb-0">Date of Birth *</label><input type="date" name="members[' + i + '][date_of_birth]" class="form-control form-control-sm" required></div>' +
+                        '<div class="col-md-2"><label class="form-label small mb-0">Gender *</label><select name="members[' + i + '][gender]" class="form-select form-select-sm">' + opts(['Male', 'Female']) + '</select></div>' +
+                        '<div class="col-md-2"><label class="form-label small mb-0">Civil Status *</label><select name="members[' + i + '][civil_status]" class="form-select form-select-sm">' + opts(['Single', 'Married', 'Widowed', 'Separated']) + '</select></div>' +
+                        '<div class="col-md-3"><label class="form-label small mb-0">Contact Number</label><input type="text" name="members[' + i + '][contact_number]" class="form-control form-control-sm" placeholder="Optional"></div>' +
+                        '<div class="col-12 mt-2"><span class="small fw-bold">Category:</span></div>' +
+                        chk(i, 'cat_college', 'College', 'College Student') +
+                        chk(i, 'cat_senior', 'Senior', 'Senior Citizen') +
+                        chk(i, 'cat_pwd', 'Pwd', 'PWD') +
+                      '</div>';
+                    div.querySelector('.remove-member').addEventListener('click', function () {
+                      div.remove();
+                      renumber();
+                    });
+                    list.appendChild(div);
+                    renumber();
+                    var first = div.querySelector('input[type="text"]');
+                    if (first) first.focus();
+                  }
+                  addBtn.addEventListener('click', addMember);
                 })();
               </script>
 
@@ -1246,7 +1293,6 @@ app.post('/api/register', async (req, res) => {
     const occupation = (req.body.occupation || '').trim();
     const email = (req.body.email || '').trim().toLowerCase();
     const password = req.body.password;
-    const household_mode = req.body.household_mode === 'new' ? 'new' : 'existing';
     const household_name = (req.body.household_name || '').replace(/\s+/g, ' ').trim();
 
     if (!req.body.agree_terms) {
@@ -1261,87 +1307,140 @@ app.post('/api/register', async (req, res) => {
       return res.status(400).send('<script>alert("Please fill in all required fields."); window.history.back();</script>');
     }
 
-    const { data: existingUser } = await supabase.from('users').select('*').eq('email', email).single();
+    // ----- Family members entered by the head (members[0][first_name], ...) -----
+    const rawMembers = req.body.members
+      ? (Array.isArray(req.body.members) ? req.body.members : Object.values(req.body.members))
+      : [];
+    const members = rawMembers.slice(0, 15).map(m => ({
+      relationship: String((m && m.relationship) || '').trim(),
+      first_name: String((m && m.first_name) || '').trim(),
+      middle_name: String((m && m.middle_name) || '').trim(),
+      last_name: String((m && m.last_name) || '').trim(),
+      suffix: String((m && m.suffix) || '').trim(),
+      date_of_birth: String((m && m.date_of_birth) || '').trim(),
+      gender: (m && m.gender === 'Female') ? 'Female' : 'Male',
+      civil_status: ['Single', 'Married', 'Widowed', 'Separated'].includes(m && m.civil_status) ? m.civil_status : 'Single',
+      contact_number: String((m && m.contact_number) || '').trim(),
+      cat_college: !!(m && m.cat_college),
+      cat_senior: !!(m && m.cat_senior),
+      cat_pwd: !!(m && m.cat_pwd)
+    }));
+    for (const m of members) {
+      if (!m.first_name || !m.last_name || !m.date_of_birth) {
+        return res.status(400).send('<script>alert("Please complete the name and date of birth of every family member, or remove the empty member."); window.history.back();</script>');
+      }
+    }
+
+    const { data: existingUser } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
     if (existingUser) {
       return res.status(400).send('<script>alert("Email is already registered."); window.location="/register";</script>');
     }
 
-    // ----- Household: join an existing one by name, or register a new one -----
-    // (Names are matched privately on the server; the public form never lists other households.)
+    // ----- Household: the head always registers a NEW household -----
     const likeName = household_name.replace(/[\\%_]/g, m => '\\' + m);
     const { data: foundHh } = await supabase.from('households').select('id').ilike('household_name', likeName).limit(1).maybeSingle();
-    if (household_mode === 'existing' && !foundHh) {
-      return res.status(400).send('<script>alert("No household with that name was found. Check the spelling, or choose Register a new household."); window.history.back();</script>');
+    if (foundHh) {
+      return res.status(400).send('<script>alert("A household with that name already exists. Please use a different household name (for example, add a first name or purok)."); window.history.back();</script>');
     }
-    if (household_mode === 'new' && foundHh) {
-      return res.status(400).send('<script>alert("A household with that name already exists. Choose My household is already registered to join it, or use a different name."); window.history.back();</script>');
-    }
-    let household_id = foundHh ? foundHh.id : null;
-    let createdHouseholdId = null;
-    if (household_mode === 'new') {
-      const household_number = `HH-${Date.now().toString().slice(-6)}`;
-      const { data: newHh, error: hhErr } = await supabase.from('households').insert([{
-        household_number, household_name, head_resident_name: `${first_name} ${last_name}`, purok_id, address
-      }]).select().single();
-      if (hhErr) throw hhErr;
-      household_id = newHh.id;
-      createdHouseholdId = newHh.id;
-    }
+    const household_number = `HH-${Date.now().toString().slice(-6)}`;
+    const { data: newHh, error: hhErr } = await supabase.from('households').insert([{
+      household_number, household_name, head_resident_name: `${first_name} ${last_name}`, purok_id, address
+    }]).select().single();
+    if (hhErr) throw hhErr;
+    const household_id = newHh.id;
+    const createdHouseholdId = newHh.id;
 
     const year = new Date().getFullYear();
     const countRes = await supabase.from('residents').select('id', { count: 'exact' });
-    const sequenceNum = String((countRes.count || 0) + 1).padStart(6, '0');
-    const resident_number = `BRGY-${year}-${sequenceNum}`;
+    const baseCount = countRes.count || 0;
+    const makeNumber = (n) => `BRGY-${year}-${String(baseCount + n).padStart(6, '0')}`;
+    const resident_number = makeNumber(1);
 
-    const dob = new Date(date_of_birth);
-    const age = new Date().getFullYear() - dob.getFullYear();
-    const is_senior_citizen = age >= 60;
+    const ageOf = (d) => new Date().getFullYear() - new Date(d).getFullYear();
 
     const { data: resident, error: resErr } = await supabase.from('residents').insert([{
-      resident_number, 
-      first_name, 
-      middle_name, 
-      last_name, 
-      suffix, 
-      date_of_birth, 
+      resident_number,
+      first_name,
+      middle_name,
+      last_name,
+      suffix,
+      date_of_birth,
       gender,
-      civil_status, 
-      purok_id, 
-      address, 
-      contact_number, 
-      occupation, 
+      civil_status,
+      purok_id,
+      address,
+      contact_number,
+      occupation,
       email,
-      resident_status: 'Pending', 
-      ...categoryFlags(req.body),
-      is_senior_citizen: is_senior_citizen || !!req.body.cat_senior,
+      resident_status: 'Pending',
+      is_college_student: !!req.body.cat_college,
+      is_pwd: !!req.body.cat_pwd,
+      is_household_head: true,
+      relationship: 'Head',
+      is_senior_citizen: ageOf(date_of_birth) >= 60 || !!req.body.cat_senior,
       household_id
     }]).select().single();
 
     if (resErr) {
-      if (createdHouseholdId) await supabase.from('households').delete().eq('id', createdHouseholdId);
+      await supabase.from('households').delete().eq('id', createdHouseholdId);
       throw resErr;
+    }
+
+    // ----- Family members: each becomes a resident (Pending) with the same household, purok and address -----
+    let memberNumbers = [];
+    if (members.length) {
+      const memberRows = members.map((m, idx) => {
+        const num = makeNumber(idx + 2);
+        memberNumbers.push(num);
+        return {
+          resident_number: num,
+          first_name: m.first_name,
+          middle_name: m.middle_name,
+          last_name: m.last_name,
+          suffix: m.suffix,
+          date_of_birth: m.date_of_birth,
+          gender: m.gender,
+          civil_status: m.civil_status,
+          purok_id,
+          address,
+          contact_number: m.contact_number || contact_number,
+          resident_status: 'Pending',
+          is_college_student: m.cat_college,
+          is_pwd: m.cat_pwd,
+          is_household_head: false,
+          relationship: m.relationship || 'Other Relative',
+          is_senior_citizen: ageOf(m.date_of_birth) >= 60 || m.cat_senior,
+          household_id
+        };
+      });
+      const { error: memErr } = await supabase.from('residents').insert(memberRows);
+      if (memErr) {
+        await supabase.from('residents').delete().eq('id', resident.id);
+        await supabase.from('households').delete().eq('id', createdHouseholdId);
+        throw memErr;
+      }
     }
 
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
 
     await supabase.from('users').insert([{
-      username: email, 
-      email, 
-      password_hash, 
+      username: email,
+      email,
+      password_hash,
       full_name: `${first_name} ${last_name}`,
-      role: 'Resident', 
-      status: 'Pending', 
+      role: 'Resident',
+      status: 'Pending',
       resident_id: resident.id
     }]);
 
     res.send(`
       ${renderSystemHead('Registration Pending')}
       <div class="container text-center pt-5">
-        <div class="card p-5 shadow-lg d-inline-block bg-light-green" style="max-width: 500px;">
+        <div class="card p-5 shadow-lg d-inline-block bg-light-green" style="max-width: 520px;">
           <i class="bi bi-clock-history text-warning display-1"></i>
           <h3 class="mt-3 text-primary-blue fw-bold">Registration Received</h3>
-          <p class="text-muted">Your resident registration reference is <strong>${resident_number}</strong>. Please wait for official approval from Barangay Admin before logging in.</p>
+          <p class="text-muted">Your resident registration reference is <strong>${resident_number}</strong>.${members.length ? ` <strong>${members.length}</strong> family member${members.length > 1 ? 's were' : ' was'} also registered under your household.` : ''} Please wait for official approval from Barangay Admin before logging in. Once approved, you can view and show the Barangay ID of every member of your household from <em>My Digital ID</em>.</p>
           <a href="/login" class="btn btn-primary-custom mt-3">Return to Login</a>
         </div>
       </div>
@@ -1635,14 +1734,58 @@ app.post('/api/admin/resident/add', authenticateToken, requireRole(['Super Admin
   }
 });
 
+// Approving a family head also approves the family members registered with them (they have no login of their own).
 app.get('/api/admin/resident/approve/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
   try {
+    const { data: target } = await supabase.from('residents').select('id, household_id').eq('id', req.params.id).maybeSingle();
     await supabase.from('residents').update({ resident_status: 'Active' }).eq('id', req.params.id);
     await supabase.from('users').update({ status: 'Active' }).eq('resident_id', req.params.id);
-    await logActivity(req.user.id, 'Approve Resident', `Approved resident ID: ${req.params.id}`);
+
+    let familyCount = 0;
+    if (target && target.household_id) {
+      const { data: pendingMembers } = await supabase.from('residents').select('id')
+        .eq('household_id', target.household_id).eq('resident_status', 'Pending').neq('id', target.id);
+      const ids = (pendingMembers || []).map(m => m.id);
+      if (ids.length) {
+        // Only auto-approve members without their own login account (those are approved individually)
+        const { data: withLogin } = await supabase.from('users').select('resident_id').in('resident_id', ids);
+        const hasLogin = new Set((withLogin || []).map(u => u.resident_id));
+        const toApprove = ids.filter(id => !hasLogin.has(id));
+        if (toApprove.length) {
+          await supabase.from('residents').update({ resident_status: 'Active' }).in('id', toApprove);
+          familyCount = toApprove.length;
+        }
+      }
+    }
+    await logActivity(req.user.id, 'Approve Resident', `Approved resident ID: ${req.params.id}${familyCount ? ` and ${familyCount} household member(s)` : ''}`);
     res.redirect('/admin/residents?filter=Pending');
   } catch (err) {
     res.status(500).send('Error approving resident.');
+  }
+});
+
+app.get('/api/admin/resident/reject/:id', authenticateToken, requireRole(['Super Admin', 'Barangay Admin', 'Barangay Secretary']), async (req, res) => {
+  try {
+    const { data: target } = await supabase.from('residents').select('id, household_id').eq('id', req.params.id).maybeSingle();
+    await supabase.from('residents').update({ resident_status: 'Archived' }).eq('id', req.params.id);
+    await supabase.from('users').update({ status: 'Disabled' }).eq('resident_id', req.params.id);
+
+    // Rejecting a head also archives the pending members that were registered with them
+    if (target && target.household_id) {
+      const { data: pendingMembers } = await supabase.from('residents').select('id')
+        .eq('household_id', target.household_id).eq('resident_status', 'Pending').neq('id', target.id);
+      const ids = (pendingMembers || []).map(m => m.id);
+      if (ids.length) {
+        const { data: withLogin } = await supabase.from('users').select('resident_id').in('resident_id', ids);
+        const hasLogin = new Set((withLogin || []).map(u => u.resident_id));
+        const toArchive = ids.filter(id => !hasLogin.has(id));
+        if (toArchive.length) await supabase.from('residents').update({ resident_status: 'Archived' }).in('id', toArchive);
+      }
+    }
+    await logActivity(req.user.id, 'Reject Resident', `Rejected registration for resident ID: ${req.params.id}`);
+    res.redirect('/admin/residents?filter=Pending');
+  } catch (err) {
+    res.status(500).send('Error rejecting resident.');
   }
 });
 
@@ -3090,34 +3233,41 @@ app.post('/api/resident/request-profile-update', authenticateToken, requireRole(
 });
 
 // Resident Digital ID Display (Barangay ID Format with Captain Name below Signature)
+// Shows the logged-in resident's ID plus the IDs of everyone in the same household
+// (family members registered by the head have no login, so the head shows their IDs from here).
 app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), async (req, res) => {
   const settings = await getSettings();
   const { data: resident } = await supabase.from('residents').select('*, puroks(name)').eq('id', req.user.resident_id).single();
 
-  const qrDataUrl = await QRCode.toDataURL(resident.qr_token || resident.id, { margin: 0, width: 300 });
+  let family = [];
+  if (resident.household_id) {
+    const { data: fam } = await supabase.from('residents').select('*, puroks(name)')
+      .eq('household_id', resident.household_id).neq('id', resident.id).order('created_at', { ascending: true });
+    family = fam || [];
+  }
 
-  const html = `
-    <div class="text-center py-4">
-      <h4 class="fw-bold text-primary-blue mb-3">Official Digital Barangay ID</h4>
-
+  const renderIdCard = async (r) => {
+    const qrDataUrl = await QRCode.toDataURL(r.qr_token || r.id, { margin: 0, width: 300 });
+    const isActive = r.resident_status === 'Active';
+    return `
       <div class="id-card-frame shadow-lg text-start" style="width: 3.6in; height: 2.25in; border-width: 3px;">
         <div class="id-card-header">
           ${settings.barangay_logo ? `<img src="${settings.barangay_logo}" class="id-header-logo">` : '<i class="bi bi-building fs-5"></i>'}
           <div class="text-center flex-grow-1 px-1" style="line-height:1.1;">
-            <strong style="font-size: 8pt; display: block;" class="text-uppercase">${settings.barangay_name || 'BARANGAY CENTRAL'}</strong>
+            <strong style="font-size: 8pt; display: block;" class="text-uppercase">${escHtml(settings.barangay_name || 'BARANGAY CENTRAL')}</strong>
             <span style="font-size: 6pt; letter-spacing:0.5px;">BARANGAY ID</span>
           </div>
-          <span class="badge bg-white text-dark px-1" style="font-size: 5.5pt; font-weight: 800;">VERIFIED</span>
+          <span class="badge bg-white text-dark px-1" style="font-size: 5.5pt; font-weight: 800;">${isActive ? 'VERIFIED' : 'PENDING'}</span>
         </div>
 
         <div class="id-card-body">
-          <img src="${resident.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
+          <img src="${r.photo_url || 'https://via.placeholder.com/150'}" class="id-photo" style="width: 1.1in; height: 1.1in;">
           <div class="id-details">
-            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${resident.resident_number}</div>
-            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${resident.first_name} ${resident.last_name}</div>
-            <div class="text-muted mt-1">DOB: <strong>${resident.date_of_birth}</strong></div>
-            <div class="text-muted">Sex: <strong>${resident.gender}</strong> | Civil: <strong>${resident.civil_status || 'Single'}</strong></div>
-            <div class="text-muted">Purok: <strong>${resident.puroks ? resident.puroks.name : '-'}</strong></div>
+            <div class="text-primary-blue fw-bold" style="font-size: 8.5pt;">${escHtml(r.resident_number)}</div>
+            <div class="fw-bold text-uppercase text-dark mt-1" style="font-size: 9pt;">${escHtml(r.first_name)} ${escHtml(r.last_name)}</div>
+            <div class="text-muted mt-1">DOB: <strong>${escHtml(r.date_of_birth)}</strong></div>
+            <div class="text-muted">Sex: <strong>${escHtml(r.gender)}</strong> | Civil: <strong>${escHtml(r.civil_status || 'Single')}</strong></div>
+            <div class="text-muted">Purok: <strong>${r.puroks ? escHtml(r.puroks.name) : '-'}</strong></div>
           </div>
           <img src="${qrDataUrl}" class="id-qr" style="width: 1.1in; height: 1.1in;">
         </div>
@@ -3128,11 +3278,30 @@ app.get('/resident/digital-id', authenticateToken, requireRole(['Resident']), as
           </div>
           <div class="text-center" style="min-width: 1.0in;">
             ${settings.captain_signature ? `<img src="${settings.captain_signature}" style="height:18px; object-fit:contain; display:block; margin:auto;"><br>` : ''}
-            <span style="font-size: 5.5pt; border-top: 1px solid #333; display: block; font-weight: 600; margin-top: -2px;">${settings.barangay_captain || 'Barangay Captain'}</span>
+            <span style="font-size: 5.5pt; border-top: 1px solid #333; display: block; font-weight: 600; margin-top: -2px;">${escHtml(settings.barangay_captain || 'Barangay Captain')}</span>
           </div>
         </div>
-      </div>
+      </div>`;
+  };
+
+  const myCard = await renderIdCard(resident);
+  const familyCards = await Promise.all(family.map(async (m) => `
+    <div class="d-inline-block mx-2 mb-4 align-top">
+      ${await renderIdCard(m)}
+      <div class="small text-muted mt-1">${escHtml(m.first_name)} ${escHtml(m.last_name)}${m.relationship ? ' (' + escHtml(m.relationship) + ')' : (m.is_household_head ? ' (Head)' : '')}${m.resident_status !== 'Active' ? ' - awaiting approval' : ''}</div>
+    </div>`));
+
+  const html = `
+    <div class="text-center py-4">
+      <h4 class="fw-bold text-primary-blue mb-3">Official Digital Barangay ID</h4>
+      ${myCard}
     </div>
+    ${family.length ? `
+      <div class="text-center pb-4">
+        <h5 class="fw-bold text-primary-blue mb-1"><i class="bi bi-people me-2"></i>My Household Members' IDs</h5>
+        <p class="small text-muted mb-3">Each family member is a registered resident with their own ID and QR code. Show the member's QR code when they claim aid or documents.</p>
+        ${familyCards.join('')}
+      </div>` : ''}
   `;
 
   res.send(renderAppLayout(req, 'res-digital-id', html, settings));
