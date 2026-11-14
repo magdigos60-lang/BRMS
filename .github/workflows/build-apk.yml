@@ -8,6 +8,9 @@ on:
       - 'android-app/**'
       - '.github/workflows/build-apk.yml'
 
+permissions:
+  contents: write   # needed to create a GitHub Release
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -60,3 +63,15 @@ jobs:
         with:
           name: barangay-portal-apk
           path: android-app/android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk ../barangay-portal.apk
+        working-directory: android-app
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Barangay Portal v1.0.${{ github.run_number }}
+          body: Android APK build #${{ github.run_number }}. Download barangay-portal.apk below and install it on your phone.
+          files: barangay-portal.apk
