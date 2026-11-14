@@ -3,7 +3,7 @@
   "appName": "Barangay Portal",
   "webDir": "www",
   "server": {
-    "url": "https://YOUR-APP-NAME.onrender.com",
+    "url": "https://brms-l6nq.onrender.com",
     "cleartext": false,
     "androidScheme": "https"
   },
