@@ -1,2 +1,4 @@
 node_modules/
 .env
+android-app/node_modules/
+android-app/android/

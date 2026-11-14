@@ -1,0 +1,13 @@
+{
+  "appId": "ph.gov.barangay.portal",
+  "appName": "Barangay Portal",
+  "webDir": "www",
+  "server": {
+    "url": "https://YOUR-APP-NAME.onrender.com",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
